@@ -1,0 +1,28 @@
+[project]
+name = "vmux"
+version = "0.0.1"
+description = "Attention router for a swarm of CLI coding agents running in tmux."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+vmux = "vmux.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vmux"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

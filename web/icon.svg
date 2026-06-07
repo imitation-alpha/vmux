@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0b0e14"/>
+  <!-- the swarm: a grid of agent cells, one lit red because it needs you -->
+  <g>
+    <rect x="96"  y="96"  width="120" height="120" rx="22" fill="#22c55e"/>
+    <rect x="296" y="96"  width="120" height="120" rx="22" fill="#eab308"/>
+    <rect x="96"  y="296" width="120" height="120" rx="22" fill="#5b8cff"/>
+    <rect x="296" y="296" width="120" height="120" rx="22" fill="#ef4444"/>
+    <circle cx="356" cy="356" r="20" fill="#0b0e14"/>
+  </g>
+</svg>

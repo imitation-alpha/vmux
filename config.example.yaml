@@ -1,0 +1,34 @@
+# vmux config — every field is optional. With no config at all, vmux
+# auto-discovers every tmux pane and classifies it. Copy to config.yaml to tweak.
+
+server:
+  host: 127.0.0.1     # reach over SSH tunnel or Tailscale. 0.0.0.0 REQUIRES a token.
+  port: 8787
+  token: ""           # set a long random string for LAN mode
+
+poll_interval: 0.7    # seconds between tmux capture passes
+
+discovery:
+  auto: true          # discover all panes automatically
+  include_shells: false   # set true to also show plain idle shells
+
+# Optional per-pane overrides / pinned panes. A target listed here is always
+# shown; if its pane dies it shows as "offline" instead of vanishing.
+panes:
+  # - target: "work:1.1"        # session:window.pane (see `tmux list-panes -a`)
+  #   name: "API refactor"
+  #   kind: claude-code         # claude-code | generic | shell
+
+# Detector tuning for non-Claude agents (regex).
+detectors:
+  generic_prompt_patterns:
+    - "\\(y/n\\)"
+    - "\\[Y/n\\]"
+    - "Do you want to"
+    - "Press enter to"
+    - "Continue\\?"
+  error_patterns:
+    - "Traceback \\(most recent call last\\)"
+    - "^\\s*Error:"
+    - "panic:"
+    - "fatal:"

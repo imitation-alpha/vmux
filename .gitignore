@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# uv
+uv.lock
+
+# local config (ship config.example.yaml instead)
+config.yaml
+config.yml
+
+# OS
+.DS_Store

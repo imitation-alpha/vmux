@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0e14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="vmux" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon.svg" />
+<title>vmux</title>
+<style>
+  :root {
+    --bg:#0b0e14; --panel:#131722; --panel2:#1a2030; --line:#262d3d;
+    --text:#e6e9ef; --dim:#8b93a7; --acc:#5b8cff;
+    --needs:#ef4444; --error:#f59e0b; --working:#eab308; --idle:#22c55e; --offline:#6b7280;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  #root { min-height:100%; }
+  header { position:sticky; top:0; z-index:10; background:rgba(11,14,20,.92);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+    padding:max(env(safe-area-inset-top),10px) 14px 10px; display:flex; align-items:center; gap:10px; }
+  header .logo { font-weight:700; letter-spacing:.5px; font-size:18px; }
+  header .logo b { color:var(--acc); }
+  .summary { color:var(--dim); font-size:13px; display:flex; gap:10px; flex-wrap:wrap; }
+  .summary .n { color:var(--text); font-weight:600; }
+  .spacer { flex:1; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--offline); }
+  .dot.on { background:var(--idle); box-shadow:0 0 8px var(--idle); }
+  .btn { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:9px; padding:8px 11px; font-size:13px; cursor:pointer; }
+  .btn:active { transform:translateY(1px); }
+  .btn.acc { background:var(--acc); border-color:var(--acc); color:#fff; }
+  .btn.ghost.on { background:var(--acc); border-color:var(--acc); color:#fff; }
+
+  .grid { display:grid; gap:12px; padding:12px;
+    grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); }
+  .card { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--offline);
+    border-radius:12px; padding:12px; cursor:pointer; position:relative; overflow:hidden; }
+  .card.needs_input { border-left-color:var(--needs); animation:pulse 1.4s ease-in-out infinite; }
+  .card.error   { border-left-color:var(--error); }
+  .card.working { border-left-color:var(--working); }
+  .card.idle    { border-left-color:var(--idle); }
+  .card.offline { border-left-color:var(--offline); opacity:.6; }
+  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,0); } 50%{ box-shadow:0 0 0 3px rgba(239,68,68,.35); } }
+  .card .top { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .card .name { font-weight:600; font-size:15px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pill { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; padding:2px 7px; border-radius:20px;
+    border:1px solid var(--line); color:var(--dim); }
+  .pill.needs_input { color:var(--needs); border-color:var(--needs); }
+  .pill.error{ color:var(--error); border-color:var(--error); }
+  .pill.working{ color:var(--working); border-color:var(--working); }
+  .pill.idle{ color:var(--idle); border-color:var(--idle); }
+  .meta { color:var(--dim); font-size:11.5px; margin-bottom:8px; }
+  .meta .kind { color:var(--acc); }
+  .q { font-size:13.5px; margin:6px 0 9px; color:var(--text); }
+  .menu { display:flex; flex-wrap:wrap; gap:7px; }
+  .menu .opt { background:var(--panel2); border:1px solid var(--line); border-radius:9px;
+    padding:8px 11px; font-size:13px; cursor:pointer; color:var(--text); }
+  .menu .opt.sel { border-color:var(--acc); }
+  .menu .opt b { color:var(--acc); margin-right:5px; }
+  pre.preview { margin:6px 0 0; font-size:11px; line-height:1.35; color:var(--dim);
+    background:#0a0d13; border:1px solid var(--line); border-radius:8px; padding:8px;
+    max-height:92px; overflow:hidden; white-space:pre-wrap; word-break:break-word; }
+  .check { position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:6px;
+    border:1px solid var(--line); display:flex; align-items:center; justify-content:center; background:var(--panel2); }
+  .check.on { background:var(--acc); border-color:var(--acc); }
+
+  /* detail overlay */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; display:flex; }
+  .sheet { margin:auto; width:min(820px,96vw); max-height:92vh; background:var(--panel);
+    border:1px solid var(--line); border-radius:16px; display:flex; flex-direction:column; overflow:hidden; }
+  .sheet header { position:static; background:var(--panel); }
+  .sheet .body { padding:12px 14px; overflow:auto; }
+  pre.full { margin:0; font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-word;
+    background:#0a0d13; border:1px solid var(--line); border-radius:10px; padding:12px; max-height:46vh; overflow:auto; }
+  .actions { display:flex; flex-wrap:wrap; gap:7px; padding:10px 14px; border-top:1px solid var(--line); }
+  .row { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line); }
+  .row input, .binput { flex:1; background:#0a0d13; border:1px solid var(--line); color:var(--text);
+    border-radius:9px; padding:10px 12px; font-size:14px; }
+  .bbar { position:fixed; left:0; right:0; bottom:0; z-index:40; background:var(--panel);
+    border-top:1px solid var(--line); padding:10px 12px max(env(safe-area-inset-bottom),10px);
+    display:flex; gap:8px; align-items:center; }
+  .empty { text-align:center; color:var(--dim); padding:60px 20px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/htm@3/dist/htm.umd.js" crossorigin></script>
+<script>
+const { useState, useEffect, useRef, useCallback } = React;
+const html = htm.bind(React.createElement);
+
+const TOKEN = new URLSearchParams(location.search).get("token")
+  || localStorage.getItem("vmux_token") || "";
+if (TOKEN) localStorage.setItem("vmux_token", TOKEN);
+
+const ORDER = { needs_input:0, error:1, working:2, idle:3, offline:4 };
+const ACTIONS = [
+  ["Ctrl+C","C-c"], ["Esc","Escape"], ["Tab","Tab"], ["Enter","Enter"],
+  ["↑","Up"], ["↓","Down"], ["←","Left"], ["→","Right"],
+];
+
+async function api(path, body) {
+  const headers = { "Content-Type":"application/json" };
+  if (TOKEN) headers["Authorization"] = "Bearer " + TOKEN;
+  const r = await fetch("/api"+path, {
+    method: body ? "POST":"GET", headers,
+    body: body ? JSON.stringify(body): undefined,
+  });
+  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.status);
+  return r.json();
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type="sine"; o.frequency.value=880; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.15, ctx.currentTime+.01);
+    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime+.4);
+    o.start(); o.stop(ctx.currentTime+.42);
+  } catch(e){}
+}
+
+function useSwarm() {
+  const [panes, setPanes] = useState([]);
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    let ws, stop=false, timer;
+    const connect = () => {
+      const proto = location.protocol==="https:" ? "wss":"ws";
+      const url = proto+"://"+location.host+"/ws"+(TOKEN?("?token="+encodeURIComponent(TOKEN)):"");
+      ws = new WebSocket(url);
+      ws.onopen = () => setConnected(true);
+      ws.onmessage = (e) => { const m=JSON.parse(e.data); if(m.type==="state") setPanes(m.panes); };
+      ws.onclose = () => { setConnected(false); if(!stop) timer=setTimeout(connect, 1200); };
+      ws.onerror = () => { try{ws.close();}catch(_){} };
+    };
+    connect();
+    return () => { stop=true; clearTimeout(timer); if(ws) try{ws.close();}catch(_){} };
+  }, []);
+  return { panes, connected };
+}
+
+function Menu({ pane }) {
+  if (!pane.menu || !pane.menu.length) return null;
+  const tap = (e, key) => { e.stopPropagation(); api("/select",{id:pane.id,key}).catch(()=>{}); };
+  return html`<div class="menu">
+    ${pane.menu.map(o => html`<button class=${"opt"+(o.selected?" sel":"")}
+        onClick=${(e)=>tap(e,o.key)}>
+        <b>${o.key}</b>${o.label}</button>`)}
+  </div>`;
+}
+
+function Card({ pane, onOpen, bmode, checked, onCheck }) {
+  const click = () => bmode ? onCheck(pane.id) : onOpen(pane.id);
+  return html`<div class=${"card "+pane.status} onClick=${click}>
+    ${bmode && html`<div class=${"check"+(checked?" on":"")}>${checked?"✓":""}</div>`}
+    <div class="top">
+      <div class="name">${pane.name}</div>
+      <span class=${"pill "+pane.status}>${pane.status.replace("_"," ")}</span>
+    </div>
+    <div class="meta">${pane.target} · <span class="kind">${pane.kind}</span></div>
+    ${pane.status==="needs_input" && html`
+      ${pane.question && html`<div class="q">${pane.question}</div>`}
+      <${Menu} pane=${pane} />`}
+    ${pane.preview && pane.preview.length>0 && html`<pre class="preview">${pane.preview.join("\n")}</pre>`}
+  </div>`;
+}
+
+function Detail({ pane, onClose }) {
+  const [text, setText] = useState("");
+  const send = (enter) => { if(!text && !enter) return;
+    api("/text",{id:pane.id,text,enter}).then(()=>setText("")).catch(()=>{}); };
+  const key = (k) => api("/key",{id:pane.id,key:k}).catch(()=>{});
+  return html`<div class="overlay" onClick=${onClose}>
+    <div class="sheet" onClick=${(e)=>e.stopPropagation()}>
+      <header>
+        <div class="logo">${pane.name}</div>
+        <span class=${"pill "+pane.status}>${pane.status.replace("_"," ")}</span>
+        <div class="spacer"></div>
+        <button class="btn" onClick=${onClose}>Close</button>
+      </header>
+      <div class="body">
+        ${pane.status==="needs_input" && html`
+          ${pane.question && html`<div class="q">${pane.question}</div>`}
+          <${Menu} pane=${pane} />
+          <div style=${{height:"10px"}}></div>`}
+        <pre class="full">${(pane.lines||[]).join("\n")}</pre>
+      </div>
+      <div class="actions">
+        ${ACTIONS.map(([lbl,k]) => html`<button class="btn" onClick=${()=>key(k)}>${lbl}</button>`)}
+      </div>
+      <div class="row">
+        <input placeholder="type to send…" value=${text}
+          onInput=${(e)=>setText(e.target.value)}
+          onKeyDown=${(e)=>{ if(e.key==="Enter"){ e.preventDefault(); send(true);} }} />
+        <button class="btn" onClick=${()=>send(false)}>Send</button>
+        <button class="btn acc" onClick=${()=>send(true)}>↵</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function App() {
+  const { panes, connected } = useSwarm();
+  const [openId, setOpenId] = useState(null);
+  const [bmode, setBmode] = useState(false);
+  const [sel, setSel] = useState(()=>new Set());
+  const [btext, setBtext] = useState("");
+  const prevNeeds = useRef(new Set());
+
+  const sorted = [...panes].sort((a,b)=>
+    (ORDER[a.status]-ORDER[b.status]) || a.name.localeCompare(b.name));
+  const counts = panes.reduce((m,p)=>{ m[p.status]=(m[p.status]||0)+1; return m; },{});
+  const open = panes.find(p=>p.id===openId) || null;
+
+  // needs-input transition -> beep + notify + title flip
+  useEffect(() => {
+    const now = new Set(panes.filter(p=>p.status==="needs_input").map(p=>p.id));
+    let fresh = false;
+    now.forEach(id => { if(!prevNeeds.current.has(id)) fresh = true; });
+    if (fresh) {
+      beep();
+      if ("Notification" in window && Notification.permission==="granted") {
+        const who = panes.filter(p=>p.status==="needs_input"&&!prevNeeds.current.has(p.id))
+          .map(p=>p.name).join(", ");
+        try { new Notification("vmux — needs you", { body: who }); } catch(e){}
+      }
+    }
+    document.title = now.size ? `(${now.size}) vmux` : "vmux";
+    prevNeeds.current = now;
+  }, [panes]);
+
+  const askNotify = () => { if("Notification" in window) Notification.requestPermission(); };
+  const toggleSel = (id) => setSel(s => { const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
+  const doBroadcast = () => {
+    if(!sel.size || !btext) return;
+    api("/broadcast",{ids:[...sel],text:btext,enter:true}).then(()=>{ setBtext(""); }).catch(()=>{});
+  };
+
+  return html`
+    <header>
+      <div class="logo">v<b>mux</b></div>
+      <div class="summary">
+        ${counts.needs_input ? html`<span><span class="n" style=${{color:"var(--needs)"}}>${counts.needs_input}</span> need you</span>`:null}
+        ${counts.error ? html`<span><span class="n" style=${{color:"var(--error)"}}>${counts.error}</span> error</span>`:null}
+        ${counts.working ? html`<span><span class="n" style=${{color:"var(--working)"}}>${counts.working}</span> working</span>`:null}
+        ${counts.idle ? html`<span><span class="n" style=${{color:"var(--idle)"}}>${counts.idle}</span> idle</span>`:null}
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" onClick=${askNotify} title="enable notifications">🔔</button>
+      <button class=${"btn ghost"+(bmode?" on":"")} onClick=${()=>{setBmode(!bmode); setSel(new Set());}}>Broadcast</button>
+      <div class=${"dot"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></div>
+    </header>
+
+    ${sorted.length===0
+      ? html`<div class="empty">${connected?"No agent panes found. Start agents in tmux.":"Connecting…"}</div>`
+      : html`<div class="grid" style=${bmode?{paddingBottom:"78px"}:null}>
+          ${sorted.map(p => html`<${Card} key=${p.id} pane=${p} onOpen=${setOpenId}
+              bmode=${bmode} checked=${sel.has(p.id)} onCheck=${toggleSel} />`)}
+        </div>`}
+
+    ${open && html`<${Detail} pane=${open} onClose=${()=>setOpenId(null)} />`}
+
+    ${bmode && html`<div class="bbar">
+      <span class="summary"><span class="n">${sel.size}</span> selected</span>
+      <input class="binput"
+        placeholder="broadcast message…" value=${btext} onInput=${(e)=>setBtext(e.target.value)} />
+      <button class="btn acc" onClick=${doBroadcast}>Send to ${sel.size}</button>
+    </div>`}
+  `;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
