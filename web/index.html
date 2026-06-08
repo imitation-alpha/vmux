@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#0b0e14" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -14,278 +15,869 @@
 <title>vmux</title>
 <style>
   :root {
-    --bg:#0b0e14; --panel:#131722; --panel2:#1a2030; --line:#262d3d;
-    --text:#e6e9ef; --dim:#8b93a7; --acc:#5b8cff;
-    --needs:#ef4444; --error:#f59e0b; --working:#eab308; --idle:#22c55e; --offline:#6b7280;
+    --bg:#f2f2f7; --bg-elevated:#ffffff; --bg-secondary:#ffffff;
+    --sidebar-bg:rgba(246,246,248,.8); --material:rgba(255,255,255,.72);
+    --label:#1c1c1e; --label-2:rgba(60,60,67,.6); --label-3:rgba(60,60,67,.32);
+    --separator:rgba(60,60,67,.2); --fill:rgba(118,118,128,.12); --fill-2:rgba(118,118,128,.06);
+    --accent:#007aff; --on-accent:#fff;
+    --red:#ff3b30; --orange:#ff9500; --yellow:#c98a00; --green:#34c759; --gray:#8e8e93;
+    --shadow:0 12px 48px rgba(0,0,0,.18);
+    /* Liquid Glass */
+    --glass-bg:rgba(255,255,255,.6); --glass-sheen:rgba(255,255,255,.5);
+    --glass-rim:rgba(255,255,255,.75); --glass-shadow:0 8px 30px rgba(0,0,0,.12);
   }
+  /* Dark tokens live on a class JS toggles, so theme can be Auto/Light/Dark.
+     JS resolves "auto" from prefers-color-scheme and sets .t-dark / .t-light. */
+  .t-dark {
+    --bg:#000000; --bg-elevated:#1c1c1e; --bg-secondary:#2c2c2e;
+    --sidebar-bg:rgba(28,28,30,.72); --material:rgba(30,30,30,.72);
+    --label:#ffffff; --label-2:rgba(235,235,245,.6); --label-3:rgba(235,235,245,.3);
+    --separator:rgba(84,84,88,.55); --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.14);
+    --accent:#0a84ff;
+    --red:#ff453a; --orange:#ff9f0a; --yellow:#ffd60a; --green:#30d158; --gray:#8e8e93;
+    --shadow:0 12px 48px rgba(0,0,0,.55);
+    /* Liquid Glass */
+    --glass-bg:rgba(40,40,45,.5); --glass-sheen:rgba(255,255,255,.1);
+    --glass-rim:rgba(255,255,255,.22); --glass-shadow:0 10px 36px rgba(0,0,0,.5);
+  }
+
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  #root { min-height:100%; }
-  header { position:sticky; top:0; z-index:10; background:rgba(11,14,20,.92);
-    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
-    padding:max(env(safe-area-inset-top),10px) 14px 10px; display:flex; align-items:center; gap:10px; }
-  header .logo { font-weight:700; letter-spacing:.5px; font-size:18px; }
-  header .logo b { color:var(--acc); }
-  .summary { color:var(--dim); font-size:13px; display:flex; gap:10px; flex-wrap:wrap; }
-  .summary .n { color:var(--text); font-weight:600; }
+  html, body { margin:0; height:100%; }
+  body { background:var(--bg); color:var(--label); overscroll-behavior:none;
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  #root { height:100%; position:relative; z-index:0; }
+  button { font:inherit; color:inherit; cursor:pointer; }
   .spacer { flex:1; }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--offline); }
-  .dot.on { background:var(--idle); box-shadow:0 0 8px var(--idle); }
-  .btn { background:var(--panel2); color:var(--text); border:1px solid var(--line);
-    border-radius:9px; padding:8px 11px; font-size:13px; cursor:pointer; }
+
+  /* Liquid Glass material — translucent, frosted, light-catching. Sheen is a
+     gradient layered UNDER content so text contrast is untouched; the rim is an
+     inset highlight. Applied only to the floating chrome (bars, sheet, palette). */
+  .glass {
+    background:linear-gradient(180deg, var(--glass-sheen), transparent 38%), var(--glass-bg);
+    -webkit-backdrop-filter:blur(24px) saturate(180%);
+    backdrop-filter:blur(24px) saturate(180%);
+    box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-rim), inset 0 0 0 .5px rgba(255,255,255,.12);
+  }
+
+  /* Ambient backdrop — soft colour wash so the glass has something to tint/bend.
+     Sits behind everything; restrained and slow. */
+  .ambient { position:fixed; inset:0; z-index:-1; overflow:hidden; background:var(--bg); }
+  .ambient::before { content:""; position:absolute; inset:-25%;
+    background:
+      radial-gradient(38% 34% at 18% 20%, color-mix(in srgb,var(--accent) 32%,transparent), transparent 70%),
+      radial-gradient(36% 30% at 84% 14%, rgba(255,120,180,.20), transparent 70%),
+      radial-gradient(42% 38% at 74% 86%, rgba(60,210,180,.16), transparent 70%),
+      radial-gradient(40% 40% at 26% 88%, rgba(150,130,255,.18), transparent 70%);
+    animation:drift 34s ease-in-out infinite alternate; }
+  @media (prefers-reduced-motion: reduce) { .ambient::before { animation:none; } }
+  @keyframes drift { from { transform:translate(0,0) scale(1); } to { transform:translate(3%,2%) scale(1.12); } }
+
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--s,var(--gray)); flex:none; }
+  .s-needs_input { --s:var(--red); } .s-error { --s:var(--orange); }
+  .s-working { --s:var(--yellow); } .s-idle { --s:var(--green); } .s-offline { --s:var(--gray); }
+
+  .pill-needs { background:var(--red); color:#fff; font-size:11px; font-weight:700; letter-spacing:.4px;
+    text-transform:uppercase; padding:3px 8px; border-radius:20px; white-space:nowrap; }
+  .pill-soft { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
+    letter-spacing:.3px; text-transform:uppercase; color:var(--label-2); white-space:nowrap; }
+
+  .iconbtn { border:none; background:var(--fill); width:32px; height:32px; border-radius:50%;
+    font-size:15px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .iconbtn:active { transform:scale(.92); }
+  .conn { width:9px; height:9px; border-radius:50%; background:var(--gray); flex:none; transition:background .2s; }
+  .conn.on { background:var(--green); box-shadow:0 0 6px var(--green); }
+
+  /* shared detail body */
+  .question { font-size:15px; font-weight:600; margin:0 0 12px; }
+  .menu { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .opt { background:var(--fill); border:1px solid var(--separator); border-radius:10px;
+    padding:9px 13px; font-size:14px; }
+  .opt.sel { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent); }
+  .opt b { color:var(--accent); margin-right:6px; }
+  @media (hover:hover){ .opt:hover { background:var(--fill-2); } }
+  .output { font:12px/1.45 "SF Mono",ui-monospace,Menlo,monospace; background:var(--bg);
+    color:var(--label-2); border:1px solid var(--separator); border-radius:10px; padding:12px;
+    white-space:pre-wrap; word-break:break-word; max-height:46vh; overflow:auto; user-select:text; margin:0 0 14px; }
+  .actions { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+  .keycap { background:var(--bg-secondary); border:1px solid var(--separator); border-radius:8px;
+    padding:7px 11px; font-size:13px; min-width:42px; }
+  .keycap:active { transform:translateY(1px); }
+  @media (hover:hover){ .keycap:hover { background:var(--fill); } }
+  .composer { display:flex; gap:8px; }
+  .field { flex:1; background:var(--bg); border:1px solid var(--separator); border-radius:10px;
+    padding:10px 12px; font-size:15px; color:var(--label); outline:none; }
+  .field:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent); }
+  .btn { background:var(--fill); border:1px solid var(--separator); border-radius:10px; padding:9px 14px; font-size:14px; }
+  .btn.accent { background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn:active { transform:translateY(1px); }
-  .btn.acc { background:var(--acc); border-color:var(--acc); color:#fff; }
-  .btn.ghost.on { background:var(--acc); border-color:var(--acc); color:#fff; }
+  .empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
+    height:100%; color:var(--label-3); gap:10px; font-size:15px; }
+  .empty-glyph { font-size:42px; opacity:.5; }
 
-  .grid { display:grid; gap:12px; padding:12px;
-    grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); }
-  .card { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--offline);
-    border-radius:12px; padding:12px; cursor:pointer; position:relative; overflow:hidden; }
-  .card.needs_input { border-left-color:var(--needs); animation:pulse 1.4s ease-in-out infinite; }
-  .card.error   { border-left-color:var(--error); }
-  .card.working { border-left-color:var(--working); }
-  .card.idle    { border-left-color:var(--idle); }
-  .card.offline { border-left-color:var(--offline); opacity:.6; }
-  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,0); } 50%{ box-shadow:0 0 0 3px rgba(239,68,68,.35); } }
-  .card .top { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-  .card .name { font-weight:600; font-size:15px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .pill { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; padding:2px 7px; border-radius:20px;
-    border:1px solid var(--line); color:var(--dim); }
-  .pill.needs_input { color:var(--needs); border-color:var(--needs); }
-  .pill.error{ color:var(--error); border-color:var(--error); }
-  .pill.working{ color:var(--working); border-color:var(--working); }
-  .pill.idle{ color:var(--idle); border-color:var(--idle); }
-  .meta { color:var(--dim); font-size:11.5px; margin-bottom:8px; }
-  .meta .kind { color:var(--acc); }
-  .q { font-size:13.5px; margin:6px 0 9px; color:var(--text); }
-  .menu { display:flex; flex-wrap:wrap; gap:7px; }
-  .menu .opt { background:var(--panel2); border:1px solid var(--line); border-radius:9px;
-    padding:8px 11px; font-size:13px; cursor:pointer; color:var(--text); }
-  .menu .opt.sel { border-color:var(--acc); }
-  .menu .opt b { color:var(--acc); margin-right:5px; }
-  pre.preview { margin:6px 0 0; font-size:11px; line-height:1.35; color:var(--dim);
-    background:#0a0d13; border:1px solid var(--line); border-radius:8px; padding:8px;
-    max-height:92px; overflow:hidden; white-space:pre-wrap; word-break:break-word; }
-  .check { position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:6px;
-    border:1px solid var(--line); display:flex; align-items:center; justify-content:center; background:var(--panel2); }
-  .check.on { background:var(--acc); border-color:var(--acc); }
+  /* iOS grouped inset list */
+  .ios-group { background:var(--bg-secondary); border-radius:12px; overflow:hidden; margin-bottom:14px; }
+  .ios-row { display:flex; align-items:center; gap:12px; width:100%; border:none; background:transparent;
+    padding:13px 16px; text-align:left; border-bottom:1px solid var(--separator); }
+  .ios-row:last-child { border-bottom:none; }
+  .ios-row:active { background:var(--fill); }
+  .ios-row-key { width:24px; height:24px; border-radius:6px; background:var(--accent); color:#fff;
+    font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none; }
+  .ios-row-label { flex:1; font-size:16px; }
+  .ios-row-check { color:var(--accent); font-weight:700; }
+  .chev { color:var(--label-3); }
 
-  /* detail overlay */
-  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; display:flex; }
-  .sheet { margin:auto; width:min(820px,96vw); max-height:92vh; background:var(--panel);
-    border:1px solid var(--line); border-radius:16px; display:flex; flex-direction:column; overflow:hidden; }
-  .sheet header { position:static; background:var(--panel); }
-  .sheet .body { padding:12px 14px; overflow:auto; }
-  pre.full { margin:0; font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-word;
-    background:#0a0d13; border:1px solid var(--line); border-radius:10px; padding:12px; max-height:46vh; overflow:auto; }
-  .actions { display:flex; flex-wrap:wrap; gap:7px; padding:10px 14px; border-top:1px solid var(--line); }
-  .row { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line); }
-  .row input, .binput { flex:1; background:#0a0d13; border:1px solid var(--line); color:var(--text);
-    border-radius:9px; padding:10px 12px; font-size:14px; }
-  .bbar { position:fixed; left:0; right:0; bottom:0; z-index:40; background:var(--panel);
-    border-top:1px solid var(--line); padding:10px 12px max(env(safe-area-inset-bottom),10px);
-    display:flex; gap:8px; align-items:center; }
-  .empty { text-align:center; color:var(--dim); padding:60px 20px; }
+  /* ===== macOS split view ===== */
+  .mac { display:grid; grid-template-columns:248px 1fr; height:100dvh; }
+  .sidebar { border-right:1px solid var(--separator); border-radius:0;
+    display:flex; flex-direction:column; overflow:hidden; padding-top:env(safe-area-inset-top); }
+  .sidebar-head { display:flex; align-items:center; gap:8px; padding:14px 16px 8px; }
+  .sidebar-head .title { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .sidebar-head .title b { color:var(--accent); }
+  .search { padding:0 12px 8px; }
+  .search-field { width:100%; background:var(--fill); border:none; border-radius:9px; padding:7px 10px;
+    font-size:13px; color:var(--label); outline:none; }
+  .seg { display:flex; gap:2px; margin:0 12px 8px; background:var(--fill); border-radius:9px; padding:2px; }
+  .seg-btn { flex:1; border:none; background:transparent; border-radius:7px; padding:5px 6px; font-size:12px; color:var(--label-2); }
+  .seg-btn.on { background:var(--bg-elevated); color:var(--label); box-shadow:0 1px 2px rgba(0,0,0,.14); }
+  .source-list { flex:1; overflow:auto; padding:4px 8px 12px; }
+  .group-head { display:flex; justify-content:space-between; font-size:11px; font-weight:700;
+    letter-spacing:.5px; text-transform:uppercase; color:var(--label-3); padding:12px 8px 4px; }
+  .src-row { display:flex; align-items:center; gap:8px; width:100%; border:none; background:transparent;
+    border-radius:8px; padding:7px 8px; text-align:left; }
+  @media (hover:hover){ .src-row:hover { background:var(--fill-2); } }
+  .src-row.sel { background:var(--accent); color:#fff; }
+  .src-row.sel .src-target { color:rgba(255,255,255,.8); }
+  .src-row.sel .dot { box-shadow:0 0 0 2px rgba(255,255,255,.5); }
+  .src-name { flex:1; font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .src-target { font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .content { display:flex; flex-direction:column; min-width:0; background:var(--bg-elevated); }
+  .content-toolbar { display:flex; align-items:center; gap:10px; border-radius:0;
+    padding:calc(env(safe-area-inset-top) + 13px) 18px 13px; border-bottom:1px solid var(--separator); }
+  .ct-title { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ct-meta { font-size:12px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .content-scroll { flex:1; overflow:auto; padding:18px; }
+
+  /* command palette */
+  .palette-scrim { position:fixed; inset:0; background:rgba(0,0,0,.3); display:flex; justify-content:center;
+    align-items:flex-start; padding-top:14vh; z-index:100; animation:fade .15s ease; }
+  .palette { width:min(560px,92vw); border-radius:18px; overflow:hidden;
+    animation:pop .18s cubic-bezier(.32,.72,0,1); }
+  .palette-input { width:100%; border:none; background:transparent; padding:16px 18px; font-size:18px;
+    color:var(--label); outline:none; border-bottom:1px solid var(--separator); }
+  .palette-list { max-height:46vh; overflow:auto; padding:6px; }
+  .palette-row { display:flex; align-items:center; gap:10px; width:100%; border:none; background:transparent;
+    border-radius:9px; padding:10px 12px; text-align:left; }
+  .palette-row.on { background:var(--accent); color:#fff; }
+  .palette-row.on .pr-meta { color:rgba(255,255,255,.8); }
+  .pr-name { flex:1; font-size:14px; font-weight:500; }
+  .pr-meta { font-size:12px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .palette-empty { padding:18px; text-align:center; color:var(--label-3); }
+  .palette-hint { padding:8px 14px; font-size:11px; color:var(--label-3); border-top:1px solid var(--separator); display:flex; gap:14px; }
+
+  /* ===== iOS ===== */
+  .ios { height:100dvh; display:flex; flex-direction:column; }
+  .ios-nav { position:fixed; top:0; left:0; right:0; z-index:20; padding-top:env(safe-area-inset-top);
+    height:calc(env(safe-area-inset-top)); display:flex; align-items:flex-end; justify-content:center;
+    background:transparent; transition:background .2s,height .2s; pointer-events:none; }
+  .ios-nav.small { border-radius:0; border-bottom:1px solid var(--separator);
+    height:calc(env(safe-area-inset-top) + 44px); }
+  .ios-nav-inline { font-size:17px; font-weight:600; opacity:0; transition:opacity .2s; padding-bottom:11px; }
+  .ios-nav.small .ios-nav-inline { opacity:1; }
+  .ios-scroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+    padding-top:env(safe-area-inset-top); }
+  .lt-row { display:flex; align-items:center; gap:10px; padding:6px 16px 2px; }
+  .large-title { flex:1; font-size:34px; font-weight:700; letter-spacing:-.02em; margin:0; }
+  .ios-summary { display:flex; gap:8px; flex-wrap:wrap; padding:6px 16px 14px; }
+  .chip { font-size:13px; font-weight:600; padding:5px 11px; border-radius:20px; color:var(--label-2); }
+  .chip.s-needs_input { background:color-mix(in srgb,var(--red) 16%,transparent); color:var(--red); }
+  .ios-grid { display:grid; grid-template-columns:1fr; gap:12px; padding:0 16px; }
+  @media (min-width:560px){ .ios-grid { grid-template-columns:1fr 1fr; } }
+  .ios-bottom-pad { height:calc(env(safe-area-inset-bottom) + 92px); }
+
+  .card { background:var(--bg-elevated); border:.5px solid var(--separator);
+    border-left:3px solid var(--s,var(--gray)); border-radius:14px; padding:14px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06); transition:transform .12s; }
+  .card:active { transform:scale(.98); }
+  .card.s-needs_input { animation:pulse 1.6s ease-in-out infinite; }
+  .card-top { display:flex; align-items:center; gap:8px; margin-bottom:3px; }
+  .card-name { flex:1; font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card-meta { font-size:12px; color:var(--label-3); margin-bottom:8px; font-variant-numeric:tabular-nums; }
+  .card-q { font-size:14px; margin:6px 0 10px; }
+  .card-preview { font:11px/1.4 "SF Mono",ui-monospace,Menlo,monospace; color:var(--label-3);
+    background:var(--bg); border-radius:8px; padding:8px; max-height:78px; overflow:hidden;
+    white-space:pre-wrap; word-break:break-word; margin-top:8px; }
+  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(255,59,48,0); } 50%{ box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 35%,transparent); } }
+
+  /* iOS 26 floating glass capsule */
+  .tabbar { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(env(safe-area-inset-bottom) + 10px);
+    z-index:20; display:flex; gap:2px; padding:5px; border-radius:26px; max-width:calc(100vw - 28px); }
+  .tab { border:none; background:transparent; padding:10px 18px; font-size:13px; font-weight:500;
+    color:var(--label-2); border-radius:22px; white-space:nowrap; }
+  .tab.on { color:var(--accent); font-weight:600; background:var(--fill); }
+  .tab b { color:var(--red); margin-left:3px; }
+
+  /* bottom sheet */
+  .sheet-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:60; animation:fade .25s ease; }
+  .sheet-scrim.closing { animation:fadeout .26s ease forwards; }
+  .sheet { position:fixed; left:0; right:0; bottom:0; max-height:92dvh; background:var(--bg-elevated);
+    border-radius:16px 16px 0 0; box-shadow:var(--shadow); display:flex; flex-direction:column;
+    animation:slideup .34s cubic-bezier(.32,.72,0,1); transition:transform .3s cubic-bezier(.32,.72,0,1);
+    padding-bottom:env(safe-area-inset-bottom); }
+  .sheet-grab-zone { padding:8px 16px 4px; touch-action:none; }
+  .grabber { width:38px; height:5px; border-radius:3px; background:var(--label-3); margin:0 auto 10px; }
+  .sheet-head { display:flex; align-items:center; gap:10px; padding-bottom:12px; border-bottom:1px solid var(--separator); }
+  .sheet-title { flex:1; font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sheet-scroll { overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:14px 16px 4px; }
+
+  /* broadcast modal */
+  .modal-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:80; display:flex;
+    align-items:center; justify-content:center; padding:20px; animation:fade .15s ease; }
+  .modal { width:min(460px,94vw); border-radius:20px; padding:18px;
+    animation:pop .18s cubic-bezier(.32,.72,0,1); }
+  .modal-title { font-size:18px; font-weight:700; margin-bottom:14px; }
+  .modal-text { width:100%; min-height:92px; resize:vertical; background:var(--bg); border:1px solid var(--separator);
+    border-radius:10px; padding:10px 12px; font:15px/1.4 -apple-system,sans-serif; color:var(--label); outline:none; margin-bottom:14px; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; }
+
+  /* token gate */
+  .gate { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .gate-card { width:min(420px,92vw); border-radius:22px; padding:26px; text-align:center; }
+  .gate-logo { font-size:26px; font-weight:700; letter-spacing:-.02em; margin-bottom:14px; }
+  .gate-logo b { color:var(--accent); }
+  .gate-title { font-size:19px; font-weight:700; margin-bottom:8px; }
+  .gate-sub { font-size:13.5px; color:var(--label-2); line-height:1.5; margin-bottom:18px; }
+  .gate-sub code { font-family:"SF Mono",ui-monospace,monospace; font-size:12px; background:var(--fill); padding:1px 5px; border-radius:5px; }
+  .gate-input { width:100%; background:var(--bg); border:1px solid var(--separator); border-radius:12px;
+    padding:12px 14px; font-size:15px; color:var(--label); outline:none; margin-bottom:12px; }
+  .gate-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent); }
+  .gate-btn { width:100%; padding:12px; font-size:15px; }
+
+  /* preference escape-hatches */
+  .no-glass .glass { -webkit-backdrop-filter:none; backdrop-filter:none; background:var(--bg-elevated);
+    box-shadow:0 1px 3px rgba(0,0,0,.12), inset 0 0 0 .5px var(--separator); }
+  .no-ambient .ambient::before { animation:none; }
+
+  /* iOS-style switch */
+  .switch { position:relative; width:51px; height:31px; flex:none; }
+  .switch input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; z-index:2; }
+  .switch .track { position:absolute; inset:0; background:var(--fill); border-radius:16px; transition:background .22s; }
+  .switch input:checked + .track { background:var(--green); }
+  .switch .knob { position:absolute; top:2px; left:2px; width:27px; height:27px; border-radius:50%;
+    background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:transform .22s; }
+  .switch input:checked ~ .knob { transform:translateX(20px); }
+
+  /* settings overlay */
+  .settings-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:70; display:flex; animation:fade .2s ease; }
+  .settings-panel { display:flex; flex-direction:column; overflow:hidden; }
+  .settings-panel.mac { margin:auto; width:min(540px,94vw); max-height:86vh; border-radius:20px;
+    animation:pop .18s cubic-bezier(.32,.72,0,1); }
+  .settings-panel.ios { margin-top:auto; width:100%; max-height:92dvh; border-radius:18px 18px 0 0;
+    animation:slideup .32s cubic-bezier(.32,.72,0,1); }
+  .settings-head { display:flex; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--separator); flex:none; }
+  .settings-title { flex:1; font-size:18px; font-weight:700; }
+  .settings-body { padding:6px 16px 18px; overflow:auto; }
+  .set-group-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--label-3); margin:18px 4px 7px; }
+  .set-group { background:var(--bg-secondary); border-radius:12px; overflow:hidden; }
+  .set-row { display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1px solid var(--separator); }
+  .set-row:last-child { border-bottom:none; }
+  .set-col { flex:1; min-width:0; }
+  .set-label { font-size:15px; }
+  .set-sub { font-size:11.5px; color:var(--label-3); margin-top:2px; }
+  .set-row .seg { margin:0; flex:none; }
+  .set-input { background:var(--bg); border:1px solid var(--separator); border-radius:8px; padding:7px 10px;
+    font-size:14px; color:var(--label); outline:none; width:140px; }
+  .set-input:focus { border-color:var(--accent); }
+  .set-area { width:100%; min-height:96px; resize:vertical; background:var(--bg); border:1px solid var(--separator);
+    border-radius:10px; padding:10px 12px; color:var(--label); font:12px/1.45 "SF Mono",ui-monospace,Menlo,monospace; outline:none; }
+  .set-err { color:var(--red); font-size:12.5px; margin:8px 4px 0; }
+  .set-stepper { display:flex; align-items:center; gap:10px; flex:none; }
+  .set-stepper button { width:30px; height:30px; border-radius:8px; border:1px solid var(--separator);
+    background:var(--fill); font-size:17px; }
+  .set-stepper .val { min-width:54px; text-align:center; font-variant-numeric:tabular-nums; font-size:14px; }
+  .link-btn { border:none; background:none; color:var(--accent); font-size:15px; padding:0; }
+  .link-btn.danger { color:var(--red); }
+
+  @keyframes slideup { from{ transform:translateY(100%); } to{ transform:translateY(0); } }
+  @keyframes fade { from{ opacity:0; } to{ opacity:1; } }
+  @keyframes fadeout { from{ opacity:1; } to{ opacity:0; } }
+  @keyframes pop { from{ transform:scale(.96); opacity:0; } to{ transform:scale(1); opacity:1; } }
 </style>
+<script>
+  /* apply theme/glass prefs before first paint to avoid a flash */
+  (function(){
+    try {
+      var p = JSON.parse(localStorage.getItem("vmux_prefs") || "{}");
+      var t = p.theme || "dark";
+      var dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+      var el = document.documentElement;
+      el.classList.add(dark ? "t-dark" : "t-light");
+      if (p.glass === false) el.classList.add("no-glass");
+      if (p.ambient === false) el.classList.add("no-ambient");
+    } catch (e) { document.documentElement.classList.add("t-dark"); }
+  })();
+</script>
 </head>
 <body>
+<div class="ambient"></div>
 <div id="root"></div>
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/htm@3/dist/htm.umd.js" crossorigin></script>
 <script>
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useMemo } = React;
+const F = React.Fragment;
 const html = htm.bind(React.createElement);
 
 const TOKEN = new URLSearchParams(location.search).get("token")
   || localStorage.getItem("vmux_token") || "";
 if (TOKEN) localStorage.setItem("vmux_token", TOKEN);
 
-const ORDER = { needs_input:0, error:1, working:2, idle:3, offline:4 };
-const ACTIONS = [
-  ["Ctrl+C","C-c"], ["Esc","Escape"], ["Tab","Tab"], ["Enter","Enter"],
-  ["↑","Up"], ["↓","Down"], ["←","Left"], ["→","Right"],
-];
+// ---- browser-local preferences (Settings page) ----
+const PREFS_KEY = "vmux_prefs";
+const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all" };
+let PREFS = (function(){ try { return {...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")}; } catch(e){ return {...DEFAULT_PREFS}; } })();
+const prefsSubs = new Set();
+function applyPrefs(p){
+  const el = document.documentElement;
+  const dark = p.theme==="dark" || (p.theme!=="light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  el.classList.toggle("t-dark", dark); el.classList.toggle("t-light", !dark);
+  el.classList.toggle("no-glass", !p.glass);
+  el.classList.toggle("no-ambient", !p.ambient);
+}
+function setPrefs(patch){ PREFS = {...PREFS, ...patch}; localStorage.setItem(PREFS_KEY, JSON.stringify(PREFS)); applyPrefs(PREFS); prefsSubs.forEach(fn=>fn()); }
+applyPrefs(PREFS);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(PREFS.theme==="auto") applyPrefs(PREFS); });
+function usePrefs(){ const [,f]=useState(0); useEffect(()=>{ const fn=()=>f(x=>x+1); prefsSubs.add(fn); return ()=>prefsSubs.delete(fn); },[]); return PREFS; }
 
-async function api(path, body) {
+const ORDER = { needs_input:0, error:1, working:2, idle:3, offline:4 };
+const STATUS_LABEL = { needs_input:"Needs input", error:"Error", working:"Working", idle:"Idle", offline:"Offline" };
+const GROUP_LABEL = { needs_input:"Needs you", error:"Error", working:"Working", idle:"Idle", offline:"Offline" };
+const ACTIONS = [["Ctrl+C","C-c"],["Esc","Escape"],["Tab","Tab"],["Enter","Enter"],["↑","Up"],["↓","Down"],["←","Left"],["→","Right"]];
+
+async function api(path, body, method) {
   const headers = { "Content-Type":"application/json" };
   if (TOKEN) headers["Authorization"] = "Bearer " + TOKEN;
-  const r = await fetch("/api"+path, {
-    method: body ? "POST":"GET", headers,
-    body: body ? JSON.stringify(body): undefined,
-  });
-  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.status);
+  const r = await fetch("/api"+path, { method: method || (body?"POST":"GET"), headers,
+    body: body?JSON.stringify(body):undefined });
+  if (!r.ok) { let m=r.status; try { m=(await r.json()).detail || m; } catch(e){} throw new Error(m); }
   return r.json();
 }
+const act = {
+  select:(p,key)=>api("/select",{id:p.id,key}).catch(()=>{}),
+  key:(p,k)=>api("/key",{id:p.id,key:k}).catch(()=>{}),
+  text:(p,text,enter)=>api("/text",{id:p.id,text,enter}),
+};
+function askNotify(){ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }
+function beep(){ if(!PREFS.sound) return; try{
+  const c=new (window.AudioContext||window.webkitAudioContext)();
+  const o=c.createOscillator(), g=c.createGain();
+  o.type="sine"; o.frequency.value=880; o.connect(g); g.connect(c.destination);
+  g.gain.setValueAtTime(.0001,c.currentTime);
+  g.gain.exponentialRampToValueAtTime(.14,c.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.4);
+  o.start(); o.stop(c.currentTime+.42);
+}catch(e){} }
+const byStatus = (a,b)=> (ORDER[a.status]-ORDER[b.status]) || a.name.localeCompare(b.name);
+const countOf = (panes)=> panes.reduce((m,p)=>{ m[p.status]=(m[p.status]||0)+1; return m; },{});
 
-function beep() {
-  try {
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type="sine"; o.frequency.value=880; o.connect(g); g.connect(ctx.destination);
-    g.gain.setValueAtTime(.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(.15, ctx.currentTime+.01);
-    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime+.4);
-    o.start(); o.stop(ctx.currentTime+.42);
-  } catch(e){}
-}
-
-function useSwarm() {
-  const [panes, setPanes] = useState([]);
-  const [connected, setConnected] = useState(false);
-  useEffect(() => {
-    let ws, stop=false, timer;
-    const connect = () => {
-      const proto = location.protocol==="https:" ? "wss":"ws";
-      const url = proto+"://"+location.host+"/ws"+(TOKEN?("?token="+encodeURIComponent(TOKEN)):"");
-      ws = new WebSocket(url);
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (e) => { const m=JSON.parse(e.data); if(m.type==="state") setPanes(m.panes); };
-      ws.onclose = () => { setConnected(false); if(!stop) timer=setTimeout(connect, 1200); };
-      ws.onerror = () => { try{ws.close();}catch(_){} };
+function useSwarm(){
+  const [panes,setPanes]=useState([]);
+  // connecting | live | unauthorized | offline — so a failed socket is never a silent empty grid
+  const [status,setStatus]=useState("connecting");
+  useEffect(()=>{
+    let ws, stop=false, t;
+    // when the socket won't open, classify why via a REST probe (the WS handshake
+    // rejection can't carry a reason to the browser)
+    const probe=async()=>{
+      try{
+        const r=await fetch("/api/state",{headers:TOKEN?{Authorization:"Bearer "+TOKEN}:{}});
+        if(r.status===401){ setStatus("unauthorized"); return "unauthorized"; }
+        if(r.ok){ const d=await r.json(); setPanes(d.panes); return "ok"; }
+        setStatus("offline"); return "offline";
+      }catch(e){ setStatus("offline"); return "offline"; }
+    };
+    const connect=()=>{
+      const proto=location.protocol==="https:"?"wss":"ws";
+      const url=proto+"://"+location.host+"/ws"+(TOKEN?("?token="+encodeURIComponent(TOKEN)):"");
+      ws=new WebSocket(url);
+      ws.onopen=()=>setStatus("live");
+      ws.onmessage=(e)=>{ const m=JSON.parse(e.data); if(m.type==="state"){ setPanes(m.panes); setStatus("live"); } };
+      ws.onclose=async()=>{
+        if(stop) return;
+        const why=await probe();
+        if(why==="unauthorized") return;     // bad/missing token — wait for the gate, don't hammer
+        t=setTimeout(connect,1500);          // ok/offline — keep trying
+      };
+      ws.onerror=()=>{ try{ws.close();}catch(_){} };
     };
     connect();
-    return () => { stop=true; clearTimeout(timer); if(ws) try{ws.close();}catch(_){} };
-  }, []);
-  return { panes, connected };
+    return ()=>{ stop=true; clearTimeout(t); if(ws) try{ws.close();}catch(_){} };
+  },[]);
+  return { panes, status };
 }
 
-function Menu({ pane }) {
-  if (!pane.menu || !pane.menu.length) return null;
-  const tap = (e, key) => { e.stopPropagation(); api("/select",{id:pane.id,key}).catch(()=>{}); };
-  return html`<div class="menu">
-    ${pane.menu.map(o => html`<button class=${"opt"+(o.selected?" sel":"")}
-        onClick=${(e)=>tap(e,o.key)}>
-        <b>${o.key}</b>${o.label}</button>`)}
-  </div>`;
-}
-
-function Card({ pane, onOpen, bmode, checked, onCheck }) {
-  const click = () => bmode ? onCheck(pane.id) : onOpen(pane.id);
-  return html`<div class=${"card "+pane.status} onClick=${click}>
-    ${bmode && html`<div class=${"check"+(checked?" on":"")}>${checked?"✓":""}</div>`}
-    <div class="top">
-      <div class="name">${pane.name}</div>
-      <span class=${"pill "+pane.status}>${pane.status.replace("_"," ")}</span>
-    </div>
-    <div class="meta">${pane.target} · <span class="kind">${pane.kind}</span></div>
-    ${pane.status==="needs_input" && html`
-      ${pane.question && html`<div class="q">${pane.question}</div>`}
-      <${Menu} pane=${pane} />`}
-    ${pane.preview && pane.preview.length>0 && html`<pre class="preview">${pane.preview.join("\n")}</pre>`}
-  </div>`;
-}
-
-function Detail({ pane, onClose }) {
-  const [text, setText] = useState("");
-  const send = (enter) => { if(!text && !enter) return;
-    api("/text",{id:pane.id,text,enter}).then(()=>setText("")).catch(()=>{}); };
-  const key = (k) => api("/key",{id:pane.id,key:k}).catch(()=>{});
-  return html`<div class="overlay" onClick=${onClose}>
-    <div class="sheet" onClick=${(e)=>e.stopPropagation()}>
-      <header>
-        <div class="logo">${pane.name}</div>
-        <span class=${"pill "+pane.status}>${pane.status.replace("_"," ")}</span>
-        <div class="spacer"></div>
-        <button class="btn" onClick=${onClose}>Close</button>
-      </header>
-      <div class="body">
-        ${pane.status==="needs_input" && html`
-          ${pane.question && html`<div class="q">${pane.question}</div>`}
-          <${Menu} pane=${pane} />
-          <div style=${{height:"10px"}}></div>`}
-        <pre class="full">${(pane.lines||[]).join("\n")}</pre>
-      </div>
-      <div class="actions">
-        ${ACTIONS.map(([lbl,k]) => html`<button class="btn" onClick=${()=>key(k)}>${lbl}</button>`)}
-      </div>
-      <div class="row">
-        <input placeholder="type to send…" value=${text}
-          onInput=${(e)=>setText(e.target.value)}
-          onKeyDown=${(e)=>{ if(e.key==="Enter"){ e.preventDefault(); send(true);} }} />
-        <button class="btn" onClick=${()=>send(false)}>Send</button>
-        <button class="btn acc" onClick=${()=>send(true)}>↵</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function App() {
-  const { panes, connected } = useSwarm();
-  const [openId, setOpenId] = useState(null);
-  const [bmode, setBmode] = useState(false);
-  const [sel, setSel] = useState(()=>new Set());
-  const [btext, setBtext] = useState("");
-  const prevNeeds = useRef(new Set());
-
-  const sorted = [...panes].sort((a,b)=>
-    (ORDER[a.status]-ORDER[b.status]) || a.name.localeCompare(b.name));
-  const counts = panes.reduce((m,p)=>{ m[p.status]=(m[p.status]||0)+1; return m; },{});
-  const open = panes.find(p=>p.id===openId) || null;
-
-  // needs-input transition -> beep + notify + title flip
-  useEffect(() => {
-    const now = new Set(panes.filter(p=>p.status==="needs_input").map(p=>p.id));
-    let fresh = false;
-    now.forEach(id => { if(!prevNeeds.current.has(id)) fresh = true; });
-    if (fresh) {
-      beep();
-      if ("Notification" in window && Notification.permission==="granted") {
-        const who = panes.filter(p=>p.status==="needs_input"&&!prevNeeds.current.has(p.id))
-          .map(p=>p.name).join(", ");
-        try { new Notification("vmux — needs you", { body: who }); } catch(e){}
+function useNeedsNotify(panes){
+  const prev=useRef(new Set());
+  useEffect(()=>{
+    const watch = PREFS.alertErrors ? ["needs_input","error"] : ["needs_input"];
+    const now=new Set(panes.filter(p=>watch.includes(p.status)).map(p=>p.id));
+    let fresh=false; now.forEach(id=>{ if(!prev.current.has(id)) fresh=true; });
+    if(fresh){
+      beep();   // self-guards on PREFS.sound
+      if(PREFS.notify && "Notification" in window && Notification.permission==="granted"){
+        const who=panes.filter(p=>watch.includes(p.status)&&!prev.current.has(p.id)).map(p=>p.name).join(", ");
+        try{ new Notification("vmux — needs you",{body:who}); }catch(e){}
       }
     }
-    document.title = now.size ? `(${now.size}) vmux` : "vmux";
-    prevNeeds.current = now;
-  }, [panes]);
+    const needs = panes.filter(p=>p.status==="needs_input").length;
+    document.title = needs? "("+needs+") vmux" : "vmux";
+    prev.current=now;
+  },[panes]);
+}
 
-  const askNotify = () => { if("Notification" in window) Notification.requestPermission(); };
-  const toggleSel = (id) => setSel(s => { const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
-  const doBroadcast = () => {
-    if(!sel.size || !btext) return;
-    api("/broadcast",{ids:[...sel],text:btext,enter:true}).then(()=>{ setBtext(""); }).catch(()=>{});
+function useIdiom(){
+  const Q="(min-width:820px) and (pointer:fine)";
+  const [mac,setMac]=useState(()=> window.matchMedia(Q).matches);
+  useEffect(()=>{ const m=window.matchMedia(Q); const on=()=>setMac(m.matches);
+    m.addEventListener("change",on); return ()=>m.removeEventListener("change",on); },[]);
+  return mac?"mac":"ios";
+}
+
+function StatusPill({status}){
+  if(status==="needs_input") return html`<span class="pill-needs">Needs input</span>`;
+  return html`<span class=${"pill-soft s-"+status}><span class=${"dot s-"+status}></span>${STATUS_LABEL[status]}</span>`;
+}
+
+function Menu({pane, variant}){
+  if(!pane.menu||!pane.menu.length) return null;
+  const tap=(e,key)=>{ e.stopPropagation(); act.select(pane,key); };
+  if(variant==="rows") return html`<div class="ios-group">
+    ${pane.menu.map(o=>html`<button class="ios-row" key=${o.key} onClick=${e=>tap(e,o.key)}>
+      <span class="ios-row-key">${o.key}</span>
+      <span class="ios-row-label">${o.label}</span>
+      ${o.selected ? html`<span class="ios-row-check">✓</span>` : html`<span class="chev">›</span>`}
+    </button>`)}
+  </div>`;
+  return html`<div class="menu">
+    ${pane.menu.map(o=>html`<button class=${"opt"+(o.selected?" sel":"")} key=${o.key}
+      onClick=${e=>tap(e,o.key)}><b>${o.key}</b>${o.label}</button>`)}
+  </div>`;
+}
+
+function Composer({pane}){
+  const [text,setText]=useState("");
+  const send=(enter)=>{ if(!text&&!enter) return; act.text(pane,text,enter).then(()=>setText("")).catch(()=>{}); };
+  return html`<div class="composer">
+    <input class="field" name="message" autocomplete="off" placeholder="Message…" value=${text}
+      onInput=${e=>setText(e.target.value)}
+      onKeyDown=${e=>{ if(e.key==="Enter"){ e.preventDefault(); send(true); } }} />
+    <button class="btn" onClick=${()=>send(false)}>Send</button>
+    <button class="btn accent" onClick=${()=>send(true)}>↵</button>
+  </div>`;
+}
+
+function DetailBody({pane, variant}){
+  return html`<${F}>
+    ${pane.status==="needs_input" && pane.question && html`<div class="question">${pane.question}</div>`}
+    <${Menu} pane=${pane} variant=${variant==="ios"?"rows":"buttons"} />
+    <pre class="output">${(pane.lines||[]).join("\n") || "(no output)"}</pre>
+    <div class="actions">
+      ${ACTIONS.map(([lbl,k])=>html`<button class="keycap" key=${k} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
+    </div>
+    <${Composer} pane=${pane} />
+  <//>`;
+}
+
+/* ===================== macOS ===================== */
+function Palette({panes,onPick,onClose}){
+  const [q,setQ]=useState(""); const [i,setI]=useState(0); const ref=useRef();
+  const list=useMemo(()=> panes.filter(p=>!q||(p.name+" "+p.target).toLowerCase().includes(q.toLowerCase()))
+    .sort(byStatus).slice(0,8),[panes,q]);
+  useEffect(()=>{ if(ref.current) ref.current.focus(); },[]);
+  useEffect(()=>{ setI(0); },[q]);
+  const onKey=(e)=>{
+    if(e.key==="ArrowDown"){ e.preventDefault(); setI(v=>Math.min(list.length-1,v+1)); }
+    else if(e.key==="ArrowUp"){ e.preventDefault(); setI(v=>Math.max(0,v-1)); }
+    else if(e.key==="Enter"){ e.preventDefault(); if(list[i]) onPick(list[i].id); }
+    else if(e.key==="Escape"){ e.preventDefault(); onClose(); }
   };
-
-  return html`
-    <header>
-      <div class="logo">v<b>mux</b></div>
-      <div class="summary">
-        ${counts.needs_input ? html`<span><span class="n" style=${{color:"var(--needs)"}}>${counts.needs_input}</span> need you</span>`:null}
-        ${counts.error ? html`<span><span class="n" style=${{color:"var(--error)"}}>${counts.error}</span> error</span>`:null}
-        ${counts.working ? html`<span><span class="n" style=${{color:"var(--working)"}}>${counts.working}</span> working</span>`:null}
-        ${counts.idle ? html`<span><span class="n" style=${{color:"var(--idle)"}}>${counts.idle}</span> idle</span>`:null}
+  return html`<div class="palette-scrim" onClick=${onClose}>
+    <div class="palette glass" onClick=${e=>e.stopPropagation()}>
+      <input ref=${ref} class="palette-input" name="palette" autocomplete="off" placeholder="Jump to agent…" value=${q}
+        onInput=${e=>setQ(e.target.value)} onKeyDown=${onKey} />
+      <div class="palette-list">
+        ${list.map((p,idx)=>html`<button class=${"palette-row"+(idx===i?" on":"")} key=${p.id}
+          onMouseEnter=${()=>setI(idx)} onClick=${()=>onPick(p.id)}>
+          <span class=${"dot s-"+p.status}></span><span class="pr-name">${p.name}</span>
+          <span class="pr-meta">${p.target}</span></button>`)}
+        ${list.length===0 && html`<div class="palette-empty">No matches</div>`}
       </div>
-      <div class="spacer"></div>
-      <button class="btn" onClick=${askNotify} title="enable notifications">🔔</button>
-      <button class=${"btn ghost"+(bmode?" on":"")} onClick=${()=>{setBmode(!bmode); setSel(new Set());}}>Broadcast</button>
-      <div class=${"dot"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></div>
-    </header>
+      <div class="palette-hint"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+    </div>
+  </div>`;
+}
 
-    ${sorted.length===0
-      ? html`<div class="empty">${connected?"No agent panes found. Start agents in tmux.":"Connecting…"}</div>`
-      : html`<div class="grid" style=${bmode?{paddingBottom:"78px"}:null}>
-          ${sorted.map(p => html`<${Card} key=${p.id} pane=${p} onOpen=${setOpenId}
-              bmode=${bmode} checked=${sel.has(p.id)} onCheck=${toggleSel} />`)}
-        </div>`}
+function MacApp({panes, connected, onBroadcast, onSettings}){
+  const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
+  const [query,setQuery]=useState("");
+  const [selId,setSel]=useState(null);
+  const [palette,setPalette]=useState(false);
 
-    ${open && html`<${Detail} pane=${open} onClose=${()=>setOpenId(null)} />`}
+  const filtered=useMemo(()=> panes.filter(p=>
+      filter==="all" || (filter==="needs"&&p.status==="needs_input") || (filter==="working"&&p.status==="working"))
+    .filter(p=> !query || (p.name+" "+p.target).toLowerCase().includes(query.toLowerCase()))
+  ,[panes,filter,query]);
 
-    ${bmode && html`<div class="bbar">
-      <span class="summary"><span class="n">${sel.size}</span> selected</span>
-      <input class="binput"
-        placeholder="broadcast message…" value=${btext} onInput=${(e)=>setBtext(e.target.value)} />
-      <button class="btn acc" onClick=${doBroadcast}>Send to ${sel.size}</button>
-    </div>`}
-  `;
+  const groups=useMemo(()=> ["needs_input","error","working","idle","offline"]
+    .map(s=>({ status:s, label:GROUP_LABEL[s], items:filtered.filter(p=>p.status===s).sort((a,b)=>a.name.localeCompare(b.name)) }))
+    .filter(g=>g.items.length),[filtered]);
+  const flat=useMemo(()=>groups.flatMap(g=>g.items),[groups]);
+
+  useEffect(()=>{ if(selId && panes.some(p=>p.id===selId)) return; if(flat[0]) setSel(flat[0].id); },[flat,selId,panes]);
+  const sel=panes.find(p=>p.id===selId)||null;
+
+  useEffect(()=>{
+    const onKey=(e)=>{
+      if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){ e.preventDefault(); setPalette(v=>!v); return; }
+      if(palette) return;
+      const tag=(e.target.tagName||"").toLowerCase();
+      if(tag==="input"||tag==="textarea") return;
+      if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+        e.preventDefault();
+        const idx=flat.findIndex(p=>p.id===selId);
+        const ni=e.key==="ArrowDown"?Math.min(flat.length-1,idx+1):Math.max(0,idx-1);
+        if(flat[ni]) setSel(flat[ni].id);
+      } else if(sel && sel.menu && sel.menu.length && /^[0-9]$/.test(e.key)){
+        const opt=sel.menu.find(o=>o.key===e.key); if(opt) act.select(sel,e.key);
+      }
+    };
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[flat,selId,sel,palette]);
+
+  return html`<div class="mac">
+    <aside class="sidebar glass">
+      <div class="sidebar-head">
+        <div class="title">v<b>mux</b></div>
+        <div class="spacer"></div>
+        <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
+        <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+        <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
+      </div>
+      <div class="search"><input class="search-field" name="search" autocomplete="off" placeholder="Search" value=${query} onInput=${e=>setQuery(e.target.value)} /></div>
+      <div class="seg">
+        ${[["all","All"],["needs","Needs you"],["working","Working"]].map(([f,l])=>html`
+          <button class=${"seg-btn"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}</button>`)}
+      </div>
+      <nav class="source-list">
+        ${groups.length===0 && html`<div class="palette-empty">${connected?"No agents":"Connecting…"}</div>`}
+        ${groups.map(g=>html`<${F} key=${g.status}>
+          <div class="group-head">${g.label}<span>${g.items.length}</span></div>
+          ${g.items.map(p=>html`<button class=${"src-row"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>setSel(p.id)}>
+            <span class=${"dot s-"+p.status}></span>
+            <span class="src-name">${p.name}</span>
+            <span class="src-target">${p.target}</span>
+          </button>`)}
+        <//>`)}
+      </nav>
+    </aside>
+    <main class="content">
+      ${sel ? html`<${F}>
+        <div class="content-toolbar glass">
+          <div class="ct-title">${sel.name}</div>
+          <${StatusPill} status=${sel.status} />
+          <div class="spacer"></div>
+          <span class="ct-meta">${sel.target} · ${sel.kind}</span>
+        </div>
+        <div class="content-scroll"><${DetailBody} pane=${sel} variant="mac" /></div>
+      <//>` : html`<div class="empty"><div class="empty-glyph">▦</div>${connected?"Select an agent  ·  ⌘K to jump":"Connecting…"}</div>`}
+    </main>
+    ${palette && html`<${Palette} panes=${panes} onPick=${id=>{ setSel(id); setPalette(false); }} onClose=${()=>setPalette(false)} />`}
+  </div>`;
+}
+
+/* ===================== iOS ===================== */
+function IOSCard({pane, onOpen}){
+  return html`<div class=${"card s-"+pane.status} onClick=${onOpen}>
+    <div class="card-top">
+      <div class="card-name">${pane.name}</div>
+      <${StatusPill} status=${pane.status} />
+    </div>
+    <div class="card-meta">${pane.target} · ${pane.kind}</div>
+    ${pane.status==="needs_input" && html`<${F}>
+      ${pane.question && html`<div class="card-q">${pane.question}</div>`}
+      <${Menu} pane=${pane} variant="buttons" />
+    <//>`}
+    ${pane.preview && pane.preview.length>0 && html`<pre class="card-preview">${pane.preview.join("\n")}</pre>`}
+  </div>`;
+}
+
+function Sheet({pane, onClose}){
+  const [dy,setDy]=useState(0);
+  const [closing,setClosing]=useState(false);
+  const drag=useRef(null);
+  const close=()=>{ setClosing(true); setTimeout(onClose,260); };
+  const onDown=(e)=>{ drag.current=e.clientY; try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
+  const onMove=(e)=>{ if(drag.current==null) return; setDy(Math.max(0,e.clientY-drag.current)); };
+  const onUp=(e)=>{ if(drag.current==null) return; const d=Math.max(0,e.clientY-drag.current); drag.current=null;
+    if(d>120) close(); else setDy(0); };
+  const style = closing ? {transform:"translateY(100%)"} : (dy ? {transform:"translateY("+dy+"px)", transition:"none"} : null);
+  return html`<div class=${"sheet-scrim"+(closing?" closing":"")} onClick=${close}>
+    <div class=${"sheet"+(closing?" closing":"")} style=${style} onClick=${e=>e.stopPropagation()}>
+      <div class="sheet-grab-zone" onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp}>
+        <div class="grabber"></div>
+        <div class="sheet-head">
+          <div class="sheet-title">${pane.name}</div>
+          <${StatusPill} status=${pane.status} />
+        </div>
+      </div>
+      <div class="sheet-scroll"><${DetailBody} pane=${pane} variant="ios" /></div>
+    </div>
+  </div>`;
+}
+
+function IOSApp({panes, connected, onBroadcast, onSettings}){
+  const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
+  const [openId,setOpen]=useState(null);
+  const [scrolled,setScrolled]=useState(false);
+  const counts=countOf(panes);
+  const sorted=useMemo(()=> panes.filter(p=>
+      filter==="all"||(filter==="needs"&&p.status==="needs_input")||(filter==="working"&&p.status==="working"))
+    .sort(byStatus),[panes,filter]);
+  const open=panes.find(p=>p.id===openId)||null;
+
+  return html`<div class="ios">
+    <div class=${"ios-nav"+(scrolled?" small glass":"")}><div class="ios-nav-inline">vmux</div></div>
+    <div class="ios-scroll" onScroll=${e=>setScrolled(e.target.scrollTop>34)}>
+      <div class="lt-row">
+        <h1 class="large-title">vmux</h1>
+        <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
+        <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+        <span class=${"conn"+(connected?" on":"")}></span>
+      </div>
+      <div class="ios-summary">
+        ${counts.needs_input?html`<span class="chip glass s-needs_input">${counts.needs_input} need you</span>`:null}
+        ${counts.working?html`<span class="chip glass">${counts.working} working</span>`:null}
+        ${counts.idle?html`<span class="chip glass">${counts.idle} idle</span>`:null}
+      </div>
+      ${sorted.length===0
+        ? html`<div class="empty" style=${{height:"50vh"}}><div class="empty-glyph">▦</div>${connected?"No agents":"Connecting…"}</div>`
+        : html`<div class="ios-grid">
+            ${sorted.map(p=>html`<${IOSCard} key=${p.id} pane=${p} onOpen=${()=>setOpen(p.id)} />`)}
+          </div>`}
+      <div class="ios-bottom-pad"></div>
+    </div>
+    <nav class="tabbar glass">
+      ${[["all","All",0],["needs","Needs you",counts.needs_input||0],["working","Working",counts.working||0]].map(([f,l,n])=>html`
+        <button class=${"tab"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}${n?html` <b>${n}</b>`:null}</button>`)}
+    </nav>
+    ${open && html`<${Sheet} pane=${open} onClose=${()=>setOpen(null)} />`}
+  </div>`;
+}
+
+function BroadcastModal({panes, onClose}){
+  const [text,setText]=useState(""); const [scope,setScope]=useState("needs");
+  const inScope=(p,s)=> s==="all"||(s==="needs"&&p.status==="needs_input")||(s==="working"&&p.status==="working");
+  const ids=panes.filter(p=>inScope(p,scope)).map(p=>p.id);
+  const send=()=>{ if(!text||!ids.length) return; api("/broadcast",{ids,text,enter:true}).then(onClose).catch(()=>{}); };
+  return html`<div class="modal-scrim" onClick=${onClose}>
+    <div class="modal glass" onClick=${e=>e.stopPropagation()}>
+      <div class="modal-title">Broadcast</div>
+      <div class="seg" style=${{margin:"0 0 12px"}}>
+        ${[["all","All"],["needs","Needs you"],["working","Working"]].map(([s,l])=>html`
+          <button class=${"seg-btn"+(scope===s?" on":"")} key=${s} onClick=${()=>setScope(s)}>
+            ${l} (${panes.filter(p=>inScope(p,s)).length})</button>`)}
+      </div>
+      <textarea class="modal-text" name="broadcast" placeholder=${"Message to "+ids.length+" agent(s)…"} value=${text}
+        onInput=${e=>setText(e.target.value)}></textarea>
+      <div class="modal-actions">
+        <button class="btn" onClick=${onClose}>Cancel</button>
+        <button class="btn accent" onClick=${send}>Send to ${ids.length}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function TokenGate(){
+  const [val,setVal]=useState("");
+  const save=()=>{ const t=val.trim(); if(!t) return; localStorage.setItem("vmux_token",t); location.href=location.pathname; };
+  return html`<div class="gate">
+    <div class="gate-card glass">
+      <div class="gate-logo">v<b>mux</b></div>
+      <div class="gate-title">Access token required</div>
+      <div class="gate-sub">This vmux is token-protected. Paste its token to connect, or open the link that includes <code>?token=…</code></div>
+      <input class="gate-input" type="password" name="token" autocomplete="off" placeholder="paste token…"
+        value=${val} onInput=${e=>setVal(e.target.value)} onKeyDown=${e=>{ if(e.key==="Enter") save(); }} />
+      <button class="btn accent gate-btn" onClick=${save}>Connect</button>
+    </div>
+  </div>`;
+}
+
+/* ===================== Settings ===================== */
+function Switch({on, onChange}){
+  return html`<label class="switch">
+    <input type="checkbox" checked=${!!on} onChange=${e=>onChange(e.target.checked)} />
+    <span class="track"></span><span class="knob"></span>
+  </label>`;
+}
+function Seg({value, options, onChange}){
+  return html`<div class="seg">
+    ${options.map(([v,l])=>html`<button class=${"seg-btn"+(value===v?" on":"")} key=${v} onClick=${()=>onChange(v)}>${l}</button>`)}
+  </div>`;
+}
+function Row({label, sub, children}){
+  return html`<div class="set-row">
+    <div class="set-col"><div class="set-label">${label}</div>${sub?html`<div class="set-sub">${sub}</div>`:null}</div>
+    ${children}
+  </div>`;
+}
+
+function useServerConfig(){
+  const [cfg,setCfg]=useState(null);
+  const [err,setErr]=useState("");
+  useEffect(()=>{ api("/config").then(setCfg).catch(()=>setErr("Couldn't load server config")); },[]);
+  const patch=async(partial)=>{ setErr("");
+    try{ const d=await api("/config",partial,"PATCH"); setCfg(d); return true; }
+    catch(e){ setErr(String(e.message||e)); return false; } };
+  return {cfg,err,patch};
+}
+
+function PatternEditor({label, value, onSave}){
+  const [text,setText]=useState(value.join("\n"));
+  const save=()=>onSave(text.split("\n").map(s=>s.trim()).filter(Boolean));
+  return html`<div class="set-group" style=${{padding:"12px 14px"}}>
+    <div class="set-sub" style=${{marginBottom:"6px"}}>${label}</div>
+    <textarea class="set-area" value=${text} onInput=${e=>setText(e.target.value)}></textarea>
+    <div style=${{display:"flex",justifyContent:"flex-end",marginTop:"8px"}}>
+      <button class="btn accent" onClick=${save}>Save</button>
+    </div>
+  </div>`;
+}
+
+function ServerSettings({cfg, err, patch, panes}){
+  const setPoll=(d)=>patch({poll_interval: Math.round((cfg.poll_interval + d)*10)/10});
+  const ovMap={}; cfg.overrides.forEach(o=>ovMap[o.target]=o);
+  const targets = Array.from(new Set([
+    ...((cfg._info&&cfg._info.targets)||[]), ...cfg.overrides.map(o=>o.target), ...panes.map(p=>p.target),
+  ])).sort();
+  const editAgent=(target, change)=>{
+    const cur = ovMap[target] || {target,name:null,kind:null};
+    const next = {...cur, ...change};
+    const others = cfg.overrides.filter(o=>o.target!==target).map(o=>({target:o.target,name:o.name,kind:o.kind}));
+    const keep = next.name || next.kind;
+    patch({overrides: keep ? [...others, {target, name:next.name||null, kind:next.kind||null}] : others});
+  };
+  return html`<${F}>
+    <div class="set-group-title">Server · General</div>
+    <div class="set-group">
+      <${Row} label="Poll interval" sub="how often panes are read">
+        <div class="set-stepper">
+          <button onClick=${()=>setPoll(-0.1)}>−</button>
+          <span class="val">${cfg.poll_interval.toFixed(1)}s</span>
+          <button onClick=${()=>setPoll(0.1)}>+</button>
+        </div>
+      <//>
+      <${Row} label="Auto-discover panes"><${Switch} on=${cfg.auto_discover} onChange=${v=>patch({auto_discover:v})} /><//>
+      <${Row} label="Show idle shells"><${Switch} on=${cfg.include_shells} onChange=${v=>patch({include_shells:v})} /><//>
+    </div>
+
+    <div class="set-group-title">Server · Agents</div>
+    <div class="set-group">
+      ${targets.length===0 ? html`<div class="set-row"><span class="set-sub">No panes yet.</span></div>`
+        : targets.map(t=>{ const o=ovMap[t]||{}; return html`<div class="set-row" key=${t} style=${{flexWrap:"wrap"}}>
+          <div class="set-col">
+            <input class="set-input" style=${{width:"100%"}} placeholder=${t} value=${o.name||""}
+              onChange=${e=>editAgent(t,{name:e.target.value.trim()||null})} />
+          </div>
+          <${Seg} value=${o.kind||"auto"} options=${[["auto","Auto"],["claude-code","Claude"],["generic","Gen"],["shell","Sh"]]}
+            onChange=${v=>editAgent(t,{kind:v==="auto"?null:v})} />
+        </div>`; })}
+    </div>
+
+    <div class="set-group-title">Server · Detectors</div>
+    <${PatternEditor} label="Prompt patterns — one regex per line" value=${cfg.generic_prompt_patterns}
+      onSave=${pats=>patch({generic_prompt_patterns:pats})} />
+    <${PatternEditor} label="Error patterns — one regex per line" value=${cfg.error_patterns}
+      onSave=${pats=>patch({error_patterns:pats})} />
+    ${err && html`<div class="set-err">${err}</div>`}
+  <//>`;
+}
+
+function SettingsContent({panes}){
+  const prefs=usePrefs();
+  const {cfg,err,patch}=useServerConfig();
+  const reAuth=()=>{ localStorage.removeItem("vmux_token"); location.href=location.pathname; };
+  return html`<div class="settings-body">
+    <div class="set-group-title">Appearance</div>
+    <div class="set-group">
+      <${Row} label="Theme"><${Seg} value=${prefs.theme}
+        options=${[["auto","Auto"],["light","Light"],["dark","Dark"]]} onChange=${v=>setPrefs({theme:v})} /><//>
+      <${Row} label="Liquid Glass" sub="translucent bars & sheets"><${Switch} on=${prefs.glass} onChange=${v=>setPrefs({glass:v})} /><//>
+      <${Row} label="Ambient motion" sub="moving background — off saves battery"><${Switch} on=${prefs.ambient} onChange=${v=>setPrefs({ambient:v})} /><//>
+    </div>
+
+    <div class="set-group-title">Notifications</div>
+    <div class="set-group">
+      <${Row} label="System notifications"><${Switch} on=${prefs.notify} onChange=${v=>{ setPrefs({notify:v}); if(v) askNotify(); }} /><//>
+      <${Row} label="Sound"><${Switch} on=${prefs.sound} onChange=${v=>setPrefs({sound:v})} /><//>
+      <${Row} label="Also alert on errors" sub="not just needs-input"><${Switch} on=${prefs.alertErrors} onChange=${v=>setPrefs({alertErrors:v})} /><//>
+    </div>
+
+    <div class="set-group-title">Display</div>
+    <div class="set-group">
+      <${Row} label="Default filter"><${Seg} value=${prefs.defaultFilter}
+        options=${[["all","All"],["needs","Needs"],["working","Work"]]} onChange=${v=>setPrefs({defaultFilter:v})} /><//>
+    </div>
+
+    ${cfg ? html`<${ServerSettings} cfg=${cfg} err=${err} patch=${patch} panes=${panes} />`
+          : html`<${F}><div class="set-group-title">Server</div><div class="set-sub" style=${{padding:"4px"}}>${err||"Loading…"}</div><//>`}
+
+    <div class="set-group-title">Connection</div>
+    <div class="set-group">
+      <${Row} label="Server"><span class="set-sub">${location.host}</span><//>
+      <${Row} label="Access token"><button class="link-btn" onClick=${reAuth}>Change…</button><//>
+      <${Row} label="Sign out" sub="clear token on this device"><button class="link-btn danger" onClick=${reAuth}>Sign out</button><//>
+    </div>
+  </div>`;
+}
+
+function SettingsOverlay({idiom, panes, onClose}){
+  return html`<div class="settings-scrim" onClick=${onClose}>
+    <div class=${"settings-panel glass "+idiom} onClick=${e=>e.stopPropagation()}>
+      <div class="settings-head">
+        <div class="settings-title">Settings</div>
+        <button class="btn accent" onClick=${onClose}>Done</button>
+      </div>
+      <${SettingsContent} panes=${panes} />
+    </div>
+  </div>`;
+}
+
+function App(){
+  const { panes, status } = useSwarm();
+  const idiom = useIdiom();
+  const [bc,setBc]=useState(false);
+  const [settings,setSettings]=useState(false);
+  useNeedsNotify(panes);
+  if(status==="unauthorized") return html`<${TokenGate} />`;
+  const connected = status==="live";
+  const onBroadcast=()=>setBc(true), onSettings=()=>setSettings(true);
+  return html`<${F}>
+    ${idiom==="mac"
+      ? html`<${MacApp} panes=${panes} connected=${connected} onBroadcast=${onBroadcast} onSettings=${onSettings} />`
+      : html`<${IOSApp} panes=${panes} connected=${connected} onBroadcast=${onBroadcast} onSettings=${onSettings} />`}
+    ${bc && html`<${BroadcastModal} panes=${panes} onClose=${()=>setBc(false)} />`}
+    ${settings && html`<${SettingsOverlay} idiom=${idiom} panes=${panes} onClose=${()=>setSettings(false)} />`}
+  <//>`;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+  window.addEventListener("load", ()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
 }
 </script>
 </body>

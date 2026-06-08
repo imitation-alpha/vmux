@@ -8,6 +8,8 @@ have to be URL-encoded):
     POST /api/text     {id, text, enter} -> send literal text, optional Enter
     POST /api/select   {id, key}         -> tap a parsed menu option
     POST /api/broadcast{ids, text, enter}-> send text to many panes
+    GET  /api/config                     -> editable server settings + read-only info
+    PATCH /api/config  {partial}         -> update settings live, persist to overlay
     WS   /ws[?token=]                    -> push full state every tick
 """
 
@@ -23,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import tmux
-from .config import Config
+from .config import Config, save_overlay
 from .poller import Hub
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -125,6 +127,34 @@ def create_app(cfg: Config) -> FastAPI:
                 errors.append("%s: %s" % (pid, exc))
         hub.kick()
         return {"ok": True, "sent": sent, "errors": errors}
+
+    def _config_payload():
+        d = cfg.editable_dict()
+        d["_info"] = {
+            "host": cfg.host,
+            "port": cfg.port,
+            "token_set": bool(cfg.token),
+            "version": app.version,
+            "targets": [hub.states[pid].target for pid in hub.order if pid in hub.states],
+        }
+        return d
+
+    @app.get("/api/config")
+    def get_config(_=Depends(require_auth)):
+        return _config_payload()
+
+    @app.patch("/api/config")
+    def patch_config(payload: dict, _=Depends(require_auth)):
+        try:
+            cfg.apply_patch(payload)            # validates + recompiles regexes
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            save_overlay(cfg)                  # persist to overlay (config.yaml untouched)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="could not persist settings: %s" % exc)
+        hub.kick()                             # apply on the next (immediate) poll
+        return _config_payload()
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
