@@ -13,7 +13,7 @@ import subprocess
 from typing import Dict, List, Optional
 
 # Fields we pull for every pane. Order matters: parsed positionally below.
-_PANE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}"
+_PANE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}\t#{window_name}"
 
 # Named keys the API is allowed to send. Anything else is rejected.
 ALLOWED_KEYS = {
@@ -67,10 +67,11 @@ def list_panes() -> List[Dict[str, str]]:
         if not line:
             continue
         parts = line.split("\t")
-        while len(parts) < 4:
+        while len(parts) < 5:
             parts.append("")
         panes.append(
-            {"id": parts[0], "target": parts[1], "cmd": parts[2], "title": parts[3]}
+            {"id": parts[0], "target": parts[1], "cmd": parts[2],
+             "title": parts[3], "window": parts[4]}
         )
     return panes
 

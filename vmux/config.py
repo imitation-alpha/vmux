@@ -41,6 +41,7 @@ DEFAULT_ERROR_PATTERNS = [
 # Limits for UI-supplied detector patterns (the editor holds the token, so this
 # guards against fat-finger mistakes, not malice).
 PANE_KINDS = {"claude-code", "generic", "shell"}
+NAMING_MODES = {"title", "window", "target", "command"}
 MAX_PATTERNS = 40
 MAX_PATTERN_LEN = 200
 
@@ -60,6 +61,7 @@ class Config:
     poll_interval: float = 0.7
     auto_discover: bool = True
     include_shells: bool = False
+    naming_mode: str = "title"   # title | window | target | command
     overrides: Dict[str, PaneOverride] = field(default_factory=dict)  # keyed by target
     generic_prompt_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_GENERIC_PROMPTS))
     error_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_ERROR_PATTERNS))
@@ -84,6 +86,7 @@ class Config:
             "poll_interval": self.poll_interval,
             "auto_discover": self.auto_discover,
             "include_shells": self.include_shells,
+            "naming_mode": self.naming_mode,
             "overrides": [
                 {"target": o.target, "name": o.name, "kind": o.kind}
                 for o in self.overrides.values()
@@ -106,6 +109,11 @@ class Config:
             self.auto_discover = bool(data["auto_discover"])
         if "include_shells" in data:
             self.include_shells = bool(data["include_shells"])
+        if "naming_mode" in data:
+            m = data["naming_mode"]
+            if m not in NAMING_MODES:
+                raise ValueError("bad naming_mode: %s" % m)
+            self.naming_mode = m
         if "overrides" in data:
             ov: Dict[str, PaneOverride] = {}
             for e in (data["overrides"] or []):

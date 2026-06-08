@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -43,9 +43,9 @@
 
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { margin:0; height:100%; }
-  body { background:var(--bg); color:var(--label); overscroll-behavior:none;
+  body { background:var(--bg); color:var(--label); overscroll-behavior:none; overflow-x:hidden;
     font:15px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; -webkit-text-size-adjust:100%; }
   #root { height:100%; position:relative; z-index:0; }
   button { font:inherit; color:inherit; cursor:pointer; }
   .spacer { flex:1; }
@@ -128,7 +128,7 @@
   .chev { color:var(--label-3); }
 
   /* ===== macOS split view ===== */
-  .mac { display:grid; grid-template-columns:248px 1fr; height:100dvh; }
+  .mac { display:grid; grid-template-columns:248px 1fr; height:100%; }
   .sidebar { border-right:1px solid var(--separator); border-radius:0;
     display:flex; flex-direction:column; overflow:hidden; padding-top:env(safe-area-inset-top); }
   .sidebar-head { display:flex; align-items:center; gap:8px; padding:14px 16px 8px; }
@@ -149,12 +149,12 @@
   .src-row.sel { background:var(--accent); color:#fff; }
   .src-row.sel .src-target { color:rgba(255,255,255,.8); }
   .src-row.sel .dot { box-shadow:0 0 0 2px rgba(255,255,255,.5); }
-  .src-name { flex:1; font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .src-name { flex:1; min-width:0; font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .src-target { font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
   .content { display:flex; flex-direction:column; min-width:0; background:var(--bg-elevated); }
   .content-toolbar { display:flex; align-items:center; gap:10px; border-radius:0;
     padding:calc(env(safe-area-inset-top) + 13px) 18px 13px; border-bottom:1px solid var(--separator); }
-  .ct-title { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ct-title { min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ct-meta { font-size:12px; color:var(--label-3); font-variant-numeric:tabular-nums; }
   .content-scroll { flex:1; overflow:auto; padding:18px; }
 
@@ -176,7 +176,7 @@
   .palette-hint { padding:8px 14px; font-size:11px; color:var(--label-3); border-top:1px solid var(--separator); display:flex; gap:14px; }
 
   /* ===== iOS ===== */
-  .ios { height:100dvh; display:flex; flex-direction:column; }
+  .ios { height:100%; display:flex; flex-direction:column; }
   .ios-nav { position:fixed; top:0; left:0; right:0; z-index:20; padding-top:env(safe-area-inset-top);
     height:calc(env(safe-area-inset-top)); display:flex; align-items:flex-end; justify-content:center;
     background:transparent; transition:background .2s,height .2s; pointer-events:none; }
@@ -191,17 +191,17 @@
   .ios-summary { display:flex; gap:8px; flex-wrap:wrap; padding:6px 16px 14px; }
   .chip { font-size:13px; font-weight:600; padding:5px 11px; border-radius:20px; color:var(--label-2); }
   .chip.s-needs_input { background:color-mix(in srgb,var(--red) 16%,transparent); color:var(--red); }
-  .ios-grid { display:grid; grid-template-columns:1fr; gap:12px; padding:0 16px; }
-  @media (min-width:560px){ .ios-grid { grid-template-columns:1fr 1fr; } }
+  .ios-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; padding:0 16px; }
+  @media (min-width:560px){ .ios-grid { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
   .ios-bottom-pad { height:calc(env(safe-area-inset-bottom) + 92px); }
 
-  .card { background:var(--bg-elevated); border:.5px solid var(--separator);
+  .card { background:var(--bg-elevated); border:.5px solid var(--separator); min-width:0;
     border-left:3px solid var(--s,var(--gray)); border-radius:14px; padding:14px;
     box-shadow:0 1px 3px rgba(0,0,0,.06); transition:transform .12s; }
   .card:active { transform:scale(.98); }
   .card.s-needs_input { animation:pulse 1.6s ease-in-out infinite; }
   .card-top { display:flex; align-items:center; gap:8px; margin-bottom:3px; }
-  .card-name { flex:1; font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card-name { flex:1; min-width:0; font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card-meta { font-size:12px; color:var(--label-3); margin-bottom:8px; font-variant-numeric:tabular-nums; }
   .card-q { font-size:14px; margin:6px 0 10px; }
   .card-preview { font:11px/1.4 "SF Mono",ui-monospace,Menlo,monospace; color:var(--label-3);
@@ -220,14 +220,14 @@
   /* bottom sheet */
   .sheet-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:60; animation:fade .25s ease; }
   .sheet-scrim.closing { animation:fadeout .26s ease forwards; }
-  .sheet { position:fixed; left:0; right:0; bottom:0; max-height:92dvh; background:var(--bg-elevated);
+  .sheet { position:fixed; left:0; right:0; bottom:0; max-height:92%; background:var(--bg-elevated);
     border-radius:16px 16px 0 0; box-shadow:var(--shadow); display:flex; flex-direction:column;
     animation:slideup .34s cubic-bezier(.32,.72,0,1); transition:transform .3s cubic-bezier(.32,.72,0,1);
     padding-bottom:env(safe-area-inset-bottom); }
   .sheet-grab-zone { padding:8px 16px 4px; touch-action:none; }
   .grabber { width:38px; height:5px; border-radius:3px; background:var(--label-3); margin:0 auto 10px; }
   .sheet-head { display:flex; align-items:center; gap:10px; padding-bottom:12px; border-bottom:1px solid var(--separator); }
-  .sheet-title { flex:1; font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sheet-title { flex:1; min-width:0; font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sheet-scroll { overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:14px 16px 4px; }
 
   /* broadcast modal */
@@ -272,7 +272,7 @@
   .settings-panel { display:flex; flex-direction:column; overflow:hidden; }
   .settings-panel.mac { margin:auto; width:min(540px,94vw); max-height:86vh; border-radius:20px;
     animation:pop .18s cubic-bezier(.32,.72,0,1); }
-  .settings-panel.ios { margin-top:auto; width:100%; max-height:92dvh; border-radius:18px 18px 0 0;
+  .settings-panel.ios { margin-top:auto; width:100%; max-height:92%; border-radius:18px 18px 0 0;
     animation:slideup .32s cubic-bezier(.32,.72,0,1); }
   .settings-head { display:flex; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--separator); flex:none; }
   .settings-title { flex:1; font-size:18px; font-weight:700; }
@@ -782,6 +782,11 @@ function ServerSettings({cfg, err, patch, panes}){
       <//>
       <${Row} label="Auto-discover panes"><${Switch} on=${cfg.auto_discover} onChange=${v=>patch({auto_discover:v})} /><//>
       <${Row} label="Show idle shells"><${Switch} on=${cfg.include_shells} onChange=${v=>patch({include_shells:v})} /><//>
+      <${Row} label="Pane name" sub="default source — manual renames always win">
+        <${Seg} value=${cfg.naming_mode||"title"}
+          options=${[["title","Task"],["window","Window"],["target","ID"],["command","Cmd"]]}
+          onChange=${v=>patch({naming_mode:v})} />
+      <//>
     </div>
 
     <div class="set-group-title">Server · Agents</div>

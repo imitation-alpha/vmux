@@ -22,11 +22,27 @@ from .models import (
 )
 
 
-def _friendly_name(title: str, target: str) -> str:
-    t = (title or "").strip()
+def _strip_spinner(s: str) -> str:
+    t = (s or "").strip()
     while t and is_spinner(t[0]):
         t = t[1:].strip()
-    return t or target
+    return t
+
+
+def choose_name(mode, *, title, window, target, command, override_name):
+    """Pick a pane's display name. A manual override always wins; otherwise the
+    chosen source (spinner-stripped where it's a title); empty -> target."""
+    if override_name:
+        return override_name
+    if mode == "window":
+        cand = _strip_spinner(window)
+    elif mode == "target":
+        cand = target
+    elif mode == "command":
+        cand = (command or "").split("/")[-1]
+    else:  # "title" (default)
+        cand = _strip_spinner(title)
+    return cand or target
 
 
 def _hash(text: str) -> str:
@@ -88,8 +104,12 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
-            name = (override.name if override and override.name
-                    else _friendly_name(pane["title"], target))
+            name = choose_name(
+                self.cfg.naming_mode,
+                title=pane["title"], window=pane.get("window", ""),
+                target=target, command=pane["cmd"],
+                override_name=(override.name if override else None),
+            )
 
             st = PaneState(
                 id=pid,

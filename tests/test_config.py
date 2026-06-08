@@ -16,9 +16,18 @@ from vmux.models import KIND_GENERIC, STATUS_NEEDS_INPUT
 def test_editable_dict_has_expected_keys():
     d = config.Config().editable_dict()
     assert set(d) == {
-        "poll_interval", "auto_discover", "include_shells",
+        "poll_interval", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
     }
+
+
+def test_naming_mode():
+    c = config.Config()
+    assert c.naming_mode == "title"
+    c.apply_patch({"naming_mode": "window"})
+    assert c.naming_mode == "window"
+    with pytest.raises(ValueError):
+        c.apply_patch({"naming_mode": "bogus"})
 
 
 def test_poll_interval_clamped():
