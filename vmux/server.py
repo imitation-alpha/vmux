@@ -15,6 +15,9 @@ have to be URL-encoded):
 
 from __future__ import annotations
 
+import hmac
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
@@ -53,6 +56,10 @@ class BroadcastReq(BaseModel):
     enter: bool = True
 
 
+class KillReq(BaseModel):
+    id: str
+
+
 def create_app(cfg: Config) -> FastAPI:
     hub = Hub(cfg)
 
@@ -72,7 +79,8 @@ def create_app(cfg: Config) -> FastAPI:
     def require_auth(authorization: Optional[str] = Header(None)):
         if not cfg.token:
             return
-        if authorization != "Bearer " + cfg.token:
+        expected = "Bearer " + cfg.token
+        if not (authorization and hmac.compare_digest(authorization, expected)):
             raise HTTPException(status_code=401, detail="bad or missing token")
 
     def _resolve(pane_id: str) -> str:
@@ -156,14 +164,29 @@ def create_app(cfg: Config) -> FastAPI:
         hub.kick()                             # apply on the next (immediate) poll
         return _config_payload()
 
+    @app.get("/api/sessions")
+    def get_sessions(_=Depends(require_auth)):
+        return {"sessions": hub.sessions()}
+
+    @app.post("/api/sessions/kill")
+    async def kill_session(req: KillReq, _=Depends(require_auth)):
+        if not await hub.kill_client(req.id):
+            raise HTTPException(status_code=404, detail="unknown session")
+        return {"ok": True}
+
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
-        if cfg.token and websocket.query_params.get("token") != cfg.token:
+        token = websocket.query_params.get("token", "") or ""
+        if cfg.token and not hmac.compare_digest(token, cfg.token):
             await websocket.close(code=1008)
             return
         await websocket.accept()
-        hub.clients.add(websocket)
+        sid = uuid.uuid4().hex[:8]
+        ip = websocket.client.host if websocket.client else "?"
+        ua = websocket.headers.get("user-agent", "")
+        hub.add_client(sid, websocket, ip, ua, time.time())
         try:
+            await websocket.send_json({"type": "hello", "sid": sid})
             await websocket.send_json(hub.snapshot())
             while True:
                 await websocket.receive_text()  # keepalive / disconnect detection
@@ -172,7 +195,7 @@ def create_app(cfg: Config) -> FastAPI:
         except Exception:
             pass
         finally:
-            hub.clients.discard(websocket)
+            hub.remove_client(sid)
 
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

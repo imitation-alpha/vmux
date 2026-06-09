@@ -2,15 +2,16 @@
 // Strategy: network-first so updates always win; fall back to cache when offline.
 // API and websocket traffic is never cached.
 
-const CACHE = "vmux-v9";
+const CACHE = "vmux-v11";
 const SHELL = [
   "/",
   "/index.html",
   "/manifest.webmanifest",
   "/icon.svg",
-  "https://unpkg.com/react@18/umd/react.production.min.js",
-  "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
-  "https://unpkg.com/htm@3/dist/htm.umd.js",
+  "/loaders.js",
+  "/vendor/react.production.min.js",
+  "/vendor/react-dom.production.min.js",
+  "/vendor/htm.umd.js",
 ];
 
 self.addEventListener("install", (e) => {

@@ -57,6 +57,28 @@ def test_bad_regex_rejected():
         config.Config().apply_patch({"generic_prompt_patterns": ["("]})  # unbalanced paren
 
 
+def test_catastrophic_regex_rejected():
+    c = config.Config()
+    for bad in [r"(a+)+$", r"(.*)*", r"(a+){2,}", r"(\d+)+"]:
+        with pytest.raises(ValueError):
+            c.apply_patch({"generic_prompt_patterns": [bad]})
+    # the shipped defaults must still pass the guard
+    c.apply_patch({"generic_prompt_patterns": list(config.DEFAULT_GENERIC_PROMPTS),
+                   "error_patterns": list(config.DEFAULT_ERROR_PATTERNS)})
+
+
+def test_alternation_redos_is_time_bounded():
+    # (a|a)+$ slips past the nested-quantifier linter but backtracks
+    # catastrophically. The regex-module timeout in detect() must keep this
+    # from hanging the poll loop — detect should return promptly, not wedge.
+    from vmux.detectors import detect
+    from vmux.models import KIND_GENERIC
+    c = config.Config()
+    c.apply_patch({"generic_prompt_patterns": [r"(a|a)+$"]})
+    res = detect("trigger:\n" + ("a" * 44) + "X", KIND_GENERIC, False, c, "")
+    assert res is not None  # returned at all == the timeout fired instead of hanging
+
+
 def test_too_many_patterns_rejected():
     with pytest.raises(ValueError):
         config.Config().apply_patch({"error_patterns": ["x"] * (config.MAX_PATTERNS + 1)})

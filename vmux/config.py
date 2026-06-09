@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
+
+import regex          # supports per-call timeout= for bounded-time matching
+import yaml
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-
-import yaml
 
 DEFAULT_GENERIC_PROMPTS = [
     r"\(y/n\)",
@@ -44,6 +45,12 @@ PANE_KINDS = {"claude-code", "generic", "shell"}
 NAMING_MODES = {"title", "window", "target", "command"}
 MAX_PATTERNS = 40
 MAX_PATTERN_LEN = 200
+
+# Crude ReDoS guard: reject a group containing * or + that is itself quantified —
+# e.g. (a+)+, (.*)*, (a+){2,} — the dominant catastrophic-backtracking shape.
+# Not exhaustive (a determined token-holder can still craft one, but they already
+# have shell access), but it blocks the realistic fat-finger / content-trigger case.
+_NESTED_QUANT = re.compile(r"\([^()]*[*+][^()]*\)\s*[*+{]")
 
 
 @dataclass
@@ -77,8 +84,9 @@ class Config:
         self._recompile()
 
     def _recompile(self) -> None:
-        self.generic_re = [re.compile(p) for p in self.generic_prompt_patterns]
-        self.error_re = [re.compile(p, re.MULTILINE) for p in self.error_patterns]
+        # compiled with the `regex` module so detectors can match with a timeout=
+        self.generic_re = [regex.compile(p) for p in self.generic_prompt_patterns]
+        self.error_re = [regex.compile(p, regex.MULTILINE) for p in self.error_patterns]
 
     # -- the slice the Settings UI may read/write ------------------------- #
     def editable_dict(self) -> dict:
@@ -140,9 +148,11 @@ class Config:
                     p = str(p)
                     if len(p) > MAX_PATTERN_LEN:
                         raise ValueError("pattern too long (max %d chars)" % MAX_PATTERN_LEN)
+                    if _NESTED_QUANT.search(p):
+                        raise ValueError("rejected possibly-catastrophic regex (nested quantifier): %r" % p)
                     try:
-                        re.compile(p)
-                    except re.error as exc:
+                        regex.compile(p)
+                    except regex.error as exc:
                         raise ValueError("bad regex %r: %s" % (p, exc))
                     clean.append(p)
                 setattr(self, key, clean)

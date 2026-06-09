@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from . import tmux
 from .config import Config
@@ -54,7 +54,7 @@ class Hub:
         self.cfg = cfg
         self.states: Dict[str, PaneState] = {}
         self.order: List[str] = []
-        self.clients: Set = set()
+        self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self._wake = asyncio.Event()
         self._stop = False
@@ -156,13 +156,38 @@ class Hub:
             return
         payload = self.snapshot()
         dead = []
-        for ws in list(self.clients):
+        for sid, c in list(self.clients.items()):
             try:
-                await ws.send_json(payload)
+                await c["ws"].send_json(payload)
             except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.clients.discard(ws)
+                dead.append(sid)
+        for sid in dead:
+            self.clients.pop(sid, None)
+
+    # -- client/session tracking ------------------------------------------ #
+    def add_client(self, sid, ws, ip, ua, ts):
+        self.clients[sid] = {"ws": ws, "ip": ip, "ua": ua, "ts": ts}
+
+    def remove_client(self, sid):
+        self.clients.pop(sid, None)
+
+    def sessions(self):
+        now = time.time()
+        return [
+            {"id": sid, "ip": c["ip"], "ua": c["ua"], "age": round(now - c["ts"], 1)}
+            for sid, c in self.clients.items()
+        ]
+
+    async def kill_client(self, sid):
+        c = self.clients.get(sid)
+        if not c:
+            return False
+        try:
+            await c["ws"].close(code=4001)
+        except Exception:
+            pass
+        self.clients.pop(sid, None)
+        return True
 
     # -- action helpers (used by the API) ---------------------------------- #
     def resolve_id(self, pane_id: str) -> Optional[str]:

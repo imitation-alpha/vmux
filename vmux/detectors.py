@@ -59,6 +59,20 @@ _OPTION_RE = re.compile(r"^(?P<cur>[❯»▶➤>*])?\s*(?P<num>\d+)[.)]\s+(?P<la
 _SELECT_CURSORS = "❯»▶➤>*"
 
 
+# Hard wall-clock cap for matching user-supplied patterns. The `regex` module
+# raises TimeoutError if a single match exceeds this — so even a catastrophic
+# pattern (any shape, incl. alternation overlap the linter can't catch) can't
+# wedge the poll loop. On timeout we treat it as "no match".
+_RX_TIMEOUT = 0.05
+
+
+def _safe_search(rx, text):
+    try:
+        return rx.search(text, timeout=_RX_TIMEOUT)
+    except TimeoutError:
+        return None
+
+
 @dataclass
 class DetectResult:
     status: str
@@ -203,8 +217,9 @@ def _generic_needs_input(lines: List[str], cfg) -> Tuple[Optional[str], List[Men
     # check the last few lines for a prompt pattern
     tail = lines[-6:]
     for ln in reversed(tail):
+        capped = ln[:2000]   # cap input fed to user-configurable regexes (ReDoS defense)
         for rx in cfg.generic_re:
-            if rx.search(ln):
+            if _safe_search(rx, capped):
                 return _clean(ln) or ln.strip(), _build_generic_menu(ln)
     return None, []
 
@@ -214,8 +229,9 @@ def _generic_needs_input(lines: List[str], cfg) -> Tuple[Optional[str], List[Men
 # --------------------------------------------------------------------------- #
 
 def _has_error(text: str, cfg) -> bool:
-    tail = "\n".join(text.splitlines()[-15:])
-    return any(rx.search(tail) for rx in cfg.error_re)
+    # cap input length fed to user-configurable regexes (defense against ReDoS)
+    tail = "\n".join(text.splitlines()[-15:])[-4000:]
+    return any(_safe_search(rx, tail) for rx in cfg.error_re)
 
 
 def detect(text: str, kind: str, changed: bool, cfg, title: str = "") -> DetectResult:
