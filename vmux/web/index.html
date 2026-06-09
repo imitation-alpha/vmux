@@ -114,8 +114,6 @@
   .empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
     height:100%; color:var(--label-3); gap:10px; font-size:15px; }
   .empty-glyph { font-size:42px; opacity:.5; }
-  .loader-curve { width:64px; height:64px; opacity:.6; }
-  .loader-curve svg { width:100%; height:100%; display:block; }
 
   /* iOS grouped inset list */
   .ios-group { background:var(--bg-secondary); border-radius:12px; overflow:hidden; margin-bottom:14px; }
@@ -331,7 +329,6 @@
 <script src="/vendor/react.production.min.js"></script>
 <script src="/vendor/react-dom.production.min.js"></script>
 <script src="/vendor/htm.umd.js"></script>
-<script src="/loaders.js"></script>
 <script>
 const { useState, useEffect, useRef, useMemo } = React;
 const F = React.Fragment;
@@ -343,7 +340,7 @@ if (TOKEN) localStorage.setItem("vmux_token", TOKEN);
 
 // ---- browser-local preferences (Settings page) ----
 const PREFS_KEY = "vmux_prefs";
-const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", loader:"original" };
+const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all" };
 let PREFS = (function(){ try { return {...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")}; } catch(e){ return {...DEFAULT_PREFS}; } })();
 const prefsSubs = new Set();
 function applyPrefs(p){
@@ -603,7 +600,7 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
           <span class="ct-meta">${sel.target} · ${sel.kind}</span>
         </div>
         <div class="content-scroll"><${DetailBody} pane=${sel} variant="mac" /></div>
-      <//>` : html`<div class="empty"><${Loader} label=${connected?"Select an agent  ·  ⌘K to jump":"Connecting…"} /></div>`}
+      <//>` : html`<div class="empty"><div class="empty-glyph">▦</div>${connected?"Select an agent  ·  ⌘K to jump":"Connecting…"}</div>`}
     </main>
     ${palette && html`<${Palette} panes=${panes} onPick=${id=>{ setSel(id); setPalette(false); }} onClose=${()=>setPalette(false)} />`}
   </div>`;
@@ -674,7 +671,7 @@ function IOSApp({panes, connected, onBroadcast, onSettings}){
         ${counts.idle?html`<span class="chip glass">${counts.idle} idle</span>`:null}
       </div>
       ${sorted.length===0
-        ? html`<div class="empty" style=${{height:"50vh"}}><${Loader} label=${connected?"No agents":"Connecting…"} /></div>`
+        ? html`<div class="empty" style=${{height:"50vh"}}><div class="empty-glyph">▦</div>${connected?"No agents":"Connecting…"}</div>`
         : html`<div class="ios-grid">
             ${sorted.map(p=>html`<${IOSCard} key=${p.id} pane=${p} onOpen=${()=>setOpen(p.id)} />`)}
           </div>`}
@@ -724,25 +721,6 @@ function TokenGate(){
       <button class="btn accent gate-btn" onClick=${save}>Connect</button>
     </div>
   </div>`;
-}
-
-/* ===================== Loaders ===================== */
-// Animated math-curve loader for empty states; "classic" falls back to the ▦ glyph.
-// Curve engine: /loaders.js (see https://github.com/Paidax01/math-curve-loaders).
-function Loader({label}){
-  const prefs=usePrefs();
-  const ref=useRef(null);
-  useEffect(()=>{
-    if(prefs.loader==="classic" || !window.VmuxLoaders || !ref.current) return;
-    const stop=window.VmuxLoaders.mount(ref.current, prefs.loader);
-    return stop;
-  },[prefs.loader]);
-  return html`<${F}>
-    ${prefs.loader==="classic"
-      ? html`<div class="empty-glyph">▦</div>`
-      : html`<div class="loader-curve" ref=${ref}></div>`}
-    ${label}
-  <//>`;
 }
 
 /* ===================== Settings ===================== */
@@ -885,10 +863,6 @@ function SettingsContent({panes}){
         options=${[["auto","Auto"],["light","Light"],["dark","Dark"]]} onChange=${v=>setPrefs({theme:v})} /><//>
       <${Row} label="Liquid Glass" sub="translucent bars & sheets"><${Switch} on=${prefs.glass} onChange=${v=>setPrefs({glass:v})} /><//>
       <${Row} label="Ambient motion" sub="moving background — off saves battery"><${Switch} on=${prefs.ambient} onChange=${v=>setPrefs({ambient:v})} /><//>
-      <${Row} label="Loading animation" sub="math-curve loaders · github.com/Paidax01/math-curve-loaders">
-        <${Seg} value=${prefs.loader}
-          options=${[["original","Thinking"],["rose","Rose"],["lissajous","Lissajous"],["lemniscate","Lemniscate"],["hypotrochoid","Spiro"],["cardioid","Cardioid"],["classic","▦"]]}
-          onChange=${v=>setPrefs({loader:v})} /><//>
     </div>
 
     <div class="set-group-title">Notifications</div>

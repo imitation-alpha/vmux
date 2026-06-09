@@ -2,13 +2,12 @@
 // Strategy: network-first so updates always win; fall back to cache when offline.
 // API and websocket traffic is never cached.
 
-const CACHE = "vmux-v11";
+const CACHE = "vmux-v12";
 const SHELL = [
   "/",
   "/index.html",
   "/manifest.webmanifest",
   "/icon.svg",
-  "/loaders.js",
   "/vendor/react.production.min.js",
   "/vendor/react-dom.production.min.js",
   "/vendor/htm.umd.js",
