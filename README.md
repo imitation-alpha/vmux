@@ -1,125 +1,91 @@
 # vmux
 
-**Drive your Claude Code / Codex / Gemini CLI swarm from your phone.**
+**An attention router for your CLI coding-agent swarm — drive Claude Code / Codex / Gemini from your phone.**
 
-When an agent stops to ask *"Do you want me to make this edit to `auth.py`?"*, `vmux` parses the dialog out of the tmux pane, ships the menu options to your phone, and lets you tap **Yes** from the couch — or the train, or a meeting room.
+When you run a swarm of CLI coding agents, the hard part isn't running them — it's knowing *which one needs you right now*, and answering it without diving into a terminal, hunting the pane, and reconstructing context. `vmux` reads your tmux panes, figures out each agent's state (idle / working / **needs input** / error / offline), parses the dialog an agent is blocked on, and ships the menu choices to your phone (or desktop) as tappable buttons. You tap **Yes** from the couch.
 
-It's the missing control panel for the [setup I wrote about here](https://imitation-alpha.github.io/blog/orchestrating-coding-agents.html) — running 10+ CLI coding agents in parallel without it collapsing into chaos.
+It's the missing control panel for [running 10+ coding agents in parallel](https://imitation-alpha.github.io/blog/orchestrating-coding-agents.html) without it collapsing into chaos.
 
-![vmux PWA — list of agent sessions, color-coded by status](docs/images/panel-list-view.jpg)
-![vmux PWA — open session detail with menu options and action keys](docs/images/panel-session-view.jpg)
+![vmux PWA — grid of agent sessions, color-coded by status](docs/images/panel-list-view.jpg)
+![vmux PWA — session detail with menu options and action keys](docs/images/panel-session-view.jpg)
 
----
-
-## ⭐ Star to vote — 100 stars unlocks the public release
-
-This repo is currently a placeholder. The prototype is real, runs on my machine every day, and is what powers my own ten-agent workflow — but it isn't yet packaged for other people.
-
-Polishing it into something installable, secure-by-default, documented, and supportable is roughly 5× the work of the prototype itself. Before I commit to that, I'd like a real signal that it's worth doing.
-
-**If this repo crosses 100 stars, I'll port the prototype into a polished open-source release.**
-
-If you'd use this — star the repo. GitHub will notify you the moment v0.1 ships. No mailing list, no DMs, no follow-up needed from you.
+> Like it? A ⭐ genuinely helps — it's the signal that keeps this maintained.
 
 ---
 
-## What the prototype does today
+## Install
 
-A small FastAPI server reads and writes tmux panes; a single-file React PWA renders the swarm in your browser.
+vmux needs **tmux** and **Python 3.9+**.
 
-### Grid view — every agent at a glance
+```bash
+# from GitHub (works today)
+pipx install git+https://github.com/imitation-alpha/vmux
 
-One card per CLI agent, color-coded by what it's doing:
+# once published to PyPI
+pipx install vmux
+```
 
-- 🟢 **Idle** — at a shell prompt
-- 🟡 **Working** — output is scrolling
-- 🔴 **Needs input** — a dialog is waiting (pulsing border, tappable menu buttons right on the card)
-- 🟠 **Error** — recent traceback or error pattern detected
-- ⚫ **Offline** — tmux pane gone
+(`pip install` works too; `pipx`/`uv` just keep it isolated.)
 
-### Dialog parsing, not screen-scraping
+## Quickstart
 
-For Claude Code specifically, `vmux` parses the TUI box characters (`╭ ╰ │ ❯`) out of the pane and surfaces the menu choices as native buttons. You tap **Accept** / **Reject** / **Edit** without ever touching arrow keys.
+```bash
+vmux
+```
 
-Agents that aren't Claude Code (a long-running build, a Codex shell, a Gemini CLI) fall back to regex detection on configurable patterns: `(y/n)`, `Do you want to…`, `Press enter to…`, etc.
+Open **http://127.0.0.1:8787**. That's it — vmux auto-discovers every tmux pane, classifies each as `claude-code` / `generic` / `shell`, and shows your agents. No config required. (Idle plain shells are hidden by default; `vmux --include-shells` shows them.)
 
-### Detail view — drive the session
+## Reach it from your phone
 
-Tap a card and you get:
+vmux binds `127.0.0.1` on purpose. Two safe ways to your phone:
 
-- the full pane output, with diff highlighting
-- menu-option buttons when a Claude dialog is active
-- a text input with voice dictation (where the platform supports it)
-- an action row: `Ctrl+C`, `Esc`, arrows, `Tab`, `Enter`
+- **[Tailscale](https://tailscale.com) (easiest):**
+  ```bash
+  vmux --host 0.0.0.0 --token "$(openssl rand -hex 16)"
+  ```
+  then open `http://<machine-name>.<tailnet>.ts.net:8787/?token=<that-token>` on your phone. If the browser doesn't have the token, vmux shows a paste-token screen.
+- **SSH tunnel:** `ssh -L 8787:localhost:8787 you@box`, then open `http://localhost:8787` on the phone.
 
-No SSH attach, no `<C-b> s` dance, no scrollback hunt.
+`--host 0.0.0.0` with an empty token is a hard error, by design — see [SECURITY.md](SECURITY.md). Install it as an app via "Add to Home Screen"; it runs full-screen and notifies you when an agent needs you.
 
-### Broadcast
+See [QUICKSTART.md](QUICKSTART.md) for the longer walkthrough.
 
-Select a subset of agents on the home screen and send the same prompt to all of them. Useful for *"run the test suite"*, *"summarize what you changed"*, *"stand by, I'm switching machines"*.
+## What it does
 
-### Notifications
+- **Triage grid / sidebar** — one card per agent, color-coded and ordered so the ones that need you float to the top: 🔴 needs input · 🟠 error · 🟡 working · 🟢 idle · ⚫ offline.
+- **Dialog parsing, not screen-scraping** — for Claude Code, vmux parses the TUI selection box (`╭ │ ❯`) and turns the choices into native buttons. You tap **Yes / No / Edit** without arrow keys. Other agents fall back to configurable regex (`(y/n)`, "Do you want to…", "Press enter to…").
+- **Detail view** — full pane output, the menu, a text box, and an action row (`Ctrl+C`, `Esc`, `Tab`, arrows, `Enter`).
+- **Broadcast** — send one message to several agents at once.
+- **Settings** — theme (auto/light/dark), Liquid Glass on/off, notifications/sound, and live server config: poll interval, discovery, per-agent rename/kind, detector patterns, and how pane names are derived.
+- **Connected sessions** — see every device connected and disconnect any of them.
+- **Native feel** — a platform-adaptive PWA: macOS sidebar split-view on desktop, iOS bottom-sheet on mobile, Apple "Liquid Glass" styling, light/dark.
+- **Stays on your network** — localhost by default, bearer token for LAN/Tailscale, no cloud, no account, no telemetry.
 
-When any agent transitions to **needs input**, a beep plays and the page title flips to `(!) vmux`. With permission granted, a system notification fires while the tab is backgrounded — so you can put the phone down and trust it'll find you.
+## How it works
 
-### Stays on your network
+- **Backend** — FastAPI + WebSocket. Polls each tmux pane (`tmux capture-pane`) ~every 500 ms, runs detectors, broadcasts state diffs. Sends keystrokes back via `tmux send-keys -l` (literal, shell-safe). User-supplied detector regexes run with a hard timeout, so a bad pattern can't wedge the loop.
+- **Frontend** — a single HTML file with React + htm (vendored, no CDN, no build step), installable as a PWA.
+- **Config** — none needed (auto-discovery). Optional `config.yaml` and a live Settings UI; UI edits persist to an overlay file so your hand-authored config stays intact.
 
-- Default bind is `127.0.0.1` — meant to be reached via SSH tunnel or [Tailscale](https://tailscale.com).
-- LAN mode requires a bearer token. Empty token + `0.0.0.0` is a fail-fast error, not a footgun.
-- No cloud, no account, no telemetry. Your sessions stay on your hardware.
+More detail for contributors: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
----
+## Configuration
 
-## What's missing for a v1
+```bash
+cp config.example.yaml config.yaml
+vmux -c config.yaml
+```
 
-These are the items I'd tackle if the star threshold hits — roughly in priority order:
+See `config.example.yaml` for bind host/port, token, poll interval, discovery, pinned panes, and detector patterns. Everything there is also editable live from the in-app **Settings** (written to an overlay, never to your `config.yaml`).
 
-1. **One-command install.** Today it's `pip install -r requirements.txt`, hand-edit `config.yaml`, find pane targets via `tmux list-panes`. v1 should be a single binary or `pipx install vmux` plus auto-discovery of running agents.
-2. **Cross-agent piping.** Let one agent read another's last N lines without copy-paste.
-3. **Linux + WSL parity.** Today's prototype assumes a macOS/Linux home box; the path defaults and clipboard integration need work elsewhere.
-4. **iOS PWA polish.** The PWA installs and runs, but Safari quirks (no Web Speech API, scroll-restoration weirdness, push limits) deserve a proper pass.
-5. **Pluggable agent kinds.** Today there are two: `claude-code` (TUI box parsing) and `generic` (regex). Adding Codex and Gemini CLI as first-class kinds with their own dialog parsers.
-6. **Auth that's nicer than a bearer token.** Probably WebAuthn / passkeys, scoped to a Tailscale tailnet.
-7. **A real test story across platforms** — the current 35 tests run against a live tmux, which is right, but only on macOS.
+## Status & roadmap
 
----
+Beta — runs daily on macOS, should work on Linux. Known gaps / next up: Linux/WSL path polish, dedicated Codex/Gemini dialog parsers (today they use the generic regex path), cross-agent piping, and smart triage/ranking (sort by *who needs you most*). Ideas and PRs welcome.
 
-## How it works (short version)
+## Contributing
 
-- **Backend:** FastAPI + WebSocket. Polls each configured tmux pane every ~500 ms via `tmux capture-pane`, runs detectors, broadcasts state diffs to connected clients. Sends keystrokes back via `tmux send-keys -l` (literal mode — shell-safe).
-- **Frontend:** Single HTML file with React via CDN. No build step, no bundler. Service worker caches the shell so it's installable as a PWA.
-- **Config:** YAML — list your tmux panes, name them, mark them `claude-code` or `generic`. That's it.
-
-The whole thing is intentionally small. It's plumbing between tmux and a phone, not a platform.
-
----
-
-## FAQ
-
-**Why not [tmate / Warp / Zellij / iSH / browser terminal X]?**
-Those put you back in a terminal. The point of `vmux` is *not* being in a terminal — it's a status surface tuned for *"I have ten agents running and want to know which one needs me right now."* Different problem, different UI.
-
-**Will it work with Codex / Gemini CLI / aider / [agent X]?**
-The prototype already handles them via `kind: generic` (regex on `(y/n)`, "Do you want to…", etc.). For v1, each one would get a dedicated dialog parser like Claude Code has today, so menu choices become tappable buttons instead of "type y and press enter."
-
-**Why a 100-star threshold instead of just shipping?**
-Honest answer: porting a personal-use tool into something installable, secure-by-default, documented, and supportable is roughly 5× the prototype work. I want a real signal that the time is justified.
-
-**What if it doesn't hit 100?**
-It stays a personal tool. The [accompanying blog post](https://imitation-alpha.github.io/blog/orchestrating-coding-agents.html) covers the rest of the setup, which is the 80% you can replicate today with off-the-shelf tools (tmux, Tailscale, Terminus, Oh-My-Tmux).
-
-**Is this just a SSH client?**
-No — an SSH client puts you in a shell. `vmux` reads tmux pane state, *interprets* it (idle / working / needs-input / error / offline), and gives you a tappable surface specifically for orchestrating multiple agents. The SSH client is the fallback when `vmux` can't help.
-
-**Will it work without Tailscale?**
-Yes. Tailscale is the easiest path because it gives you a stable hostname reachable from your phone without exposing anything publicly. Plain SSH tunneling works too. So does LAN mode with a bearer token, if you trust your WiFi.
-
----
+Contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup (`uv sync --extra dev`), tests, project layout, and how to add a new agent detector. Please also read the [Code of Conduct](CODE_OF_CONDUCT.md). For security issues, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT when the code lands.
-
-## Author
-
-[@imitation-alpha](https://github.com/imitation-alpha) · [X](https://x.com/imitation_alpha)
+[MIT](LICENSE) © imitation-alpha · [@imitation-alpha](https://github.com/imitation-alpha) · [X](https://x.com/imitation_alpha)
