@@ -47,6 +47,8 @@ class PaneState:
     lines: List[str] = field(default_factory=list)   # captured visible lines (detail view)
     updated: float = 0.0                      # epoch seconds of last *change*
     changed: bool = False                     # changed since previous poll (working hint)
+    window: str = ""                          # tmux window name (for the tree view)
+    pinned: bool = False                      # user-pinned (PaneOverride.pin)
 
     def preview(self, n: int = 6) -> List[str]:
         """Last n non-empty-ish lines, for the grid card snippet."""
@@ -67,4 +69,6 @@ class PaneState:
             "lines": self.lines,
             "updated": self.updated,
             "changed": self.changed,
+            "window": self.window,
+            "pinned": self.pinned,
         }

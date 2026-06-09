@@ -60,6 +60,11 @@ class KillReq(BaseModel):
     id: str
 
 
+class PinReq(BaseModel):
+    target: str
+    pinned: bool
+
+
 def create_app(cfg: Config) -> FastAPI:
     hub = Hub(cfg)
 
@@ -144,6 +149,7 @@ def create_app(cfg: Config) -> FastAPI:
             "token_set": bool(cfg.token),
             "version": app.version,
             "targets": [hub.states[pid].target for pid in hub.order if pid in hub.states],
+            "allowed_keys": sorted(tmux.ALLOWED_KEYS),
         }
         return d
 
@@ -172,6 +178,29 @@ def create_app(cfg: Config) -> FastAPI:
     async def kill_session(req: KillReq, _=Depends(require_auth)):
         if not await hub.kill_client(req.id):
             raise HTTPException(status_code=404, detail="unknown session")
+        return {"ok": True}
+
+    @app.post("/api/pin")
+    def post_pin(req: PinReq, _=Depends(require_auth)):
+        # merge the pin change into this target's override (preserving name/kind),
+        # persist to the overlay, apply on the next (immediate) poll
+        overrides = [
+            {"target": o.target, "name": o.name, "kind": o.kind, "pin": o.pin}
+            for o in cfg.overrides.values() if o.target != req.target
+        ]
+        cur = cfg.overrides.get(req.target)
+        overrides.append({
+            "target": req.target,
+            "name": cur.name if cur else None,
+            "kind": cur.kind if cur else None,
+            "pin": req.pinned,
+        })
+        try:
+            cfg.apply_patch({"overrides": overrides})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        save_overlay(cfg)
+        hub.kick()
         return {"ok": True}
 
     @app.websocket("/ws")

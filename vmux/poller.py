@@ -122,6 +122,8 @@ class Hub:
                 lines=text.splitlines(),
                 updated=updated,
                 changed=changed,
+                window=pane.get("window", ""),
+                pinned=bool(override and override.pin),
             )
             new_states[pid] = st
             new_order.append(pid)
@@ -137,6 +139,7 @@ class Hub:
                 name=ov.name or target,
                 kind=ov.kind or "generic",
                 status=STATUS_OFFLINE,
+                pinned=ov.pin,
             )
             new_order.append(pid)
 

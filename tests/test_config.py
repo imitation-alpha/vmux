@@ -47,6 +47,19 @@ def test_booleans_and_overrides():
     assert c.overrides["a:1.1"].kind == "generic"
 
 
+def test_override_pin_roundtrips():
+    c = config.Config()
+    c.apply_patch({"overrides": [{"target": "a:1.1", "pin": True}]})
+    assert c.overrides["a:1.1"].pin is True
+    assert c.editable_dict()["overrides"][0]["pin"] is True
+    # unpinning a pane that has no name/kind drops the override entirely
+    c.apply_patch({"overrides": [{"target": "a:1.1", "pin": False}]})
+    assert "a:1.1" not in c.overrides
+    # pin coexists with a rename
+    c.apply_patch({"overrides": [{"target": "b:1.1", "name": "X", "pin": True}]})
+    assert c.overrides["b:1.1"].pin is True and c.overrides["b:1.1"].name == "X"
+
+
 def test_bad_kind_rejected():
     with pytest.raises(ValueError):
         config.Config().apply_patch({"overrides": [{"target": "a:1.1", "kind": "nope"}]})
