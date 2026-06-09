@@ -7,4 +7,4 @@ The whole tool is one pipeline:
     deliver -> put it on whatever screen you're at        (web UI + notifications)
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

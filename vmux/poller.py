@@ -73,7 +73,6 @@ class Hub:
     # -- one polling pass --------------------------------------------------- #
     async def poll_once(self) -> None:
         panes = await asyncio.to_thread(tmux.list_panes)
-        by_id = {p["id"]: p for p in panes}
         present_targets = {p["target"] for p in panes}
 
         # capture all panes concurrently

@@ -27,11 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import tmux
+from . import __version__, tmux
 from .config import Config, save_overlay
 from .poller import Hub
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+WEB_DIR = Path(__file__).resolve().parent / "web"   # packaged inside vmux/ so it ships in the wheel
 
 
 class KeyReq(BaseModel):
@@ -73,7 +73,7 @@ def create_app(cfg: Config) -> FastAPI:
             hub.stop()
             task.cancel()
 
-    app = FastAPI(title="vmux", version="0.0.1", lifespan=lifespan)
+    app = FastAPI(title="vmux", version=__version__, lifespan=lifespan)
     app.state.hub = hub
 
     def require_auth(authorization: Optional[str] = Header(None)):

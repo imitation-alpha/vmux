@@ -9,11 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
-
-import regex          # supports per-call timeout= for bounded-time matching
-import yaml
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+import regex  # supports per-call timeout= for bounded-time matching
+import yaml
 
 DEFAULT_GENERIC_PROMPTS = [
     r"\(y/n\)",

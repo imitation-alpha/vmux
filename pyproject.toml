@@ -1,10 +1,35 @@
 [project]
 name = "vmux"
-version = "0.0.1"
-description = "Attention router for a swarm of CLI coding agents running in tmux."
+version = "0.1.0"
+description = "Attention router for a swarm of CLI coding agents running in tmux — drive your Claude Code / Codex / Gemini swarm from your phone."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "imitation-alpha" }]
+keywords = [
+    "tmux", "claude-code", "codex", "gemini", "ai-agents", "coding-agents",
+    "pwa", "remote-control", "fastapi", "terminal", "orchestration",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Terminals",
+    "Topic :: Utilities",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -13,7 +38,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/imitation-alpha/vmux"
+Repository = "https://github.com/imitation-alpha/vmux"
+Issues = "https://github.com/imitation-alpha/vmux/issues"
+Changelog = "https://github.com/imitation-alpha/vmux/blob/main/CHANGELOG.md"
+Blog = "https://imitation-alpha.github.io/blog/orchestrating-coding-agents.html"
 
 [project.scripts]
 vmux = "vmux.__main__:main"
@@ -25,5 +57,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["vmux"]
 
+[tool.hatch.build.targets.sdist]
+include = ["vmux", "tests", "config.example.yaml", "README.md", "LICENSE", "CHANGELOG.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+# Real issues only (errors, pyflakes, import order) — not style modernization,
+# to keep the contributor bar low on a deliberately small, 3.9-simple codebase.
+select = ["E", "F", "I"]
+ignore = ["E501"]   # long lines are fine here
