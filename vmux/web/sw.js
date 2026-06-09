@@ -2,7 +2,7 @@
 // Strategy: network-first so updates always win; fall back to cache when offline.
 // API and websocket traffic is never cached.
 
-const CACHE = "vmux-v12";
+const CACHE = "vmux-v13";
 const SHELL = [
   "/",
   "/index.html",

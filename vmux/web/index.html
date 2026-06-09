@@ -104,7 +104,20 @@
     padding:7px 11px; font-size:13px; min-width:42px; }
   .keycap:active { transform:translateY(1px); }
   @media (hover:hover){ .keycap:hover { background:var(--fill); } }
-  .composer { display:flex; gap:8px; }
+  .composer { display:flex; gap:8px; align-items:center; }
+  .snip-wrap { position:relative; flex:none; }
+  .snip-btn { width:42px; height:42px; border-radius:10px; background:var(--bg-secondary);
+    border:1px solid var(--separator); font-size:17px; color:var(--label-2); }
+  .snip-btn:active { transform:translateY(1px); }
+  @media (hover:hover){ .snip-btn:hover { background:var(--fill); } }
+  .snip-menu { position:absolute; bottom:calc(100% + 8px); left:0; min-width:180px; max-width:64vw;
+    max-height:46vh; overflow:auto; padding:6px; border-radius:12px; background:var(--bg-elevated);
+    border:1px solid var(--separator); box-shadow:var(--shadow); z-index:50; display:flex; flex-direction:column; gap:2px; }
+  .snip-item { text-align:left; padding:9px 11px; border-radius:8px; font-size:14px; color:var(--label);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  @media (hover:hover){ .snip-item:hover { background:var(--fill); } }
+  .snip-item:active { background:var(--fill); }
+  .snip-empty { padding:9px 11px; font-size:13px; color:var(--label-3); }
   .field { flex:1; background:var(--bg); border:1px solid var(--separator); border-radius:10px;
     padding:10px 12px; font-size:15px; color:var(--label); outline:none; }
   .field:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent); }
@@ -289,6 +302,13 @@
   .set-input { background:var(--bg); border:1px solid var(--separator); border-radius:8px; padding:7px 10px;
     font-size:14px; color:var(--label); outline:none; width:140px; }
   .set-input:focus { border-color:var(--accent); }
+  .kb-edit-row { gap:6px; }
+  .kb-edit-row .kb-label { flex:1; min-width:0; width:auto; }
+  .kb-edit-row .kb-key { flex:none; width:96px; }
+  .kb-mini { width:30px; height:30px; flex:none; font-size:14px; border-radius:7px; color:var(--label-2); }
+  .kb-mini:disabled { opacity:.3; }
+  .kb-mini.danger { color:var(--red); }
+  .kb-foot { gap:10px; }
   .set-area { width:100%; min-height:96px; resize:vertical; background:var(--bg); border:1px solid var(--separator);
     border-radius:10px; padding:10px 12px; color:var(--label); font:12px/1.45 "SF Mono",ui-monospace,Menlo,monospace; outline:none; }
   .set-err { color:var(--red); font-size:12.5px; margin:8px 4px 0; }
@@ -338,9 +358,15 @@ const TOKEN = new URLSearchParams(location.search).get("token")
   || localStorage.getItem("vmux_token") || "";
 if (TOKEN) localStorage.setItem("vmux_token", TOKEN);
 
+// Default shortcut-key buttons (label, tmux key). Keys must be in the server allowlist.
+const DEFAULT_ACTIONS = [["CTRL+C","C-c"],["ESC","Escape"],["TAB","Tab"],["⇧TAB","BTab"],["↵","Enter"],["↑","Up"],["↓","Down"],["^R","C-r"],["^O","C-o"],["^E","C-e"]];
+// Client-side mirror of vmux/tmux.py ALLOWED_KEYS — used as a fallback before /api/config loads.
+const FALLBACK_KEYS = ["BSpace","BTab","C-a","C-c","C-d","C-e","C-k","C-l","C-n","C-o","C-p","C-r","C-u","C-w","C-z","Down","End","Enter","Escape","Home","Left","PageDown","PageUp","Right","Space","Tab","Up"];
+const DEFAULT_SNIPPETS = ["continue","yes","no"];
+
 // ---- browser-local preferences (Settings page) ----
 const PREFS_KEY = "vmux_prefs";
-const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all" };
+const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", actions:DEFAULT_ACTIONS, snippets:DEFAULT_SNIPPETS };
 let PREFS = (function(){ try { return {...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")}; } catch(e){ return {...DEFAULT_PREFS}; } })();
 const prefsSubs = new Set();
 function applyPrefs(p){
@@ -358,7 +384,6 @@ function usePrefs(){ const [,f]=useState(0); useEffect(()=>{ const fn=()=>f(x=>x
 const ORDER = { needs_input:0, error:1, working:2, idle:3, offline:4 };
 const STATUS_LABEL = { needs_input:"Needs input", error:"Error", working:"Working", idle:"Idle", offline:"Offline" };
 const GROUP_LABEL = { needs_input:"Needs you", error:"Error", working:"Working", idle:"Idle", offline:"Offline" };
-const ACTIONS = [["Ctrl+C","C-c"],["Esc","Escape"],["Tab","Tab"],["Enter","Enter"],["↑","Up"],["↓","Down"],["←","Left"],["→","Right"]];
 
 async function api(path, body, method) {
   const headers = { "Content-Type":"application/json" };
@@ -475,10 +500,28 @@ function Menu({pane, variant}){
 }
 
 function Composer({pane}){
+  const prefs=usePrefs();
   const [text,setText]=useState("");
+  const [snipOpen,setSnipOpen]=useState(false);
   const send=(enter)=>{ if(!text&&!enter) return; act.text(pane,text,enter).then(()=>setText("")).catch(()=>{}); };
+  const snippets=prefs.snippets||[];
+  const pick=(s)=>{ setText(t=>t?t+s:s); setSnipOpen(false); };
+  useEffect(()=>{ if(!snipOpen) return;
+    const onDoc=(e)=>{ if(!e.target.closest||!e.target.closest(".snip-wrap")) setSnipOpen(false); };
+    const onKey=(e)=>{ if(e.key==="Escape") setSnipOpen(false); };
+    document.addEventListener("mousedown",onDoc); document.addEventListener("keydown",onKey);
+    return ()=>{ document.removeEventListener("mousedown",onDoc); document.removeEventListener("keydown",onKey); };
+  },[snipOpen]);
   return html`<div class="composer">
-    <input class="field" name="message" autocomplete="off" placeholder="Message…" value=${text}
+    <div class="snip-wrap">
+      <button class="snip-btn" title="Snippets" onClick=${()=>setSnipOpen(o=>!o)} aria-label="Snippets">⧉</button>
+      ${snipOpen && html`<div class="snip-menu glass">
+        ${snippets.length
+          ? snippets.map((s,i)=>html`<button class="snip-item" key=${i} onClick=${()=>pick(s)}>${s}</button>`)
+          : html`<div class="snip-empty">No snippets — add in Settings</div>`}
+      </div>`}
+    </div>
+    <input class="field" name="message" autocomplete="off" placeholder="Type a message…" value=${text}
       onInput=${e=>setText(e.target.value)}
       onKeyDown=${e=>{ if(e.key==="Enter"){ e.preventDefault(); send(true); } }} />
     <button class="btn" onClick=${()=>send(false)}>Send</button>
@@ -487,12 +530,14 @@ function Composer({pane}){
 }
 
 function DetailBody({pane, variant}){
+  const prefs=usePrefs();
+  const actions=prefs.actions||DEFAULT_ACTIONS;
   return html`<${F}>
     ${pane.status==="needs_input" && pane.question && html`<div class="question">${pane.question}</div>`}
     <${Menu} pane=${pane} variant=${variant==="ios"?"rows":"buttons"} />
     <pre class="output">${(pane.lines||[]).join("\n") || "(no output)"}</pre>
     <div class="actions">
-      ${ACTIONS.map(([lbl,k])=>html`<button class="keycap" key=${k} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
+      ${actions.map(([lbl,k],i)=>html`<button class="keycap" key=${i} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
     </div>
     <${Composer} pane=${pane} />
   <//>`;
@@ -852,9 +897,60 @@ function SessionsSection(){
   <//>`;
 }
 
+// immutable array helpers for the list editors
+const arrMove=(a,i,d)=>{ const j=i+d; if(j<0||j>=a.length) return a; const b=a.slice(); const t=b[i]; b[i]=b[j]; b[j]=t; return b; };
+const arrRemove=(a,i)=> a.filter((_,k)=>k!==i);
+const arrSet=(a,i,v)=> a.map((x,k)=>k===i?v:x);
+
+function ShortcutEditor({prefs, allowedKeys}){
+  const actions=prefs.actions||DEFAULT_ACTIONS;
+  const save=(next)=>setPrefs({actions:next});
+  return html`<${F}>
+    <div class="set-group-title">Shortcut buttons</div>
+    <div class="set-group">
+      ${actions.map(([lbl,k],i)=>html`<div class="set-row kb-edit-row" key=${i}>
+        <input class="set-input kb-label" placeholder="Label" value=${lbl}
+          onInput=${e=>save(arrSet(actions,i,[e.target.value,k]))} />
+        <select class="set-input kb-key" value=${k} onChange=${e=>save(arrSet(actions,i,[lbl,e.target.value]))}>
+          ${allowedKeys.map(ak=>html`<option key=${ak} value=${ak} selected=${ak===k}>${ak}</option>`)}
+        </select>
+        <button class="iconbtn kb-mini" title="Move up" disabled=${i===0} onClick=${()=>save(arrMove(actions,i,-1))}>↑</button>
+        <button class="iconbtn kb-mini" title="Move down" disabled=${i===actions.length-1} onClick=${()=>save(arrMove(actions,i,1))}>↓</button>
+        <button class="iconbtn kb-mini danger" title="Remove" onClick=${()=>save(arrRemove(actions,i))}>×</button>
+      </div>`)}
+      <div class="set-row kb-foot">
+        <button class="link-btn" onClick=${()=>save([...actions,["Key","Enter"]])}>+ Add button</button>
+        <div class="spacer"></div>
+        <button class="link-btn" onClick=${()=>save(DEFAULT_ACTIONS)}>Reset to default</button>
+      </div>
+    </div>`;
+}
+
+function SnippetEditor({prefs}){
+  const snippets=prefs.snippets||DEFAULT_SNIPPETS;
+  const save=(next)=>setPrefs({snippets:next});
+  return html`<${F}>
+    <div class="set-group-title">Snippets</div>
+    <div class="set-group">
+      ${snippets.map((s,i)=>html`<div class="set-row kb-edit-row" key=${i}>
+        <input class="set-input kb-label" placeholder="Snippet text" value=${s}
+          onInput=${e=>save(arrSet(snippets,i,e.target.value))} />
+        <button class="iconbtn kb-mini" title="Move up" disabled=${i===0} onClick=${()=>save(arrMove(snippets,i,-1))}>↑</button>
+        <button class="iconbtn kb-mini" title="Move down" disabled=${i===snippets.length-1} onClick=${()=>save(arrMove(snippets,i,1))}>↓</button>
+        <button class="iconbtn kb-mini danger" title="Remove" onClick=${()=>save(arrRemove(snippets,i))}>×</button>
+      </div>`)}
+      <div class="set-row kb-foot">
+        <button class="link-btn" onClick=${()=>save([...snippets,""])}>+ Add snippet</button>
+        <div class="spacer"></div>
+        <button class="link-btn" onClick=${()=>save(DEFAULT_SNIPPETS)}>Reset to default</button>
+      </div>
+    </div>`;
+}
+
 function SettingsContent({panes}){
   const prefs=usePrefs();
   const {cfg,err,patch}=useServerConfig();
+  const allowedKeys=(cfg&&cfg._info&&cfg._info.allowed_keys)||FALLBACK_KEYS;
   const reAuth=()=>{ localStorage.removeItem("vmux_token"); location.href=location.pathname; };
   return html`<div class="settings-body">
     <div class="set-group-title">Appearance</div>
@@ -877,6 +973,9 @@ function SettingsContent({panes}){
       <${Row} label="Default filter"><${Seg} value=${prefs.defaultFilter}
         options=${[["all","All"],["needs","Needs"],["working","Work"]]} onChange=${v=>setPrefs({defaultFilter:v})} /><//>
     </div>
+
+    <${ShortcutEditor} prefs=${prefs} allowedKeys=${allowedKeys} />
+    <${SnippetEditor} prefs=${prefs} />
 
     ${cfg ? html`<${ServerSettings} cfg=${cfg} err=${err} patch=${patch} panes=${panes} />`
           : html`<${F}><div class="set-group-title">Server</div><div class="set-sub" style=${{padding:"4px"}}>${err||"Loading…"}</div><//>`}

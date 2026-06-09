@@ -54,9 +54,9 @@ See [QUICKSTART.md](QUICKSTART.md) for the longer walkthrough.
 
 - **Triage grid / sidebar** — one card per agent, color-coded and ordered so the ones that need you float to the top: 🔴 needs input · 🟠 error · 🟡 working · 🟢 idle · ⚫ offline.
 - **Dialog parsing, not screen-scraping** — for Claude Code, vmux parses the TUI selection box (`╭ │ ❯`) and turns the choices into native buttons. You tap **Yes / No / Edit** without arrow keys. Other agents fall back to configurable regex (`(y/n)`, "Do you want to…", "Press enter to…").
-- **Detail view** — full pane output, the menu, a text box, and an action row (`Ctrl+C`, `Esc`, `Tab`, arrows, `Enter`).
+- **Detail view** — full pane output, the menu, a text box with quick **snippets** (saved phrases you tap to drop into the message), and a **customizable shortcut-key row** (defaults to `Ctrl+C` `Esc` `Tab` `⇧Tab` `↵` `↑` `↓` `^R` `^O` `^E`).
 - **Broadcast** — send one message to several agents at once.
-- **Settings** — theme (auto/light/dark), Liquid Glass on/off, notifications/sound, and live server config: poll interval, discovery, per-agent rename/kind, detector patterns, and how pane names are derived.
+- **Settings** — theme (auto/light/dark), Liquid Glass on/off, notifications/sound, **custom shortcut-key buttons** (relabel, reorder, pick the key from the server's allowlist) and **custom snippets**, plus live server config: poll interval, discovery, per-agent rename/kind, detector patterns, and how pane names are derived.
 - **Connected sessions** — see every device connected and disconnect any of them.
 - **Native feel** — a platform-adaptive PWA: macOS sidebar split-view on desktop, iOS bottom-sheet on mobile, Apple "Liquid Glass" styling, light/dark.
 - **Stays on your network** — localhost by default, bearer token for LAN/Tailscale, no cloud, no account, no telemetry.

@@ -17,10 +17,11 @@ _PANE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pan
 
 # Named keys the API is allowed to send. Anything else is rejected.
 ALLOWED_KEYS = {
-    "Enter", "Escape", "Tab", "Space", "BSpace",
+    "Enter", "Escape", "Tab", "BTab", "Space", "BSpace",
     "Up", "Down", "Left", "Right",
     "Home", "End", "PageUp", "PageDown",
-    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l", "C-r", "C-w",
+    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l",
+    "C-r", "C-w", "C-o", "C-n", "C-p",
 }
 
 _PANE_ID_RE = re.compile(r"^%\d+$")
