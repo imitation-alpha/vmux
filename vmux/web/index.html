@@ -321,6 +321,43 @@
   .self-tag { font-size:10px; color:var(--accent); border:1px solid var(--accent);
     border-radius:6px; padding:1px 5px; margin-left:7px; vertical-align:middle; }
 
+  /* pin */
+  .pin-btn { flex:none; font-size:12px; line-height:1; cursor:pointer; padding:2px; border-radius:6px;
+    opacity:0; filter:grayscale(1); transition:opacity .12s; }
+  .pin-btn.on { opacity:1; filter:none; }
+  @media (hover:hover){ .src-row:hover .pin-btn, .card:hover .pin-btn { opacity:.55; } }
+  .pin-btn:hover { opacity:1 !important; }
+  .card .pin-btn, .ct-title ~ .pin-btn, .sheet-head .pin-btn { opacity:.4; }
+  .card .pin-btn.on, .content-toolbar .pin-btn.on, .sheet-head .pin-btn.on { opacity:1; }
+
+  /* sort control */
+  .sortrow { display:flex; align-items:center; gap:8px; margin:0 12px 8px; }
+  .sortrow-label { font-size:12px; color:var(--label-3); }
+  .sortsel { flex:1; background:var(--fill); border:none; border-radius:8px; padding:6px 8px;
+    font-size:13px; color:var(--label); outline:none; -webkit-appearance:none; appearance:none; }
+  .ios-controls { display:flex; align-items:center; gap:10px; padding:0 16px 12px; }
+  .ios-controls .seg { margin:0; }
+  .ios-controls .sortsel { flex:none; min-width:96px; padding:7px 10px; }
+  .set-pin { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--label-2); }
+  .set-pin span { white-space:nowrap; }
+
+  /* tree view */
+  .tree { padding:4px 6px 12px; }
+  .tree-node { display:flex; align-items:center; gap:8px; width:100%; border:none; background:transparent;
+    border-radius:8px; padding:6px 8px; text-align:left; color:var(--label); }
+  @media (hover:hover){ .tree-node:hover { background:var(--fill-2); } }
+  .tree-session { font-weight:600; font-size:13.5px; }
+  .tree-window { padding-left:24px; color:var(--label-2); font-size:13px; }
+  .tree-pane { padding-left:42px; font-size:13.5px; }
+  .tree-pane.sel { background:var(--accent); color:#fff; }
+  .tree-pane.sel .dot { box-shadow:0 0 0 2px rgba(255,255,255,.5); }
+  .tw-caret { width:12px; font-size:10px; color:var(--label-3); flex:none; }
+  .tw-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tw-count { font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .tw-count b { color:var(--red); }
+  .ios-tree { padding:0 10px; }
+  .ios-tree .tree-node { padding-top:9px; padding-bottom:9px; }
+
   @keyframes slideup { from{ transform:translateY(100%); } to{ transform:translateY(0); } }
   @keyframes fade { from{ opacity:0; } to{ opacity:1; } }
   @keyframes fadeout { from{ opacity:1; } to{ opacity:0; } }
@@ -366,7 +403,7 @@ const DEFAULT_SNIPPETS = ["continue","yes","no"];
 
 // ---- browser-local preferences (Settings page) ----
 const PREFS_KEY = "vmux_prefs";
-const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", actions:DEFAULT_ACTIONS, snippets:DEFAULT_SNIPPETS };
+const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", view:"list", sort:"status", actions:DEFAULT_ACTIONS, snippets:DEFAULT_SNIPPETS };
 let PREFS = (function(){ try { return {...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")}; } catch(e){ return {...DEFAULT_PREFS}; } })();
 const prefsSubs = new Set();
 function applyPrefs(p){
@@ -397,6 +434,7 @@ const act = {
   select:(p,key)=>api("/select",{id:p.id,key}).catch(()=>{}),
   key:(p,k)=>api("/key",{id:p.id,key:k}).catch(()=>{}),
   text:(p,text,enter)=>api("/text",{id:p.id,text,enter}),
+  pin:(p)=>api("/pin",{target:p.target,pinned:!p.pinned}).catch(()=>{}),
 };
 function askNotify(){ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }
 function beep(){ if(!PREFS.sound) return; try{
@@ -410,6 +448,40 @@ function beep(){ if(!PREFS.sound) return; try{
 }catch(e){} }
 const byStatus = (a,b)=> (ORDER[a.status]-ORDER[b.status]) || a.name.localeCompare(b.name);
 const countOf = (panes)=> panes.reduce((m,p)=>{ m[p.status]=(m[p.status]||0)+1; return m; },{});
+
+// ---- sort options ----
+const SORTS = [["status","Status"],["name","Name"],["active","Active"],["sent","Sent"],["target","Order"]];
+const SORT_LABEL = Object.fromEntries(SORTS);
+const cmpTarget = (a,b)=> a.target.localeCompare(b.target, undefined, {numeric:true});
+function paneCmp(sort){
+  if(sort==="name") return (a,b)=> a.name.localeCompare(b.name) || cmpTarget(a,b);
+  if(sort==="active") return (a,b)=> ((b.updated||0)-(a.updated||0)) || cmpTarget(a,b);     // recently active (output)
+  if(sort==="sent")   return (a,b)=> ((b.interacted||0)-(a.interacted||0)) || cmpTarget(a,b); // recently sent (input)
+  if(sort==="target") return cmpTarget;                                                      // session.window.pane
+  return byStatus;
+}
+
+// ---- tree: session -> windows -> panes, with a worst-status rollup on parents ----
+function rollup(ps){ return ps.reduce((b,p)=> ORDER[p.status]<ORDER[b]?p.status:b, "offline"); }
+function buildTree(panes){
+  const sessions=new Map();
+  for(const p of panes){
+    const i=p.target.lastIndexOf(":"); const sess=i<0?p.target:p.target.slice(0,i);
+    const win=(i<0?"":p.target.slice(i+1)).split(".")[0]||"0";
+    if(!sessions.has(sess)) sessions.set(sess,new Map());
+    const wins=sessions.get(sess); if(!wins.has(win)) wins.set(win,[]);
+    wins.get(win).push(p);
+  }
+  const paneIdx=(p)=> parseInt((p.target.split(".")[1]||"0"),10)||0;
+  return [...sessions.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true})).map(([sess,wins])=>{
+    const windows=[...wins.entries()].sort((a,b)=>(parseInt(a[0],10)||0)-(parseInt(b[0],10)||0)).map(([win,ps])=>{
+      ps.sort((a,b)=>paneIdx(a)-paneIdx(b));
+      return { win, name: ps[0].window || ("window "+win), panes:ps, status:rollup(ps), needs:ps.filter(x=>x.status==="needs_input").length };
+    });
+    const all=windows.flatMap(w=>w.panes);
+    return { sess, windows, status:rollup(all), needs:all.filter(x=>x.status==="needs_input").length, count:all.length };
+  });
+}
 
 let MY_SID = null;   // this browser's WebSocket session id (from the server's hello)
 
@@ -483,6 +555,11 @@ function StatusPill({status}){
   return html`<span class=${"pill-soft s-"+status}><span class=${"dot s-"+status}></span>${STATUS_LABEL[status]}</span>`;
 }
 
+function PinBtn({pane}){
+  return html`<span class=${"pin-btn"+(pane.pinned?" on":"")} title=${pane.pinned?"Unpin":"Pin"}
+    onClick=${e=>{ e.stopPropagation(); act.pin(pane); }}>📌</span>`;
+}
+
 function Menu({pane, variant}){
   if(!pane.menu||!pane.menu.length) return null;
   const tap=(e,key)=>{ e.stopPropagation(); act.select(pane,key); };
@@ -543,6 +620,37 @@ function DetailBody({pane, variant}){
   <//>`;
 }
 
+/* ===================== tree view ===================== */
+function TreeView({panes, onOpen, selId}){
+  const tree=useMemo(()=>buildTree(panes),[panes]);
+  const [collapsed,setCollapsed]=useState(()=>new Set());
+  const toggle=(k)=>setCollapsed(s=>{ const n=new Set(s); n.has(k)?n.delete(k):n.add(k); return n; });
+  if(!tree.length) return html`<div class="palette-empty">No panes</div>`;
+  return html`<div class="tree">
+    ${tree.map(s=>{ const sk="s:"+s.sess, sc=collapsed.has(sk); return html`<${F} key=${s.sess}>
+      <button class="tree-node tree-session" onClick=${()=>toggle(sk)}>
+        <span class="tw-caret">${sc?"▸":"▾"}</span>
+        <span class=${"dot s-"+s.status}></span>
+        <span class="tw-name">${s.sess}</span>
+        <span class="tw-count">${s.needs?html`<b>${s.needs}</b> `:null}${s.count}</span>
+      </button>
+      ${!sc && s.windows.map(w=>{ const wk="w:"+s.sess+":"+w.win, wc=collapsed.has(wk); return html`<${F} key=${w.win}>
+        <button class="tree-node tree-window" onClick=${()=>toggle(wk)}>
+          <span class="tw-caret">${wc?"▸":"▾"}</span>
+          <span class=${"dot s-"+w.status}></span>
+          <span class="tw-name">${w.name}</span>
+          <span class="tw-count">${w.panes.length}</span>
+        </button>
+        ${!wc && w.panes.map(p=>html`<button class=${"tree-node tree-pane"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>onOpen(p.id)}>
+          <span class=${"dot s-"+p.status}></span>
+          <span class="tw-name">${p.name}</span>
+          ${p.pinned?html`<span class="pin-btn on">📌</span>`:null}
+        </button>`)}
+      <//>`; })}
+    <//>`; })}
+  </div>`;
+}
+
 /* ===================== macOS ===================== */
 function Palette({panes,onPick,onClose}){
   const [q,setQ]=useState(""); const [i,setI]=useState(0); const ref=useRef();
@@ -573,6 +681,7 @@ function Palette({panes,onPick,onClose}){
 }
 
 function MacApp({panes, connected, onBroadcast, onSettings}){
+  const prefs=usePrefs();
   const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
   const [query,setQuery]=useState("");
   const [selId,setSel]=useState(null);
@@ -583,9 +692,21 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
     .filter(p=> !query || (p.name+" "+p.target).toLowerCase().includes(query.toLowerCase()))
   ,[panes,filter,query]);
 
-  const groups=useMemo(()=> ["needs_input","error","working","idle","offline"]
-    .map(s=>({ status:s, label:GROUP_LABEL[s], items:filtered.filter(p=>p.status===s).sort((a,b)=>a.name.localeCompare(b.name)) }))
-    .filter(g=>g.items.length),[filtered]);
+  const groups=useMemo(()=>{
+    const pinned=filtered.filter(p=>p.pinned).sort(paneCmp(prefs.sort));
+    const rest=filtered.filter(p=>!p.pinned);
+    const out=[];
+    if(pinned.length) out.push({key:"pinned", label:"Pinned", items:pinned});
+    if(prefs.sort==="status"){
+      for(const s of ["needs_input","error","working","idle","offline"]){
+        const items=rest.filter(p=>p.status===s).sort((a,b)=>a.name.localeCompare(b.name));
+        if(items.length) out.push({key:s, label:GROUP_LABEL[s], items});
+      }
+    } else if(rest.length){
+      out.push({key:"all", label:SORT_LABEL[prefs.sort], items:rest.slice().sort(paneCmp(prefs.sort))});
+    }
+    return out;
+  },[filtered, prefs.sort]);
   const flat=useMemo(()=>groups.flatMap(g=>g.items),[groups]);
 
   useEffect(()=>{ if(selId && panes.some(p=>p.id===selId)) return; if(flat[0]) setSel(flat[0].id); },[flat,selId,panes]);
@@ -621,20 +742,34 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
       </div>
       <div class="search"><input class="search-field" name="search" autocomplete="off" placeholder="Search" value=${query} onInput=${e=>setQuery(e.target.value)} /></div>
       <div class="seg">
-        ${[["all","All"],["needs","Needs you"],["working","Working"]].map(([f,l])=>html`
-          <button class=${"seg-btn"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}</button>`)}
+        ${[["list","List"],["tree","Tree"]].map(([v,l])=>html`
+          <button class=${"seg-btn"+(prefs.view===v?" on":"")} key=${v} onClick=${()=>setPrefs({view:v})}>${l}</button>`)}
       </div>
-      <nav class="source-list">
-        ${groups.length===0 && html`<div class="palette-empty">${connected?"No agents":"Connecting…"}</div>`}
-        ${groups.map(g=>html`<${F} key=${g.status}>
-          <div class="group-head">${g.label}<span>${g.items.length}</span></div>
-          ${g.items.map(p=>html`<button class=${"src-row"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>setSel(p.id)}>
-            <span class=${"dot s-"+p.status}></span>
-            <span class="src-name">${p.name}</span>
-            <span class="src-target">${p.target}</span>
-          </button>`)}
-        <//>`)}
-      </nav>
+      ${prefs.view==="tree"
+        ? html`<nav class="source-list"><${TreeView} panes=${panes} onOpen=${setSel} selId=${selId} /></nav>`
+        : html`<${F}>
+          <div class="seg">
+            ${[["all","All"],["needs","Needs you"],["working","Working"]].map(([f,l])=>html`
+              <button class=${"seg-btn"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}</button>`)}
+          </div>
+          <div class="sortrow"><span class="sortrow-label">Sort</span>
+            <select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
+              ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
+            </select>
+          </div>
+          <nav class="source-list">
+            ${groups.length===0 && html`<div class="palette-empty">${connected?"No agents":"Connecting…"}</div>`}
+            ${groups.map(g=>html`<${F} key=${g.key}>
+              <div class="group-head">${g.label}<span>${g.items.length}</span></div>
+              ${g.items.map(p=>html`<button class=${"src-row"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>setSel(p.id)}>
+                <span class=${"dot s-"+p.status}></span>
+                <span class="src-name">${p.name}</span>
+                <span class="src-target">${p.target}</span>
+                <${PinBtn} pane=${p} />
+              </button>`)}
+            <//>`)}
+          </nav>
+        <//>`}
     </aside>
     <main class="content">
       ${sel ? html`<${F}>
@@ -642,6 +777,7 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
           <div class="ct-title">${sel.name}</div>
           <${StatusPill} status=${sel.status} />
           <div class="spacer"></div>
+          <${PinBtn} pane=${sel} />
           <span class="ct-meta">${sel.target} · ${sel.kind}</span>
         </div>
         <div class="content-scroll"><${DetailBody} pane=${sel} variant="mac" /></div>
@@ -656,6 +792,7 @@ function IOSCard({pane, onOpen}){
   return html`<div class=${"card s-"+pane.status} onClick=${onOpen}>
     <div class="card-top">
       <div class="card-name">${pane.name}</div>
+      <${PinBtn} pane=${pane} />
       <${StatusPill} status=${pane.status} />
     </div>
     <div class="card-meta">${pane.target} · ${pane.kind}</div>
@@ -683,6 +820,7 @@ function Sheet({pane, onClose}){
         <div class="grabber"></div>
         <div class="sheet-head">
           <div class="sheet-title">${pane.name}</div>
+          <${PinBtn} pane=${pane} />
           <${StatusPill} status=${pane.status} />
         </div>
       </div>
@@ -692,13 +830,14 @@ function Sheet({pane, onClose}){
 }
 
 function IOSApp({panes, connected, onBroadcast, onSettings}){
+  const prefs=usePrefs();
   const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
   const [openId,setOpen]=useState(null);
   const [scrolled,setScrolled]=useState(false);
   const counts=countOf(panes);
   const sorted=useMemo(()=> panes.filter(p=>
       filter==="all"||(filter==="needs"&&p.status==="needs_input")||(filter==="working"&&p.status==="working"))
-    .sort(byStatus),[panes,filter]);
+    .slice().sort((a,b)=> ((b.pinned?1:0)-(a.pinned?1:0)) || paneCmp(prefs.sort)(a,b)),[panes,filter,prefs.sort]);
   const open=panes.find(p=>p.id===openId)||null;
 
   return html`<div class="ios">
@@ -715,11 +854,22 @@ function IOSApp({panes, connected, onBroadcast, onSettings}){
         ${counts.working?html`<span class="chip glass">${counts.working} working</span>`:null}
         ${counts.idle?html`<span class="chip glass">${counts.idle} idle</span>`:null}
       </div>
-      ${sorted.length===0
-        ? html`<div class="empty" style=${{height:"50vh"}}><div class="empty-glyph">▦</div>${connected?"No agents":"Connecting…"}</div>`
-        : html`<div class="ios-grid">
-            ${sorted.map(p=>html`<${IOSCard} key=${p.id} pane=${p} onOpen=${()=>setOpen(p.id)} />`)}
-          </div>`}
+      <div class="ios-controls">
+        <div class="seg">
+          ${[["list","List"],["tree","Tree"]].map(([v,l])=>html`
+            <button class=${"seg-btn"+(prefs.view===v?" on":"")} key=${v} onClick=${()=>setPrefs({view:v})}>${l}</button>`)}
+        </div>
+        ${prefs.view==="list" ? html`<select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
+          ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
+        </select>`:null}
+      </div>
+      ${prefs.view==="tree"
+        ? html`<div class="ios-tree"><${TreeView} panes=${panes} onOpen=${(id)=>setOpen(id)} /></div>`
+        : (sorted.length===0
+          ? html`<div class="empty" style=${{height:"50vh"}}><div class="empty-glyph">▦</div>${connected?"No agents":"Connecting…"}</div>`
+          : html`<div class="ios-grid">
+              ${sorted.map(p=>html`<${IOSCard} key=${p.id} pane=${p} onOpen=${()=>setOpen(p.id)} />`)}
+            </div>`)}
       <div class="ios-bottom-pad"></div>
     </div>
     <nav class="tabbar glass">
@@ -816,11 +966,11 @@ function ServerSettings({cfg, err, patch, panes}){
     ...((cfg._info&&cfg._info.targets)||[]), ...cfg.overrides.map(o=>o.target), ...panes.map(p=>p.target),
   ])).sort();
   const editAgent=(target, change)=>{
-    const cur = ovMap[target] || {target,name:null,kind:null};
+    const cur = ovMap[target] || {target,name:null,kind:null,pin:false};
     const next = {...cur, ...change};
-    const others = cfg.overrides.filter(o=>o.target!==target).map(o=>({target:o.target,name:o.name,kind:o.kind}));
-    const keep = next.name || next.kind;
-    patch({overrides: keep ? [...others, {target, name:next.name||null, kind:next.kind||null}] : others});
+    const others = cfg.overrides.filter(o=>o.target!==target).map(o=>({target:o.target,name:o.name,kind:o.kind,pin:o.pin}));
+    const keep = next.name || next.kind || next.pin;
+    patch({overrides: keep ? [...others, {target, name:next.name||null, kind:next.kind||null, pin:!!next.pin}] : others});
   };
   return html`<${F}>
     <div class="set-group-title">Server · General</div>
@@ -851,6 +1001,7 @@ function ServerSettings({cfg, err, patch, panes}){
           </div>
           <${Seg} value=${o.kind||"auto"} options=${[["auto","Auto"],["claude-code","Claude"],["generic","Gen"],["shell","Sh"]]}
             onChange=${v=>editAgent(t,{kind:v==="auto"?null:v})} />
+          <label class="set-pin"><span>Pin</span><${Switch} on=${!!o.pin} onChange=${v=>editAgent(t,{pin:v})} /></label>
         </div>`; })}
     </div>
 
