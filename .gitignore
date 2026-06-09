@@ -11,9 +11,10 @@ build/
 # uv
 uv.lock
 
-# local config (ship config.example.yaml instead)
-config.yaml
-config.yml
+# local config (ship config.example.yaml instead) — anchored to repo root so it
+# doesn't accidentally match e.g. .github/ISSUE_TEMPLATE/config.yml
+/config.yaml
+/config.yml
 vmux-settings.json
 
 # OS

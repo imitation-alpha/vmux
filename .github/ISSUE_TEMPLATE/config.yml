@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/imitation-alpha/vmux/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.
+  - name: Questions & ideas
+    url: https://github.com/imitation-alpha/vmux/discussions
+    about: For usage questions and open-ended discussion.
