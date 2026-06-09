@@ -56,8 +56,13 @@ class Hub:
         self.order: List[str] = []
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
+        self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
         self._wake = asyncio.Event()
         self._stop = False
+
+    def mark_interaction(self, pane_id: str) -> None:
+        """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
+        self.interactions[pane_id] = time.time()
 
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
@@ -124,6 +129,7 @@ class Hub:
                 changed=changed,
                 window=pane.get("window", ""),
                 pinned=bool(override and override.pin),
+                interacted=self.interactions.get(pid, 0.0),
             )
             new_states[pid] = st
             new_order.append(pid)
@@ -145,6 +151,8 @@ class Hub:
 
         self.states = new_states
         self.order = new_order
+        # drop interaction timestamps for panes that no longer exist
+        self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
@@ -213,6 +221,7 @@ class Hub:
             tmux.send_key(real, "Enter")
         else:
             tmux.send_literal(real, key, enter=True)
+        self.mark_interaction(real)
 
     def kick(self) -> None:
         self._wake.set()

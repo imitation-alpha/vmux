@@ -100,19 +100,23 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/api/key")
     def post_key(req: KeyReq, _=Depends(require_auth)):
+        real = _resolve(req.id)
         try:
-            tmux.send_key(_resolve(req.id), req.key)
+            tmux.send_key(real, req.key)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        hub.mark_interaction(real)
         hub.kick()
         return {"ok": True}
 
     @app.post("/api/text")
     def post_text(req: TextReq, _=Depends(require_auth)):
+        real = _resolve(req.id)
         try:
-            tmux.send_literal(_resolve(req.id), req.text, enter=req.enter)
+            tmux.send_literal(real, req.text, enter=req.enter)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        hub.mark_interaction(real)
         hub.kick()
         return {"ok": True}
 
@@ -135,6 +139,7 @@ def create_app(cfg: Config) -> FastAPI:
                 continue
             try:
                 tmux.send_literal(real, req.text, enter=req.enter)
+                hub.mark_interaction(real)
                 sent += 1
             except tmux.TmuxError as exc:
                 errors.append("%s: %s" % (pid, exc))

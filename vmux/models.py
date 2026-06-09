@@ -49,6 +49,7 @@ class PaneState:
     changed: bool = False                     # changed since previous poll (working hint)
     window: str = ""                          # tmux window name (for the tree view)
     pinned: bool = False                      # user-pinned (PaneOverride.pin)
+    interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
 
     def preview(self, n: int = 6) -> List[str]:
         """Last n non-empty-ish lines, for the grid card snippet."""
@@ -71,4 +72,5 @@ class PaneState:
             "changed": self.changed,
             "window": self.window,
             "pinned": self.pinned,
+            "interacted": self.interacted,
         }

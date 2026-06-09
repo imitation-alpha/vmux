@@ -38,3 +38,10 @@ def test_kill_client():
     assert ws.closed is True
     assert h.sessions() == []
     assert asyncio.run(h.kill_client("missing")) is False
+
+
+def test_interaction_tracking():
+    h = Hub(Config())
+    assert h.interactions == {}
+    h.mark_interaction("%5")
+    assert "%5" in h.interactions and h.interactions["%5"] > 0
