@@ -48,7 +48,7 @@ class PaneState:
     updated: float = 0.0                      # epoch seconds of last *change*
     changed: bool = False                     # changed since previous poll (working hint)
     window: str = ""                          # tmux window name (for the tree view)
-    pinned: bool = False                      # user-pinned (PaneOverride.pin)
+    starred: bool = False                     # user-starred (PaneOverride.star)
     interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
 
     def preview(self, n: int = 6) -> List[str]:
@@ -71,6 +71,6 @@ class PaneState:
             "updated": self.updated,
             "changed": self.changed,
             "window": self.window,
-            "pinned": self.pinned,
+            "starred": self.starred,
             "interacted": self.interacted,
         }

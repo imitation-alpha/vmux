@@ -58,7 +58,7 @@ class PaneOverride:
     target: str                      # session:window.pane to match
     name: Optional[str] = None
     kind: Optional[str] = None
-    pin: bool = False                # keep at top + visible even when offline
+    star: bool = False               # keep at top + visible even when offline
 
 
 @dataclass
@@ -97,7 +97,7 @@ class Config:
             "include_shells": self.include_shells,
             "naming_mode": self.naming_mode,
             "overrides": [
-                {"target": o.target, "name": o.name, "kind": o.kind, "pin": o.pin}
+                {"target": o.target, "name": o.name, "kind": o.kind, "star": o.star}
                 for o in self.overrides.values()
             ],
             "generic_prompt_patterns": list(self.generic_prompt_patterns),
@@ -135,10 +135,10 @@ class Config:
                 name = e.get("name")
                 if name is not None:
                     name = str(name)[:80] or None
-                pin = bool(e.get("pin"))
-                if not (name or kind or pin):
+                star = bool(e.get("star") or e.get("pin"))   # "pin" kept for back-compat
+                if not (name or kind or star):
                     continue   # an override with nothing set is dropped
-                ov[target] = PaneOverride(target=target, name=name, kind=kind, pin=pin)
+                ov[target] = PaneOverride(target=target, name=name, kind=kind, star=star)
             self.overrides = ov
         for key in ("generic_prompt_patterns", "error_patterns"):
             if key in data:

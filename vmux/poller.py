@@ -128,7 +128,7 @@ class Hub:
                 updated=updated,
                 changed=changed,
                 window=pane.get("window", ""),
-                pinned=bool(override and override.pin),
+                starred=bool(override and override.star),
                 interacted=self.interactions.get(pid, 0.0),
             )
             new_states[pid] = st
@@ -145,7 +145,7 @@ class Hub:
                 name=ov.name or target,
                 kind=ov.kind or "generic",
                 status=STATUS_OFFLINE,
-                pinned=ov.pin,
+                starred=ov.star,
             )
             new_order.append(pid)
 

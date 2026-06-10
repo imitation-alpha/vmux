@@ -60,9 +60,9 @@ class KillReq(BaseModel):
     id: str
 
 
-class PinReq(BaseModel):
+class StarReq(BaseModel):
     target: str
-    pinned: bool
+    starred: bool
 
 
 def create_app(cfg: Config) -> FastAPI:
@@ -185,12 +185,12 @@ def create_app(cfg: Config) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown session")
         return {"ok": True}
 
-    @app.post("/api/pin")
-    def post_pin(req: PinReq, _=Depends(require_auth)):
-        # merge the pin change into this target's override (preserving name/kind),
+    @app.post("/api/star")
+    def post_star(req: StarReq, _=Depends(require_auth)):
+        # merge the star change into this target's override (preserving name/kind),
         # persist to the overlay, apply on the next (immediate) poll
         overrides = [
-            {"target": o.target, "name": o.name, "kind": o.kind, "pin": o.pin}
+            {"target": o.target, "name": o.name, "kind": o.kind, "star": o.star}
             for o in cfg.overrides.values() if o.target != req.target
         ]
         cur = cfg.overrides.get(req.target)
@@ -198,7 +198,7 @@ def create_app(cfg: Config) -> FastAPI:
             "target": req.target,
             "name": cur.name if cur else None,
             "kind": cur.kind if cur else None,
-            "pin": req.pinned,
+            "star": req.starred,
         })
         try:
             cfg.apply_patch({"overrides": overrides})

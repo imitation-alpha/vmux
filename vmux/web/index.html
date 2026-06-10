@@ -321,14 +321,13 @@
   .self-tag { font-size:10px; color:var(--accent); border:1px solid var(--accent);
     border-radius:6px; padding:1px 5px; margin-left:7px; vertical-align:middle; }
 
-  /* pin */
-  .pin-btn { flex:none; font-size:12px; line-height:1; cursor:pointer; padding:2px; border-radius:6px;
-    opacity:0; filter:grayscale(1); transition:opacity .12s; }
-  .pin-btn.on { opacity:1; filter:none; }
-  @media (hover:hover){ .src-row:hover .pin-btn, .card:hover .pin-btn { opacity:.55; } }
-  .pin-btn:hover { opacity:1 !important; }
-  .card .pin-btn, .ct-title ~ .pin-btn, .sheet-head .pin-btn { opacity:.4; }
-  .card .pin-btn.on, .content-toolbar .pin-btn.on, .sheet-head .pin-btn.on { opacity:1; }
+  /* star */
+  .star-btn { flex:none; font-size:15px; line-height:1; cursor:pointer; padding:1px 3px; border-radius:6px;
+    color:var(--label-3); opacity:.5; transition:opacity .12s, color .12s, transform .1s; }
+  .star-btn:hover { opacity:1; color:var(--label-2); }
+  .star-btn:active { transform:scale(.82); }
+  .star-btn.on { color:#f5a623; opacity:1; }
+  @media (hover:hover){ .src-row:hover .star-btn, .card:hover .star-btn { opacity:.8; } }
 
   /* sort control */
   .sortrow { display:flex; align-items:center; gap:8px; margin:0 12px 8px; }
@@ -338,8 +337,8 @@
   .ios-controls { display:flex; align-items:center; gap:10px; padding:0 16px 12px; }
   .ios-controls .seg { margin:0; }
   .ios-controls .sortsel { flex:none; min-width:96px; padding:7px 10px; }
-  .set-pin { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--label-2); }
-  .set-pin span { white-space:nowrap; }
+  .set-star { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--label-2); }
+  .set-star span { white-space:nowrap; }
 
   /* tree view */
   .tree { padding:4px 6px 12px; }
@@ -450,7 +449,7 @@ const act = {
   select:(p,key)=>api("/select",{id:p.id,key}).catch(()=>{}),
   key:(p,k)=>api("/key",{id:p.id,key:k}).catch(()=>{}),
   text:(p,text,enter)=>api("/text",{id:p.id,text,enter}),
-  pin:(p)=>api("/pin",{target:p.target,pinned:!p.pinned}).catch(()=>{}),
+  star:(p)=>api("/star",{target:p.target,starred:!p.starred}).catch(()=>{}),
 };
 function askNotify(){ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }
 function beep(){ if(!PREFS.sound) return; try{
@@ -577,9 +576,9 @@ function StatusPill({status, compact}){
   return html`<span class=${"pill-soft s-"+status}>${compact?null:html`<span class=${"dot s-"+status}></span>`}${STATUS_LABEL[status]}</span>`;
 }
 
-function PinBtn({pane}){
-  return html`<span class=${"pin-btn"+(pane.pinned?" on":"")} title=${pane.pinned?"Unpin":"Pin"}
-    onClick=${e=>{ e.stopPropagation(); act.pin(pane); }}>📌</span>`;
+function StarBtn({pane}){
+  return html`<span class=${"star-btn"+(pane.starred?" on":"")} title=${pane.starred?"Unstar":"Star"}
+    onClick=${e=>{ e.stopPropagation(); act.star(pane); }}>${pane.starred?"★":"☆"}</span>`;
 }
 
 function Menu({pane, variant}){
@@ -675,7 +674,7 @@ function TreeView({panes, onOpen, selId}){
             <span class=${"dot s-"+p.status}></span>
             <span class="tw-name">${p.name}</span>
             <${StatusPill} status=${p.status} compact=${true} />
-            ${p.pinned?html`<span class="pin-btn on">📌</span>`:null}
+            ${p.starred?html`<span class="star-btn on">★</span>`:null}
           </button>
           ${p.status==="needs_input" && (p.question || (p.menu&&p.menu.length)) ? html`<div class="tree-needs">
             ${p.question?html`<div class="tree-q">${p.question}</div>`:null}
@@ -729,10 +728,10 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
   ,[panes,filter,query]);
 
   const groups=useMemo(()=>{
-    const pinned=filtered.filter(p=>p.pinned).sort(paneCmp(prefs.sort));
-    const rest=filtered.filter(p=>!p.pinned);
+    const starred=filtered.filter(p=>p.starred).sort(paneCmp(prefs.sort));
+    const rest=filtered.filter(p=>!p.starred);
     const out=[];
-    if(pinned.length) out.push({key:"pinned", label:"Pinned", items:pinned});
+    if(starred.length) out.push({key:"starred", label:"Starred", items:starred});
     if(prefs.sort==="status"){
       for(const s of ["needs_input","error","working","idle","offline"]){
         const items=rest.filter(p=>p.status===s).sort((a,b)=>a.name.localeCompare(b.name));
@@ -801,7 +800,7 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
                 <span class=${"dot s-"+p.status}></span>
                 <span class="src-name">${p.name}</span>
                 <span class="src-target">${p.target}</span>
-                <${PinBtn} pane=${p} />
+                <${StarBtn} pane=${p} />
               </button>`)}
             <//>`)}
           </nav>
@@ -813,7 +812,7 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
           <div class="ct-title">${sel.name}</div>
           <${StatusPill} status=${sel.status} />
           <div class="spacer"></div>
-          <${PinBtn} pane=${sel} />
+          <${StarBtn} pane=${sel} />
           <span class="ct-meta">${sel.target} · ${sel.kind}</span>
         </div>
         <div class="content-scroll"><${DetailBody} pane=${sel} variant="mac" /></div>
@@ -828,7 +827,7 @@ function IOSCard({pane, onOpen}){
   return html`<div class=${"card s-"+pane.status} onClick=${onOpen}>
     <div class="card-top">
       <div class="card-name">${pane.name}</div>
-      <${PinBtn} pane=${pane} />
+      <${StarBtn} pane=${pane} />
       <${StatusPill} status=${pane.status} />
     </div>
     <div class="card-meta">${pane.target} · ${pane.kind}</div>
@@ -856,7 +855,7 @@ function Sheet({pane, onClose}){
         <div class="grabber"></div>
         <div class="sheet-head">
           <div class="sheet-title">${pane.name}</div>
-          <${PinBtn} pane=${pane} />
+          <${StarBtn} pane=${pane} />
           <${StatusPill} status=${pane.status} />
         </div>
       </div>
@@ -873,7 +872,7 @@ function IOSApp({panes, connected, onBroadcast, onSettings}){
   const counts=countOf(panes);
   const sorted=useMemo(()=> panes.filter(p=>
       filter==="all"||(filter==="needs"&&p.status==="needs_input")||(filter==="working"&&p.status==="working"))
-    .slice().sort((a,b)=> ((b.pinned?1:0)-(a.pinned?1:0)) || paneCmp(prefs.sort)(a,b)),[panes,filter,prefs.sort]);
+    .slice().sort((a,b)=> ((b.starred?1:0)-(a.starred?1:0)) || paneCmp(prefs.sort)(a,b)),[panes,filter,prefs.sort]);
   const open=panes.find(p=>p.id===openId)||null;
 
   return html`<div class="ios">
@@ -1002,11 +1001,11 @@ function ServerSettings({cfg, err, patch, panes}){
     ...((cfg._info&&cfg._info.targets)||[]), ...cfg.overrides.map(o=>o.target), ...panes.map(p=>p.target),
   ])).sort();
   const editAgent=(target, change)=>{
-    const cur = ovMap[target] || {target,name:null,kind:null,pin:false};
+    const cur = ovMap[target] || {target,name:null,kind:null,star:false};
     const next = {...cur, ...change};
-    const others = cfg.overrides.filter(o=>o.target!==target).map(o=>({target:o.target,name:o.name,kind:o.kind,pin:o.pin}));
-    const keep = next.name || next.kind || next.pin;
-    patch({overrides: keep ? [...others, {target, name:next.name||null, kind:next.kind||null, pin:!!next.pin}] : others});
+    const others = cfg.overrides.filter(o=>o.target!==target).map(o=>({target:o.target,name:o.name,kind:o.kind,star:o.star}));
+    const keep = next.name || next.kind || next.star;
+    patch({overrides: keep ? [...others, {target, name:next.name||null, kind:next.kind||null, star:!!next.star}] : others});
   };
   return html`<${F}>
     <div class="set-group-title">Server · General</div>
@@ -1037,7 +1036,7 @@ function ServerSettings({cfg, err, patch, panes}){
           </div>
           <${Seg} value=${o.kind||"auto"} options=${[["auto","Auto"],["claude-code","Claude"],["generic","Gen"],["shell","Sh"]]}
             onChange=${v=>editAgent(t,{kind:v==="auto"?null:v})} />
-          <label class="set-pin"><span>Pin</span><${Switch} on=${!!o.pin} onChange=${v=>editAgent(t,{pin:v})} /></label>
+          <label class="set-star"><span>Star</span><${Switch} on=${!!o.star} onChange=${v=>editAgent(t,{star:v})} /></label>
         </div>`; })}
     </div>
 
