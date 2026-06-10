@@ -344,19 +344,35 @@
   /* tree view */
   .tree { padding:4px 6px 12px; }
   .tree-node { display:flex; align-items:center; gap:8px; width:100%; border:none; background:transparent;
-    border-radius:8px; padding:6px 8px; text-align:left; color:var(--label); }
+    border-left:3px solid transparent; border-radius:8px; padding:6px 8px; text-align:left; color:var(--label); }
   @media (hover:hover){ .tree-node:hover { background:var(--fill-2); } }
+  .tree-node.s-needs_input { border-left-color:var(--red); background:color-mix(in srgb,var(--red) 9%,transparent); }
+  .tree-node.s-error { border-left-color:var(--orange); background:color-mix(in srgb,var(--orange) 9%,transparent); }
+  .tree-node.s-working { border-left-color:var(--yellow); }
+  .tree-node.s-idle { border-left-color:var(--green); }
+  .tree-node.s-offline { border-left-color:transparent; }
   .tree-session { font-weight:600; font-size:13.5px; }
   .tree-window { padding-left:24px; color:var(--label-2); font-size:13px; }
   .tree-pane { padding-left:42px; font-size:13.5px; }
-  .tree-pane.sel { background:var(--accent); color:#fff; }
+  .tree-pane.sel { background:var(--accent); color:#fff; border-left-color:rgba(255,255,255,.6); }
   .tree-pane.sel .dot { box-shadow:0 0 0 2px rgba(255,255,255,.5); }
+  .tree-pane .pill-soft, .tree-pane .pill-needs { flex:none; }
   .tw-caret { width:12px; font-size:10px; color:var(--label-3); flex:none; }
   .tw-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .tw-count { font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
-  .tw-count b { color:var(--red); }
+  .tw-roll { display:inline-flex; align-items:center; gap:6px; font-size:11px; flex:none; }
+  .tw-seg { font-variant-numeric:tabular-nums; color:var(--label-3); white-space:nowrap; }
+  .tw-seg + .tw-seg::before { content:"· "; color:var(--label-3); margin-right:2px; }
+  .tw-seg.s-needs_input { color:var(--red); font-weight:700; }
+  .tw-seg.s-error { color:var(--orange); }
+  .tw-seg.s-working { color:var(--label-2); }
+  .tree-needs { padding:0 10px 10px 42px; }
+  .tree-q { font-size:12.5px; color:var(--label-2); margin:0 0 8px; }
+  .tree-needs .menu { margin-bottom:0; }
+  .tree-needs .opt { padding:6px 10px; font-size:13px; }
   .ios-tree { padding:0 10px; }
   .ios-tree .tree-node { padding-top:9px; padding-bottom:9px; }
+  .ios-tree .tree-needs { padding-left:30px; }
 
   @keyframes slideup { from{ transform:translateY(100%); } to{ transform:translateY(0); } }
   @keyframes fade { from{ opacity:0; } to{ opacity:1; } }
@@ -463,6 +479,12 @@ function paneCmp(sort){
 
 // ---- tree: session -> windows -> panes, with a worst-status rollup on parents ----
 function rollup(ps){ return ps.reduce((b,p)=> ORDER[p.status]<ORDER[b]?p.status:b, "offline"); }
+function tally(ps){ const c={needs_input:0,error:0,working:0,idle:0,offline:0}; for(const p of ps) c[p.status]=(c[p.status]||0)+1; return c; }
+const ROLL_SHORT={needs_input:"need you",error:"error",working:"working"};
+function rollupSegs(c){
+  return ["needs_input","error","working"].filter(s=>c[s])
+    .map(s=>html`<span class=${"tw-seg s-"+s} key=${s}>${c[s]} ${ROLL_SHORT[s]}</span>`);
+}
 function buildTree(panes){
   const sessions=new Map();
   for(const p of panes){
@@ -476,10 +498,10 @@ function buildTree(panes){
   return [...sessions.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true})).map(([sess,wins])=>{
     const windows=[...wins.entries()].sort((a,b)=>(parseInt(a[0],10)||0)-(parseInt(b[0],10)||0)).map(([win,ps])=>{
       ps.sort((a,b)=>paneIdx(a)-paneIdx(b));
-      return { win, name: ps[0].window || ("window "+win), panes:ps, status:rollup(ps), needs:ps.filter(x=>x.status==="needs_input").length };
+      return { win, name: ps[0].window || ("window "+win), panes:ps, status:rollup(ps), needs:ps.filter(x=>x.status==="needs_input").length, counts:tally(ps) };
     });
     const all=windows.flatMap(w=>w.panes);
-    return { sess, windows, status:rollup(all), needs:all.filter(x=>x.status==="needs_input").length, count:all.length };
+    return { sess, windows, status:rollup(all), needs:all.filter(x=>x.status==="needs_input").length, count:all.length, counts:tally(all) };
   });
 }
 
@@ -550,9 +572,9 @@ function useIdiom(){
   return mac?"mac":"ios";
 }
 
-function StatusPill({status}){
+function StatusPill({status, compact}){
   if(status==="needs_input") return html`<span class="pill-needs">Needs input</span>`;
-  return html`<span class=${"pill-soft s-"+status}><span class=${"dot s-"+status}></span>${STATUS_LABEL[status]}</span>`;
+  return html`<span class=${"pill-soft s-"+status}>${compact?null:html`<span class=${"dot s-"+status}></span>`}${STATUS_LABEL[status]}</span>`;
 }
 
 function PinBtn({pane}){
@@ -609,10 +631,17 @@ function Composer({pane}){
 function DetailBody({pane, variant}){
   const prefs=usePrefs();
   const actions=prefs.actions||DEFAULT_ACTIONS;
+  const outRef=useRef();
+  const stick=useRef(true);                                 // keep pinned to the newest output, like a real terminal
+  const text=(pane.lines||[]).join("\n") || "(no output)";
+  const toBottom=()=>{ const el=outRef.current; if(el) el.scrollTop=el.scrollHeight; };
+  useEffect(()=>{ stick.current=true; toBottom(); },[pane.id]);   // jump to bottom when opening a pane
+  useEffect(()=>{ if(stick.current) toBottom(); },[text]);        // follow new output unless the user scrolled up
+  const onScroll=()=>{ const el=outRef.current; if(el) stick.current=(el.scrollHeight-el.scrollTop-el.clientHeight)<24; };
   return html`<${F}>
     ${pane.status==="needs_input" && pane.question && html`<div class="question">${pane.question}</div>`}
     <${Menu} pane=${pane} variant=${variant==="ios"?"rows":"buttons"} />
-    <pre class="output">${(pane.lines||[]).join("\n") || "(no output)"}</pre>
+    <pre class="output" ref=${outRef} onScroll=${onScroll}>${text}</pre>
     <div class="actions">
       ${actions.map(([lbl,k],i)=>html`<button class="keycap" key=${i} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
     </div>
@@ -628,24 +657,31 @@ function TreeView({panes, onOpen, selId}){
   if(!tree.length) return html`<div class="palette-empty">No panes</div>`;
   return html`<div class="tree">
     ${tree.map(s=>{ const sk="s:"+s.sess, sc=collapsed.has(sk); return html`<${F} key=${s.sess}>
-      <button class="tree-node tree-session" onClick=${()=>toggle(sk)}>
+      <button class=${"tree-node tree-session s-"+s.status} onClick=${()=>toggle(sk)}>
         <span class="tw-caret">${sc?"▸":"▾"}</span>
         <span class=${"dot s-"+s.status}></span>
         <span class="tw-name">${s.sess}</span>
-        <span class="tw-count">${s.needs?html`<b>${s.needs}</b> `:null}${s.count}</span>
+        <span class="tw-roll">${rollupSegs(s.counts)}<span class="tw-seg tw-total">${s.count}</span></span>
       </button>
       ${!sc && s.windows.map(w=>{ const wk="w:"+s.sess+":"+w.win, wc=collapsed.has(wk); return html`<${F} key=${w.win}>
-        <button class="tree-node tree-window" onClick=${()=>toggle(wk)}>
+        <button class=${"tree-node tree-window s-"+w.status} onClick=${()=>toggle(wk)}>
           <span class="tw-caret">${wc?"▸":"▾"}</span>
           <span class=${"dot s-"+w.status}></span>
           <span class="tw-name">${w.name}</span>
-          <span class="tw-count">${w.panes.length}</span>
+          <span class="tw-roll">${rollupSegs(w.counts)}<span class="tw-seg tw-total">${w.panes.length}</span></span>
         </button>
-        ${!wc && w.panes.map(p=>html`<button class=${"tree-node tree-pane"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>onOpen(p.id)}>
-          <span class=${"dot s-"+p.status}></span>
-          <span class="tw-name">${p.name}</span>
-          ${p.pinned?html`<span class="pin-btn on">📌</span>`:null}
-        </button>`)}
+        ${!wc && w.panes.map(p=>html`<${F} key=${p.id}>
+          <button class=${"tree-node tree-pane s-"+p.status+(p.id===selId?" sel":"")} onClick=${()=>onOpen(p.id)}>
+            <span class=${"dot s-"+p.status}></span>
+            <span class="tw-name">${p.name}</span>
+            <${StatusPill} status=${p.status} compact=${true} />
+            ${p.pinned?html`<span class="pin-btn on">📌</span>`:null}
+          </button>
+          ${p.status==="needs_input" && (p.question || (p.menu&&p.menu.length)) ? html`<div class="tree-needs">
+            ${p.question?html`<div class="tree-q">${p.question}</div>`:null}
+            <${Menu} pane=${p} />
+          </div>`:null}
+        <//>`)}
       <//>`; })}
     <//>`; })}
   </div>`;
