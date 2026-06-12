@@ -61,8 +61,10 @@
   }
 
   /* Ambient backdrop — soft colour wash so the glass has something to tint/bend.
-     Sits behind everything; restrained and slow. */
-  .ambient { position:fixed; inset:0; z-index:-1; overflow:hidden; background:var(--bg); }
+     Sits behind everything; restrained and slow. 100lvh keeps it covering the full
+     screen when iOS standalone leaves the layout viewport shrunk after the keyboard
+     dismisses (height wins over bottom:0; dropped harmlessly pre-iOS 15.4). */
+  .ambient { position:fixed; inset:0; height:100lvh; z-index:-1; overflow:hidden; background:var(--bg); }
   .ambient::before { content:""; position:absolute; inset:-25%;
     background:
       radial-gradient(38% 34% at 18% 20%, color-mix(in srgb,var(--accent) 32%,transparent), transparent 70%),
@@ -318,7 +320,7 @@
   .tab b { color:var(--red); margin-left:3px; }
 
   /* bottom sheet */
-  .sheet-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:60; animation:fade .25s ease; }
+  .sheet-scrim { position:fixed; inset:0; height:100lvh; background:rgba(0,0,0,.4); z-index:60; animation:fade .25s ease; }
   .sheet-scrim.closing { animation:fadeout .26s ease forwards; }
   .sheet { position:fixed; left:0; right:0; bottom:0; max-height:92%; background:var(--bg-elevated);
     border-radius:16px 16px 0 0; box-shadow:var(--shadow); display:flex; flex-direction:column;
@@ -341,7 +343,8 @@
   .modal-actions { display:flex; justify-content:flex-end; gap:8px; }
 
   /* token gate */
-  .gate { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .gate { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    padding:calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px); }
   .gate-card { width:min(420px,92vw); border-radius:22px; padding:26px; text-align:center; }
   .gate-logo { font-size:26px; font-weight:700; letter-spacing:0; margin-bottom:14px; }
   .gate-logo b { color:var(--accent); }
@@ -1434,6 +1437,18 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+
+/* iOS standalone PWA: after the software keyboard dismisses, the layout viewport
+   can stay shrunk/offset, leaving fixed inset:0 layers and bottom-anchored chrome
+   (tabbar, sheet) misplaced. Nudge it back on focusout. The document itself never
+   scrolls (html/body are height:100%), so this is a no-op everywhere else. */
+document.addEventListener("focusout", (e) => {
+  const tag = ((e.target && e.target.tagName) || "").toLowerCase();
+  if (tag !== "input" && tag !== "textarea") return;
+  const next = ((e.relatedTarget && e.relatedTarget.tagName) || "").toLowerCase();
+  if (next === "input" || next === "textarea") return;  // keyboard staying up
+  setTimeout(() => window.scrollTo(0, 0), 100);
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", ()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
