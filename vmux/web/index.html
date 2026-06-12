@@ -145,7 +145,7 @@
   .sidebar { border-right:1px solid var(--separator); border-radius:0;
     display:flex; flex-direction:column; overflow:hidden; padding-top:env(safe-area-inset-top); }
   .sidebar-head { display:flex; align-items:center; gap:8px; padding:14px 16px 8px; }
-  .sidebar-head .title { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .sidebar-head .title { font-size:20px; font-weight:700; letter-spacing:0; }
   .sidebar-head .title b { color:var(--accent); }
   .search { padding:0 12px 8px; }
   .search-field { width:100%; background:var(--fill); border:none; border-radius:9px; padding:7px 10px;
@@ -170,6 +170,69 @@
   .ct-title { min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ct-meta { font-size:12px; color:var(--label-3); font-variant-numeric:tabular-nums; }
   .content-scroll { flex:1; overflow:auto; padding:18px; }
+
+  /* ===== command center ===== */
+  .mac.command-center { display:grid; grid-template-columns:minmax(260px,300px) minmax(340px,440px) minmax(0,1fr);
+    height:100%; min-height:0; background:var(--bg); }
+  .surface { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden;
+    border-right:1px solid var(--separator); }
+  .swarm-nav { background:var(--sidebar-bg); padding-top:env(safe-area-inset-top); }
+  .attention-queue { background:color-mix(in srgb,var(--bg-elevated) 82%,var(--bg)); }
+  .pane-inspector { background:var(--bg-elevated); border-right:none; }
+  .surface-head { flex:none; display:flex; align-items:center; gap:10px; padding:14px 16px 10px;
+    border-bottom:1px solid var(--separator); }
+  .surface-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--label-3); }
+  .surface-sub { margin-top:2px; font-size:12px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .brand { font-size:21px; font-weight:750; letter-spacing:0; line-height:1; }
+  .brand b { color:var(--accent); }
+  .surface-scroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:12px; }
+  .nav-tools { flex:none; padding:10px 12px 8px; border-bottom:1px solid var(--separator); }
+  .nav-tools .search { padding:0 0 8px; }
+  .nav-tools .seg { margin:0 0 8px; }
+  .nav-tools .sortrow { margin:0; }
+  .status-strip { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:10px 12px;
+    border-bottom:1px solid var(--separator); }
+  .stat-tile { min-width:0; background:var(--fill-2); border:1px solid var(--separator); border-radius:8px;
+    padding:7px 8px; }
+  .stat-num { display:block; font-size:17px; font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .stat-label { display:block; margin-top:2px; color:var(--label-3); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.35px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stat-tile.s-needs_input .stat-num { color:var(--red); }
+  .stat-tile.s-error .stat-num { color:var(--orange); }
+  .stat-tile.s-working .stat-num { color:var(--yellow); }
+  .nav-list .src-row { padding:8px; }
+  .nav-list .group-head { padding-top:10px; }
+  .queue-scroll { padding:12px; }
+  .attention-card { width:100%; text-align:left; color:var(--label); background:var(--bg-secondary);
+    border:.5px solid var(--separator); border-left:3px solid var(--s,var(--gray)); border-radius:10px;
+    padding:12px; margin-bottom:10px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .attention-card.selected { box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 28%,transparent); }
+  .attention-card:active { transform:scale(.995); }
+  @media (hover:hover){ .attention-card:hover { background:color-mix(in srgb,var(--bg-secondary) 86%,var(--fill)); } }
+  .attention-top { display:flex; align-items:center; gap:8px; min-width:0; }
+  .attention-name { flex:1; min-width:0; font-size:15px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .attention-meta { margin:4px 0 8px; font-size:11.5px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .attention-copy { margin:0 0 10px; color:var(--label-2); font-size:13.5px; line-height:1.35; }
+  .attention-card .menu { margin:0; }
+  .attention-card .opt { padding:7px 10px; font-size:13px; max-width:100%; white-space:normal; text-align:left; }
+  .attention-card .card-preview { margin-top:9px; max-height:96px; }
+  .queue-empty { min-height:220px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; color:var(--label-3); gap:8px; padding:24px 12px; }
+  .queue-empty .empty-glyph { font-size:34px; }
+  .inspector-head { padding:calc(env(safe-area-inset-top) + 13px) 18px 13px; }
+  .inspector-title-wrap { min-width:0; flex:1; }
+  .inspector-title { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inspector-scroll { flex:1; overflow:auto; padding:16px 18px 18px; }
+  .inspector-meta-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:14px; }
+  .meta-tile { min-width:0; background:var(--fill-2); border:1px solid var(--separator); border-radius:8px; padding:8px; }
+  .meta-label { display:block; color:var(--label-3); font-size:10.5px; text-transform:uppercase; letter-spacing:.35px; }
+  .meta-value { display:block; margin-top:3px; color:var(--label-2); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pane-inspector .output { max-height:none; height:min(52vh,520px); }
+  @media (max-width:1180px){
+    .mac.command-center { grid-template-columns:260px minmax(300px,380px) minmax(0,1fr); }
+    .inspector-meta-grid { grid-template-columns:minmax(0,1fr); }
+  }
 
   /* command palette */
   .palette-scrim { position:fixed; inset:0; background:rgba(0,0,0,.3); display:flex; justify-content:center;
@@ -200,7 +263,7 @@
   .ios-scroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
     padding-top:env(safe-area-inset-top); }
   .lt-row { display:flex; align-items:center; gap:10px; padding:6px 16px 2px; }
-  .large-title { flex:1; font-size:34px; font-weight:700; letter-spacing:-.02em; margin:0; }
+  .large-title { flex:1; font-size:34px; font-weight:700; letter-spacing:0; margin:0; }
   .ios-summary { display:flex; gap:8px; flex-wrap:wrap; padding:6px 16px 14px; }
   .chip { font-size:13px; font-weight:600; padding:5px 11px; border-radius:20px; color:var(--label-2); }
   .chip.s-needs_input { background:color-mix(in srgb,var(--red) 16%,transparent); color:var(--red); }
@@ -221,6 +284,31 @@
     background:var(--bg); border-radius:8px; padding:8px; max-height:78px; overflow:hidden;
     white-space:pre-wrap; word-break:break-word; margin-top:8px; }
   @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(255,59,48,0); } 50%{ box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 35%,transparent); } }
+
+  .mobile-attention-home { min-height:100%; padding-bottom:calc(env(safe-area-inset-bottom) + 86px); }
+  .mobile-hero { padding:6px 16px 10px; }
+  .mobile-actions { display:flex; align-items:center; gap:8px; padding:0 16px 12px; }
+  .mobile-actions .btn { flex:1; min-width:0; }
+  .mobile-section { padding:0 16px 16px; }
+  .mobile-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+    margin:6px 0 8px; }
+  .mobile-section-title { font-size:13px; font-weight:700; color:var(--label-3); text-transform:uppercase;
+    letter-spacing:.4px; }
+  .mobile-attention-home .attention-card { margin-bottom:10px; border-radius:12px; }
+  .mobile-attention-home .queue-empty { min-height:150px; background:var(--bg-elevated);
+    border:.5px solid var(--separator); border-radius:12px; }
+  .mobile-pane-list { background:var(--bg-secondary); border:.5px solid var(--separator); border-radius:12px;
+    overflow:hidden; }
+  .mobile-pane-row { display:flex; align-items:center; gap:9px; width:100%; border:none; background:transparent;
+    padding:11px 12px; text-align:left; border-bottom:1px solid var(--separator); }
+  .mobile-pane-row:last-child { border-bottom:none; }
+  .mobile-pane-name { flex:1; min-width:0; font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mobile-pane-meta { font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .mobile-dock { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(env(safe-area-inset-bottom) + 10px);
+    z-index:20; display:flex; gap:2px; padding:5px; border-radius:26px; max-width:calc(100vw - 28px); }
+  .mobile-dock .tab { padding:10px 16px; }
+  .sheet-subtitle { color:var(--label-3); font-size:12px; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .tree-sheet-tools { padding:0 10px 10px; }
 
   /* iOS 26 floating glass capsule */
   .tabbar { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(env(safe-area-inset-bottom) + 10px);
@@ -256,7 +344,7 @@
   /* token gate */
   .gate { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; }
   .gate-card { width:min(420px,92vw); border-radius:22px; padding:26px; text-align:center; }
-  .gate-logo { font-size:26px; font-weight:700; letter-spacing:-.02em; margin-bottom:14px; }
+  .gate-logo { font-size:26px; font-weight:700; letter-spacing:0; margin-bottom:14px; }
   .gate-logo b { color:var(--accent); }
   .gate-title { font-size:19px; font-weight:700; margin-bottom:8px; }
   .gate-sub { font-size:13.5px; color:var(--label-2); line-height:1.5; margin-bottom:18px; }
@@ -418,7 +506,7 @@ const DEFAULT_SNIPPETS = ["continue","yes","no"];
 
 // ---- browser-local preferences (Settings page) ----
 const PREFS_KEY = "vmux_prefs";
-const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", view:"list", sort:"status", actions:DEFAULT_ACTIONS, snippets:DEFAULT_SNIPPETS };
+const DEFAULT_PREFS = { theme:"dark", glass:true, ambient:true, sound:true, notify:true, alertErrors:false, defaultFilter:"all", view:"tree", sort:"status", actions:DEFAULT_ACTIONS, snippets:DEFAULT_SNIPPETS };
 let PREFS = (function(){ try { return {...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")}; } catch(e){ return {...DEFAULT_PREFS}; } })();
 const prefsSubs = new Set();
 function applyPrefs(p){
@@ -648,6 +736,79 @@ function DetailBody({pane, variant}){
   <//>`;
 }
 
+function timeAgo(ts){
+  if(!ts) return "no activity";
+  const s=Math.max(0,Math.round(Date.now()/1000-ts));
+  if(s<5) return "now";
+  if(s<60) return s+"s ago";
+  if(s<3600) return Math.round(s/60)+"m ago";
+  if(s<86400) return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function statusSort(a,b){ return (ORDER[a.status]-ORDER[b.status]) || ((b.starred?1:0)-(a.starred?1:0)) || ((b.updated||0)-(a.updated||0)) || cmpTarget(a,b); }
+function attentionPanes(panes){ return panes.filter(p=>p.status==="needs_input"||p.status==="error").slice().sort(statusSort); }
+function sortedPanes(panes, sort){ return panes.slice().sort((a,b)=> ((b.starred?1:0)-(a.starred?1:0)) || paneCmp(sort)(a,b)); }
+function mobileModePanes(panes, mode, sort){
+  if(mode==="queue") return attentionPanes(panes);
+  if(mode==="active") return sortedPanes(panes.filter(p=>p.status==="working"), sort);
+  return sortedPanes(panes, sort);
+}
+function previewText(pane){
+  const lines=(pane.preview&&pane.preview.length?pane.preview:pane.lines)||[];
+  return lines.slice(-5).join("\n");
+}
+
+function StatusStrip({counts}){
+  const total=(counts.needs_input||0)+(counts.error||0)+(counts.working||0)+(counts.idle||0)+(counts.offline||0);
+  const items=[["needs_input","Need",counts.needs_input||0],["error","Errors",counts.error||0],["working","Working",counts.working||0]];
+  return html`<div class="status-strip">
+    ${items.map(([s,l,n])=>html`<div class=${"stat-tile s-"+s} key=${s}>
+      <span class="stat-num">${n}</span><span class="stat-label">${l}</span>
+    </div>`)}
+    ${total===0?null:html`<div class="stat-tile" style=${{display:"none"}}><span>${total}</span></div>`}
+  </div>`;
+}
+
+function AttentionCard({pane, selected, onOpen, mobile}){
+  const isNeed=pane.status==="needs_input";
+  const copy = isNeed
+    ? (pane.question || ((pane.menu&&pane.menu.length) ? "Choose an option to unblock this agent." : "Waiting for a reply."))
+    : "Recent output matched an error pattern.";
+  return html`<div class=${"attention-card s-"+pane.status+(selected?" selected":"")+(mobile?" mobile":"")}
+    role="button" tabIndex="0" onClick=${()=>onOpen(pane.id)}
+    onKeyDown=${e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onOpen(pane.id); } }}>
+    <div class="attention-top">
+      <span class=${"dot s-"+pane.status}></span>
+      <span class="attention-name">${pane.name}</span>
+      <${StarBtn} pane=${pane} />
+      <${StatusPill} status=${pane.status} compact=${true} />
+    </div>
+    <div class="attention-meta">${pane.target} · ${pane.kind} · ${timeAgo(Math.max(pane.updated||0,pane.interacted||0))}</div>
+    <p class="attention-copy">${copy}</p>
+    ${isNeed && pane.menu && pane.menu.length ? html`<${Menu} pane=${pane} />` : null}
+    ${!isNeed && previewText(pane) ? html`<pre class="card-preview">${previewText(pane)}</pre>` : null}
+    ${isNeed && (!pane.menu || !pane.menu.length) ? html`<button class="link-btn" onClick=${e=>{ e.stopPropagation(); onOpen(pane.id); }}>Reply in inspector</button>` : null}
+  </div>`;
+}
+
+function PaneMiniRow({pane, selected, onOpen}){
+  return html`<button class=${"src-row s-"+pane.status+(selected?" sel":"")} onClick=${()=>onOpen(pane.id)}>
+    <span class=${"dot s-"+pane.status}></span>
+    <span class="src-name">${pane.name}</span>
+    <span class="src-target">${pane.target}</span>
+    <${StarBtn} pane=${pane} />
+  </button>`;
+}
+
+function MobilePaneRow({pane, onOpen}){
+  return html`<button class="mobile-pane-row" onClick=${()=>onOpen(pane.id)}>
+    <span class=${"dot s-"+pane.status}></span>
+    <span class="mobile-pane-name">${pane.name}</span>
+    <span class="mobile-pane-meta">${pane.target}</span>
+    <${StatusPill} status=${pane.status} compact=${true} />
+  </button>`;
+}
+
 /* ===================== tree view ===================== */
 function TreeView({panes, onOpen, selId}){
   const tree=useMemo(()=>buildTree(panes),[panes]);
@@ -715,21 +876,15 @@ function Palette({panes,onPick,onClose}){
   </div>`;
 }
 
-function MacApp({panes, connected, onBroadcast, onSettings}){
+function SwarmNavigator({panes, connected, selId, onOpen, onBroadcast, onSettings}){
   const prefs=usePrefs();
-  const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
   const [query,setQuery]=useState("");
-  const [selId,setSel]=useState(null);
-  const [palette,setPalette]=useState(false);
-
-  const filtered=useMemo(()=> panes.filter(p=>
-      filter==="all" || (filter==="needs"&&p.status==="needs_input") || (filter==="working"&&p.status==="working"))
-    .filter(p=> !query || (p.name+" "+p.target).toLowerCase().includes(query.toLowerCase()))
-  ,[panes,filter,query]);
+  const counts=countOf(panes);
+  const visible=useMemo(()=> panes.filter(p=> !query || (p.name+" "+p.target+" "+p.kind).toLowerCase().includes(query.toLowerCase())),[panes,query]);
 
   const groups=useMemo(()=>{
-    const starred=filtered.filter(p=>p.starred).sort(paneCmp(prefs.sort));
-    const rest=filtered.filter(p=>!p.starred);
+    const starred=visible.filter(p=>p.starred).sort(paneCmp(prefs.sort));
+    const rest=visible.filter(p=>!p.starred);
     const out=[];
     if(starred.length) out.push({key:"starred", label:"Starred", items:starred});
     if(prefs.sort==="status"){
@@ -741,10 +896,101 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
       out.push({key:"all", label:SORT_LABEL[prefs.sort], items:rest.slice().sort(paneCmp(prefs.sort))});
     }
     return out;
-  },[filtered, prefs.sort]);
-  const flat=useMemo(()=>groups.flatMap(g=>g.items),[groups]);
+  },[visible, prefs.sort]);
 
-  useEffect(()=>{ if(selId && panes.some(p=>p.id===selId)) return; if(flat[0]) setSel(flat[0].id); },[flat,selId,panes]);
+  return html`<aside class="swarm-nav surface glass">
+    <div class="surface-head">
+      <div>
+        <div class="brand">v<b>mux</b></div>
+        <div class="surface-sub">${connected?"Live swarm":"Reconnecting to server"}</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
+      <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+      <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
+    </div>
+    <${StatusStrip} counts=${counts} />
+    <div class="nav-tools">
+      <div class="search"><input class="search-field" name="search" autocomplete="off" placeholder="Search swarm" value=${query} onInput=${e=>setQuery(e.target.value)} /></div>
+      <div class="seg">
+        ${[["tree","Tree"],["list","List"]].map(([v,l])=>html`
+          <button class=${"seg-btn"+(prefs.view===v?" on":"")} key=${v} onClick=${()=>setPrefs({view:v})}>${l}</button>`)}
+      </div>
+      <div class="sortrow"><span class="sortrow-label">Sort</span>
+        <select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
+          ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
+        </select>
+      </div>
+    </div>
+    <nav class="surface-scroll nav-list">
+      ${prefs.view==="tree"
+        ? html`<${TreeView} panes=${visible} onOpen=${onOpen} selId=${selId} />`
+        : html`<${F}>
+          ${groups.length===0 && html`<div class="palette-empty">${connected?"No matching panes":"Reconnecting…"}</div>`}
+          ${groups.map(g=>html`<${F} key=${g.key}>
+            <div class="group-head">${g.label}<span>${g.items.length}</span></div>
+            ${g.items.map(p=>html`<${PaneMiniRow} key=${p.id} pane=${p} selected=${p.id===selId} onOpen=${onOpen} />`)}
+          <//>`)}
+        <//>`}
+    </nav>
+  </aside>`;
+}
+
+function AttentionQueue({panes, connected, selId, onOpen}){
+  const counts=countOf(panes);
+  const urgent=useMemo(()=>attentionPanes(panes),[panes]);
+  return html`<section class="attention-queue surface">
+    <div class="surface-head">
+      <div>
+        <div class="surface-title">Attention queue</div>
+        <div class="surface-sub">${counts.needs_input||0} waiting · ${counts.error||0} errors</div>
+      </div>
+      <div class="spacer"></div>
+      ${urgent.length?html`<span class="chip s-needs_input">${urgent.length} urgent</span>`:html`<span class="chip">Clear</span>`}
+    </div>
+    <div class="surface-scroll queue-scroll">
+      ${!connected && panes.length===0 ? html`<div class="queue-empty"><div class="empty-glyph">⌁</div><div>Reconnecting</div><div class="surface-sub">Waiting for the vmux server.</div></div>`
+        : panes.length===0 ? html`<div class="queue-empty"><div class="empty-glyph">▦</div><div>No panes discovered</div><div class="surface-sub">Start or discover tmux panes to populate the swarm.</div></div>`
+        : urgent.length===0 ? html`<div class="queue-empty"><div class="empty-glyph">✓</div><div>No agents need attention</div><div class="surface-sub">Working and idle panes stay available in the swarm navigator.</div></div>`
+        : urgent.map(p=>html`<${AttentionCard} key=${p.id} pane=${p} selected=${p.id===selId} onOpen=${onOpen} />`)}
+    </div>
+  </section>`;
+}
+
+function PaneInspector({pane, connected}){
+  return html`<main class="pane-inspector surface">
+    ${pane ? html`<${F}>
+      <div class="surface-head inspector-head glass">
+        <div class="inspector-title-wrap">
+          <div class="inspector-title">${pane.name}</div>
+          <div class="surface-sub">${pane.target} · ${pane.kind}</div>
+        </div>
+        <${StatusPill} status=${pane.status} />
+        <${StarBtn} pane=${pane} />
+      </div>
+      <div class="inspector-scroll">
+        <div class="inspector-meta-grid">
+          <div class="meta-tile"><span class="meta-label">Pane</span><span class="meta-value">${pane.target}</span></div>
+          <div class="meta-tile"><span class="meta-label">Updated</span><span class="meta-value">${timeAgo(pane.updated)}</span></div>
+          <div class="meta-tile"><span class="meta-label">Last sent</span><span class="meta-value">${timeAgo(pane.interacted)}</span></div>
+        </div>
+        <${DetailBody} pane=${pane} variant="mac" />
+      </div>
+    <//>` : html`<div class="empty"><div class="empty-glyph">▦</div>${connected?"Select a pane from the queue or swarm navigator":"Reconnecting…"}</div>`}
+  </main>`;
+}
+
+function MacApp({panes, connected, onBroadcast, onSettings}){
+  const prefs=usePrefs();
+  const [selId,setSel]=useState(null);
+  const [palette,setPalette]=useState(false);
+  const priority=useMemo(()=>{
+    const urgent=attentionPanes(panes);
+    const seen=new Set(urgent.map(p=>p.id));
+    return urgent.concat(sortedPanes(panes.filter(p=>!seen.has(p.id)), prefs.sort));
+  },[panes,prefs.sort]);
+
+  useEffect(()=>{ if(selId && panes.some(p=>p.id===selId)) return; if(priority[0]) setSel(priority[0].id); },[priority,selId,panes]);
   const sel=panes.find(p=>p.id===selId)||null;
 
   useEffect(()=>{
@@ -755,91 +1001,28 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
       if(tag==="input"||tag==="textarea") return;
       if(e.key==="ArrowDown"||e.key==="ArrowUp"){
         e.preventDefault();
-        const idx=flat.findIndex(p=>p.id===selId);
-        const ni=e.key==="ArrowDown"?Math.min(flat.length-1,idx+1):Math.max(0,idx-1);
-        if(flat[ni]) setSel(flat[ni].id);
+        const idx=priority.findIndex(p=>p.id===selId);
+        const safeIdx=idx<0?0:idx;
+        const ni=e.key==="ArrowDown"?Math.min(priority.length-1,safeIdx+1):Math.max(0,safeIdx-1);
+        if(priority[ni]) setSel(priority[ni].id);
       } else if(sel && sel.menu && sel.menu.length && /^[0-9]$/.test(e.key)){
         const opt=sel.menu.find(o=>o.key===e.key); if(opt) act.select(sel,e.key);
       }
     };
     window.addEventListener("keydown",onKey);
     return ()=>window.removeEventListener("keydown",onKey);
-  },[flat,selId,sel,palette]);
+  },[priority,selId,sel,palette]);
 
-  return html`<div class="mac">
-    <aside class="sidebar glass">
-      <div class="sidebar-head">
-        <div class="title">v<b>mux</b></div>
-        <div class="spacer"></div>
-        <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
-        <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
-        <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
-      </div>
-      <div class="search"><input class="search-field" name="search" autocomplete="off" placeholder="Search" value=${query} onInput=${e=>setQuery(e.target.value)} /></div>
-      <div class="seg">
-        ${[["list","List"],["tree","Tree"]].map(([v,l])=>html`
-          <button class=${"seg-btn"+(prefs.view===v?" on":"")} key=${v} onClick=${()=>setPrefs({view:v})}>${l}</button>`)}
-      </div>
-      ${prefs.view==="tree"
-        ? html`<nav class="source-list"><${TreeView} panes=${panes} onOpen=${setSel} selId=${selId} /></nav>`
-        : html`<${F}>
-          <div class="seg">
-            ${[["all","All"],["needs","Needs you"],["working","Working"]].map(([f,l])=>html`
-              <button class=${"seg-btn"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}</button>`)}
-          </div>
-          <div class="sortrow"><span class="sortrow-label">Sort</span>
-            <select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
-              ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
-            </select>
-          </div>
-          <nav class="source-list">
-            ${groups.length===0 && html`<div class="palette-empty">${connected?"No agents":"Connecting…"}</div>`}
-            ${groups.map(g=>html`<${F} key=${g.key}>
-              <div class="group-head">${g.label}<span>${g.items.length}</span></div>
-              ${g.items.map(p=>html`<button class=${"src-row"+(p.id===selId?" sel":"")} key=${p.id} onClick=${()=>setSel(p.id)}>
-                <span class=${"dot s-"+p.status}></span>
-                <span class="src-name">${p.name}</span>
-                <span class="src-target">${p.target}</span>
-                <${StarBtn} pane=${p} />
-              </button>`)}
-            <//>`)}
-          </nav>
-        <//>`}
-    </aside>
-    <main class="content">
-      ${sel ? html`<${F}>
-        <div class="content-toolbar glass">
-          <div class="ct-title">${sel.name}</div>
-          <${StatusPill} status=${sel.status} />
-          <div class="spacer"></div>
-          <${StarBtn} pane=${sel} />
-          <span class="ct-meta">${sel.target} · ${sel.kind}</span>
-        </div>
-        <div class="content-scroll"><${DetailBody} pane=${sel} variant="mac" /></div>
-      <//>` : html`<div class="empty"><div class="empty-glyph">▦</div>${connected?"Select an agent  ·  ⌘K to jump":"Connecting…"}</div>`}
-    </main>
+  return html`<div class="mac command-center">
+    <${SwarmNavigator} panes=${panes} connected=${connected} selId=${selId} onOpen=${setSel} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+    <${AttentionQueue} panes=${panes} connected=${connected} selId=${selId} onOpen=${setSel} />
+    <${PaneInspector} pane=${sel} connected=${connected} />
     ${palette && html`<${Palette} panes=${panes} onPick=${id=>{ setSel(id); setPalette(false); }} onClose=${()=>setPalette(false)} />`}
   </div>`;
 }
 
 /* ===================== iOS ===================== */
-function IOSCard({pane, onOpen}){
-  return html`<div class=${"card s-"+pane.status} onClick=${onOpen}>
-    <div class="card-top">
-      <div class="card-name">${pane.name}</div>
-      <${StarBtn} pane=${pane} />
-      <${StatusPill} status=${pane.status} />
-    </div>
-    <div class="card-meta">${pane.target} · ${pane.kind}</div>
-    ${pane.status==="needs_input" && html`<${F}>
-      ${pane.question && html`<div class="card-q">${pane.question}</div>`}
-      <${Menu} pane=${pane} variant="buttons" />
-    <//>`}
-    ${pane.preview && pane.preview.length>0 && html`<pre class="card-preview">${pane.preview.join("\n")}</pre>`}
-  </div>`;
-}
-
-function Sheet({pane, onClose}){
+function MobileSheet({title, subtitle, onClose, children}){
   const [dy,setDy]=useState(0);
   const [closing,setClosing]=useState(false);
   const drag=useRef(null);
@@ -854,64 +1037,106 @@ function Sheet({pane, onClose}){
       <div class="sheet-grab-zone" onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp}>
         <div class="grabber"></div>
         <div class="sheet-head">
-          <div class="sheet-title">${pane.name}</div>
-          <${StarBtn} pane=${pane} />
-          <${StatusPill} status=${pane.status} />
+          <div style=${{minWidth:0,flex:1}}>
+            <div class="sheet-title">${title}</div>
+            ${subtitle?html`<div class="sheet-subtitle">${subtitle}</div>`:null}
+          </div>
+          <button class="btn" onClick=${close}>Done</button>
         </div>
       </div>
-      <div class="sheet-scroll"><${DetailBody} pane=${pane} variant="ios" /></div>
+      <div class="sheet-scroll">${children}</div>
     </div>
   </div>`;
 }
 
-function IOSApp({panes, connected, onBroadcast, onSettings}){
+function PaneDetailSheet({pane, onClose}){
+  return html`<${MobileSheet} title=${pane.name} subtitle=${pane.target+" · "+pane.kind} onClose=${onClose}>
+    <div style=${{display:"flex",alignItems:"center",gap:"10px",marginBottom:"12px"}}>
+      <${StatusPill} status=${pane.status} />
+      <${StarBtn} pane=${pane} />
+      <div class="spacer"></div>
+      <span class="surface-sub">Updated ${timeAgo(pane.updated)}</span>
+    </div>
+    <${DetailBody} pane=${pane} variant="ios" />
+  <//>`;
+}
+
+function MobileAttentionHome({panes, connected, mode, onOpenDetail, onOpenTree, onBroadcast, onSettings}){
   const prefs=usePrefs();
-  const [filter,setFilter]=useState(PREFS.defaultFilter||"all");
-  const [openId,setOpen]=useState(null);
-  const [scrolled,setScrolled]=useState(false);
   const counts=countOf(panes);
-  const sorted=useMemo(()=> panes.filter(p=>
-      filter==="all"||(filter==="needs"&&p.status==="needs_input")||(filter==="working"&&p.status==="working"))
-    .slice().sort((a,b)=> ((b.starred?1:0)-(a.starred?1:0)) || paneCmp(prefs.sort)(a,b)),[panes,filter,prefs.sort]);
+  const urgent=useMemo(()=>attentionPanes(panes),[panes]);
+  const visible=useMemo(()=>mobileModePanes(panes,mode,prefs.sort),[panes,mode,prefs.sort]);
+  const modeTitle = mode==="active" ? "Active" : (mode==="all" ? "All panes" : "Attention queue");
+  return html`<div class="mobile-attention-home">
+    <div class="lt-row mobile-hero">
+      <h1 class="large-title">vmux</h1>
+      <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
+      <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+      <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
+    </div>
+    <div class="ios-summary">
+      <span class=${"chip glass"+((counts.needs_input||0)?" s-needs_input":"")}>${counts.needs_input||0} need you</span>
+      <span class="chip glass">${counts.error||0} errors</span>
+      <span class="chip glass">${counts.working||0} working</span>
+      <span class="chip glass">${panes.length} panes</span>
+    </div>
+
+    <section class="mobile-section">
+      <div class="mobile-section-head">
+        <div class="mobile-section-title">${modeTitle}</div>
+        ${mode==="queue"
+          ? (urgent.length?html`<span class="chip s-needs_input">${urgent.length} urgent</span>`:html`<span class="chip">Clear</span>`)
+          : mode==="active"
+            ? html`<span class="chip">${visible.length} working</span>`
+            : html`<select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
+                ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
+              </select>`}
+      </div>
+      ${mode==="all" ? html`<div class="mobile-actions">
+        <button class="btn" onClick=${onOpenTree}>Open tree</button>
+        <button class="btn" onClick=${onBroadcast}>Broadcast</button>
+      </div>` : null}
+      ${!connected && panes.length===0 ? html`<div class="queue-empty"><div class="empty-glyph">⌁</div><div>Reconnecting</div><div class="surface-sub">Waiting for vmux state.</div></div>`
+        : panes.length===0 ? html`<div class="queue-empty"><div class="empty-glyph">▦</div><div>No panes discovered</div><div class="surface-sub">The swarm tree will fill in as panes appear.</div></div>`
+        : mode==="queue"
+          ? (urgent.length===0
+            ? html`<div class="queue-empty"><div class="empty-glyph">✓</div><div>No agents need attention</div><div class="surface-sub">Working panes are in Active. Everything else is in All.</div></div>`
+            : urgent.map(p=>html`<${AttentionCard} key=${p.id} pane=${p} mobile=${true} onOpen=${onOpenDetail} />`))
+          : visible.length===0
+            ? html`<div class="queue-empty"><div class="empty-glyph">${mode==="active"?"◌":"▦"}</div><div>${mode==="active"?"No working panes":"No panes"}</div><div class="surface-sub">${mode==="active"?"Agents currently working will appear here.":"The full swarm appears here when panes are available."}</div></div>`
+            : html`<div class="mobile-pane-list">
+                ${visible.map(p=>html`<${MobilePaneRow} key=${p.id} pane=${p} onOpen=${onOpenDetail} />`)}
+              </div>`}
+    </section>
+  </div>`;
+}
+
+function IOSApp({panes, connected, onBroadcast, onSettings}){
+  const [openId,setOpen]=useState(null);
+  const [sheetMode,setSheetMode]=useState(null);
+  const [mobileMode,setMobileMode]=useState("queue");
+  const [scrolled,setScrolled]=useState(false);
   const open=panes.find(p=>p.id===openId)||null;
+  const openDetail=(id)=>{ setOpen(id); setSheetMode("detail"); };
+  const counts=countOf(panes);
+  const dockItems=[["queue","Queue",(counts.needs_input||0)+(counts.error||0)],["active","Active",counts.working||0],["all","All",panes.length]];
+  const navTitle = mobileMode==="active" ? "Active" : (mobileMode==="all" ? "All" : "Queue");
 
   return html`<div class="ios">
-    <div class=${"ios-nav"+(scrolled?" small glass":"")}><div class="ios-nav-inline">vmux</div></div>
+    <div class=${"ios-nav"+(scrolled?" small glass":"")}><div class="ios-nav-inline">${navTitle}</div></div>
     <div class="ios-scroll" onScroll=${e=>setScrolled(e.target.scrollTop>34)}>
-      <div class="lt-row">
-        <h1 class="large-title">vmux</h1>
-        <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
-        <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
-        <span class=${"conn"+(connected?" on":"")}></span>
-      </div>
-      <div class="ios-summary">
-        ${counts.needs_input?html`<span class="chip glass s-needs_input">${counts.needs_input} need you</span>`:null}
-        ${counts.working?html`<span class="chip glass">${counts.working} working</span>`:null}
-        ${counts.idle?html`<span class="chip glass">${counts.idle} idle</span>`:null}
-      </div>
-      <div class="ios-controls">
-        <div class="seg">
-          ${[["list","List"],["tree","Tree"]].map(([v,l])=>html`
-            <button class=${"seg-btn"+(prefs.view===v?" on":"")} key=${v} onClick=${()=>setPrefs({view:v})}>${l}</button>`)}
-        </div>
-        ${prefs.view==="list" ? html`<select class="sortsel" name="sort" value=${prefs.sort} onChange=${e=>setPrefs({sort:e.target.value})}>
-          ${SORTS.map(([v,l])=>html`<option key=${v} value=${v} selected=${prefs.sort===v}>${l}</option>`)}
-        </select>`:null}
-      </div>
-      ${prefs.view==="tree"
-        ? html`<div class="ios-tree"><${TreeView} panes=${panes} onOpen=${(id)=>setOpen(id)} /></div>`
-        : (sorted.length===0
-          ? html`<div class="empty" style=${{height:"50vh"}}><div class="empty-glyph">▦</div>${connected?"No agents":"Connecting…"}</div>`
-          : html`<div class="ios-grid">
-              ${sorted.map(p=>html`<${IOSCard} key=${p.id} pane=${p} onOpen=${()=>setOpen(p.id)} />`)}
-            </div>`)}
-      <div class="ios-bottom-pad"></div>
+      <${MobileAttentionHome} panes=${panes} connected=${connected} mode=${mobileMode} onOpenDetail=${openDetail}
+        onOpenTree=${()=>setSheetMode("tree")} onBroadcast=${onBroadcast} onSettings=${onSettings} />
     </div>
-    <nav class="tabbar glass">
-      ${[["all","All",0],["needs","Needs you",counts.needs_input||0],["working","Working",counts.working||0]].map(([f,l,n])=>html`
-        <button class=${"tab"+(filter===f?" on":"")} key=${f} onClick=${()=>setFilter(f)}>${l}${n?html` <b>${n}</b>`:null}</button>`)}
+    <nav class="mobile-dock glass">
+      ${dockItems.map(([mode,label,count])=>html`<button class=${"tab"+(mobileMode===mode?" on":"")} key=${mode} onClick=${()=>setMobileMode(mode)}>
+        ${label}${count?html` <b>${count}</b>`:null}
+      </button>`)}
     </nav>
-    ${open && html`<${Sheet} pane=${open} onClose=${()=>setOpen(null)} />`}
+    ${sheetMode==="tree" && html`<${MobileSheet} title="Swarm tree" subtitle=${panes.length+" panes"} onClose=${()=>setSheetMode(null)}>
+      <div class="ios-tree"><${TreeView} panes=${panes} onOpen=${id=>{ setOpen(id); setSheetMode("detail"); }} /></div>
+    <//>`}
+    ${sheetMode==="detail" && open && html`<${PaneDetailSheet} pane=${open} onClose=${()=>{ setSheetMode(null); setOpen(null); }} />`}
   </div>`;
 }
 
@@ -1109,7 +1334,8 @@ function ShortcutEditor({prefs, allowedKeys}){
         <div class="spacer"></div>
         <button class="link-btn" onClick=${()=>save(DEFAULT_ACTIONS)}>Reset to default</button>
       </div>
-    </div>`;
+    </div>
+  <//>`;
 }
 
 function SnippetEditor({prefs}){
@@ -1130,7 +1356,8 @@ function SnippetEditor({prefs}){
         <div class="spacer"></div>
         <button class="link-btn" onClick=${()=>save(DEFAULT_SNIPPETS)}>Reset to default</button>
       </div>
-    </div>`;
+    </div>
+  <//>`;
 }
 
 function SettingsContent({panes}){
