@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vmux.config import Config
-from vmux.detectors import classify_kind, detect, parse_claude_menu
+from vmux.detectors import classify_kind, detect, parse_claude_menu, parse_question_menu
 from vmux.models import (
     KIND_CLAUDE,
     KIND_GENERIC,
@@ -143,3 +143,84 @@ def test_no_false_menu_from_numbered_list():
     assert res.status != STATUS_NEEDS_INPUT
     question, options = parse_claude_menu(text.splitlines())
     assert options == []
+
+
+# --- real-capture-grounded regressions: stable active/idle + option lists --- #
+
+# Claude at the prompt after finishing a turn: the composer chrome + a past-tense
+# "for Ns" line. This must stay IDLE even when the screen just changed (the bug
+# was the ✳ brand glyph flapping it to "working").
+CLAUDE_IDLE_COMPOSER = """\
+✻ Cooked for 27s
+※ recap: fixed three buttons and shipped build 20.0.4.
+─────────────────────────────────── fix-non-functional-buttons ──
+❯
+──────────────────────────────────────────────────────────────────
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle)   new task? /clear to save 198.6k tokens
+"""
+
+# Claude mid-turn: the live "Verbing… (Ns · ↓ tokens)" counter, NO "esc to
+# interrupt" visible (it can scroll off behind the slash-command popup).
+CLAUDE_SPINNER_ONLY = """\
+· Photosynthesizing… (59s · ↓ 3.4k tokens)
+─────────────────────────────────── vmux-pin-panes-tree-view ──
+❯ /
+"""
+
+# Codex / generic CLI approval dialog: numbered choices with no ❯ cursor.
+CODEX_APPROVAL = """\
+codex wants to run: rm -rf build/
+
+Allow this command?
+  1) Yes, run it
+  2) Yes, and don't ask again
+  3) No, tell Codex what to do
+"""
+
+# An *optional* survey must not nag as needs_input.
+CLAUDE_OPTIONAL_SURVEY = """\
+※ recap: published 19 reels.
+● How is Claude doing this session? (optional)
+  1: Bad    2: Fine   3: Good   0: Dismiss
+─────────────────────────────────── launchd-queue-publisher ──
+❯
+  -- INSERT -- auto mode on   new task? /clear to save 884.9k tokens
+"""
+
+
+def test_claude_idle_does_not_flap_when_changed():
+    # changed=True and a ✳ spinner-glyph title — must still be IDLE, not working.
+    res = detect(CLAUDE_IDLE_COMPOSER, KIND_CLAUDE, True, CFG, title="✳ fix-buttons")
+    assert res.status == STATUS_IDLE
+
+
+def test_claude_working_from_spinner_line():
+    res = detect(CLAUDE_SPINNER_ONLY, KIND_CLAUDE, True, CFG, title="⠐ vmux")
+    assert res.status == STATUS_WORKING
+
+
+def test_codex_routed_to_generic_by_cmd():
+    assert classify_kind("codex", "alpha", "some text") == KIND_GENERIC
+
+
+def test_codex_cursorless_menu_detected():
+    res = detect(CODEX_APPROVAL, KIND_GENERIC, True, CFG, title="")
+    assert res.status == STATUS_NEEDS_INPUT
+    assert [o.key for o in res.menu_list()] == ["1", "2", "3"]
+    q, opts = parse_question_menu(CODEX_APPROVAL.splitlines())
+    assert q == "Allow this command?"
+
+
+def test_optional_survey_not_needs_input():
+    res = detect(CLAUDE_OPTIONAL_SURVEY, KIND_CLAUDE, True, CFG, title="✳ task")
+    assert res.status == STATUS_IDLE
+    # and the generic path also refuses an "(optional)" prompt
+    _, opts = parse_question_menu(CLAUDE_OPTIONAL_SURVEY.splitlines())
+    assert opts == []
+
+
+def test_question_menu_ignores_plain_numbered_prose():
+    # numbered list not at the bottom and no prompt word -> not a dialog
+    text = "Plan:\n1. clone repo\n2. build it\nThen I'll continue."
+    q, opts = parse_question_menu(text.splitlines())
+    assert opts == []
