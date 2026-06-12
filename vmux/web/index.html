@@ -285,18 +285,17 @@
     white-space:pre-wrap; word-break:break-word; margin-top:8px; }
   @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(255,59,48,0); } 50%{ box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 35%,transparent); } }
 
-  .mobile-attention-home { padding-bottom:12px; }
+  .mobile-attention-home { min-height:100%; display:flex; flex-direction:column; padding-bottom:12px; }
   .mobile-hero { padding:6px 16px 10px; }
   .mobile-actions { display:flex; align-items:center; gap:8px; padding:0 16px 12px; }
   .mobile-actions .btn { flex:1; min-width:0; }
-  .mobile-section { padding:0 16px 16px; }
+  .mobile-section { padding:0 16px 16px; flex:1; min-height:0; display:flex; flex-direction:column; }
   .mobile-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
     margin:6px 0 8px; }
   .mobile-section-title { font-size:13px; font-weight:700; color:var(--label-3); text-transform:uppercase;
     letter-spacing:.4px; }
   .mobile-attention-home .attention-card { margin-bottom:10px; border-radius:12px; }
-  .mobile-attention-home .queue-empty { min-height:150px; background:var(--bg-elevated);
-    border:.5px solid var(--separator); border-radius:12px; }
+  .mobile-attention-home .queue-empty { flex:1; min-height:150px; background:transparent; border:none; }
   .mobile-pane-list { background:var(--bg-secondary); border:.5px solid var(--separator); border-radius:12px;
     overflow:hidden; }
   .mobile-pane-row { display:flex; align-items:center; gap:9px; width:100%; border:none; background:transparent;
