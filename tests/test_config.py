@@ -18,7 +18,11 @@ def test_editable_dict_has_expected_keys():
     assert set(d) == {
         "poll_interval", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
+        "usage_enabled", "usage_quota_refresh", "usage_report_refresh",
+        "usage_alert_threshold",
     }
+    # the exec'd command must never be exposed to (or settable from) the UI
+    assert "usage_command" not in d
 
 
 def test_naming_mode():
@@ -105,6 +109,48 @@ def test_patterns_recompile_and_affect_detection():
     c.apply_patch({"generic_prompt_patterns": [r"DEPLOY NOW\?"]})
     res = detect("about to ship\nDEPLOY NOW?", KIND_GENERIC, False, c, "")
     assert res.status == STATUS_NEEDS_INPUT
+
+
+def test_usage_yaml_section(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "usage:\n"
+        "  enabled: false\n"
+        "  command: /opt/bin/tokscale\n"
+        "  quota_refresh: 5\n"        # below floor -> clamped up
+        "  report_refresh: 99999\n"   # above ceiling -> clamped down
+        "  alert_threshold: 150\n"
+    )
+    c = config.load(str(cfgfile))
+    assert c.usage_enabled is False
+    assert c.usage_command == "/opt/bin/tokscale"
+    assert c.usage_quota_refresh == 30.0
+    assert c.usage_report_refresh == 3600.0
+    assert c.usage_alert_threshold == 100.0
+
+
+def test_usage_defaults():
+    c = config.Config()
+    assert c.usage_enabled is True
+    assert c.usage_command == "tokscale"
+    assert c.usage_quota_refresh == 180.0
+    assert c.usage_report_refresh == 300.0
+    assert c.usage_alert_threshold == 20.0
+
+
+def test_usage_patch_clamps_and_command_immutable():
+    c = config.Config()
+    c.apply_patch({"usage_enabled": False, "usage_quota_refresh": 1,
+                   "usage_report_refresh": 999999, "usage_alert_threshold": -5})
+    assert c.usage_enabled is False
+    assert c.usage_quota_refresh == 30.0
+    assert c.usage_report_refresh == 3600.0
+    assert c.usage_alert_threshold == 0.0
+    with pytest.raises(ValueError):
+        c.apply_patch({"usage_quota_refresh": "soon"})
+    # usage_command silently ignored by apply_patch — HTTP must not set it
+    c.apply_patch({"usage_command": "/tmp/evil"})
+    assert c.usage_command == "tokscale"
 
 
 def test_overlay_roundtrip_preserves_yaml(tmp_path):

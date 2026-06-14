@@ -10,6 +10,9 @@ have to be URL-encoded):
     POST /api/broadcast{ids, text, enter}-> send text to many panes
     GET  /api/config                     -> editable server settings + read-only info
     PATCH /api/config  {partial}         -> update settings live, persist to overlay
+    GET  /api/usage                      -> provider quotas + today's usage summary
+    GET  /api/usage/history?period=&days=-> hourly | daily | monthly usage buckets
+    POST /api/usage/refresh {scope}      -> force a tokscale re-scan, return fresh usage
     WS   /ws[?token=]                    -> push full state every tick
 """
 
@@ -30,6 +33,7 @@ from pydantic import BaseModel
 from . import __version__, tmux
 from .config import Config, save_overlay
 from .poller import Hub
+from .usage import PERIODS, UsageCollector
 
 WEB_DIR = Path(__file__).resolve().parent / "web"   # packaged inside vmux/ so it ships in the wheel
 
@@ -65,21 +69,41 @@ class StarReq(BaseModel):
     starred: bool
 
 
+class PushRegisterReq(BaseModel):
+    token: str
+    name: str = ""
+    platform: str = "ios"
+
+
+class PushUnregisterReq(BaseModel):
+    token: str
+
+
+class UsageRefreshReq(BaseModel):
+    scope: str = "all"   # quota | reports | all
+
+
 def create_app(cfg: Config) -> FastAPI:
     hub = Hub(cfg)
+    usage = UsageCollector(cfg, push=hub.push)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         import asyncio
         task = asyncio.create_task(hub.run())
+        usage_task = asyncio.create_task(usage.run()) if cfg.usage_enabled else None
         try:
             yield
         finally:
             hub.stop()
             task.cancel()
+            if usage_task is not None:
+                usage.stop()
+                usage_task.cancel()
 
     app = FastAPI(title="vmux", version=__version__, lifespan=lifespan)
     app.state.hub = hub
+    app.state.usage = usage
 
     def require_auth(authorization: Optional[str] = Header(None)):
         if not cfg.token:
@@ -155,6 +179,8 @@ def create_app(cfg: Config) -> FastAPI:
             "version": app.version,
             "targets": [hub.states[pid].target for pid in hub.order if pid in hub.states],
             "allowed_keys": sorted(tmux.ALLOWED_KEYS),
+            "push": hub.push.info(),
+            "usage": usage.info(),
         }
         return d
 
@@ -207,6 +233,40 @@ def create_app(cfg: Config) -> FastAPI:
         save_overlay(cfg)
         hub.kick()
         return {"ok": True}
+
+    @app.get("/api/usage")
+    def get_usage(_=Depends(require_auth)):
+        return usage.usage_payload()
+
+    @app.get("/api/usage/history")
+    def get_usage_history(period: str = "daily", days: Optional[int] = None,
+                          _=Depends(require_auth)):
+        if period not in PERIODS:
+            raise HTTPException(status_code=400, detail="bad period: %s" % period)
+        return usage.history_payload(period, days)
+
+    @app.post("/api/usage/refresh")
+    async def post_usage_refresh(req: UsageRefreshReq, _=Depends(require_auth)):
+        if req.scope not in ("quota", "reports", "all"):
+            raise HTTPException(status_code=400, detail="bad scope: %s" % req.scope)
+        await usage.refresh(req.scope)
+        return usage.usage_payload()
+
+    @app.post("/api/push/register")
+    def push_register(req: PushRegisterReq, _=Depends(require_auth)):
+        # Tokens are accepted even while APNs isn't configured yet, so enabling
+        # push server-side later doesn't require re-registering every device.
+        try:
+            fresh = hub.push.registry.add(req.token, name=req.name, platform=req.platform)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        info = hub.push.info()
+        info.update({"ok": True, "registered": True, "new": fresh})
+        return info
+
+    @app.post("/api/push/unregister")
+    def push_unregister(req: PushUnregisterReq, _=Depends(require_auth)):
+        return {"ok": True, "removed": hub.push.registry.remove(req.token)}
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):

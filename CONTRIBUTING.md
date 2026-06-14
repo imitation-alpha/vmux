@@ -30,7 +30,9 @@ vmux/
   poller.py      the async poll loop + WebSocket hub + session tracking
   server.py      FastAPI app: REST + WebSocket + static UI
   web/           single-file React+htm PWA (index.html), vendored libs, service worker
-tests/           pytest (detectors, config, naming, sessions) — all pure, run in CI
+  push.py        optional APNs push support (extra deps: pip install 'vmux[push]')
+  usage.py       optional tokscale usage/quota collector
+tests/           pytest (detectors, config, naming, sessions, push, usage) — all pure, run in CI
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow.

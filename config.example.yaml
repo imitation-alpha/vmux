@@ -19,6 +19,31 @@ panes:
   #   name: "API refactor"
   #   kind: claude-code         # claude-code | generic | shell
 
+# Optional APNs push for registered mobile clients.
+# Requires the extra deps:  pip install 'vmux[push]'
+# Store key material outside the repo and keep config.yaml local.
+# push:
+#   apns_key_path: <APNS_KEY_PATH>
+#   apns_key_id: <KEY_ID>
+#   apns_team_id: <TEAM_ID>
+#   apns_topic: <BUNDLE_ID>
+#   environment: sandbox           # sandbox | production
+#   on_error: false                # also push on error status, not just needs_input
+#   cooldown: 30                   # min seconds between pushes for the same pane
+
+# Optional token-usage + quota tracking via tokscale (https://github.com/junhoyeo/tokscale).
+# Powers the Stats screens: remaining provider quotas, usage charts, daily summary.
+# Install tokscale yourself:  npm i -g tokscale   (or: bun i -g tokscale)
+# vmux deliberately never auto-downloads it.
+# usage:
+#   enabled: true
+#   command: tokscale       # if vmux runs under launchd/systemd it may not see your
+#                           # shell PATH — use an absolute path, e.g. ~/.bun/bin/tokscale
+#   quota_refresh: 180      # seconds between provider-quota checks (`tokscale usage`)
+#   report_refresh: 300     # seconds between usage scans (CPU-heavy, keep >= 60)
+#   alert_threshold: 20     # server push when a quota drops below this % (0 disables;
+#                           # needs the push: section above to be configured)
+
 # Detector tuning for non-Claude agents (regex).
 detectors:
   generic_prompt_patterns:

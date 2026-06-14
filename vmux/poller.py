@@ -20,6 +20,7 @@ from .models import (
     STATUS_OFFLINE,
     PaneState,
 )
+from .push import PushManager
 
 
 def _strip_spinner(s: str) -> str:
@@ -57,6 +58,7 @@ class Hub:
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
+        self.push = PushManager(cfg)
         self._wake = asyncio.Event()
         self._stop = False
 
@@ -149,10 +151,12 @@ class Hub:
             )
             new_order.append(pid)
 
+        alerts = self.push.collect(self.states, new_states)
         self.states = new_states
         self.order = new_order
         # drop interaction timestamps for panes that no longer exist
         self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
+        self.push.fire(alerts)   # async, best-effort; never blocks the poll
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:

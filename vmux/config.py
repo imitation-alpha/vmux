@@ -74,6 +74,28 @@ class Config:
     generic_prompt_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_GENERIC_PROMPTS))
     error_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_ERROR_PATTERNS))
 
+    # optional APNs push (YAML `push:` section only — not editable from the UI,
+    # since it points at local key material). See vmux/push.py.
+    apns_key_path: str = ""          # path to the APNs auth key
+    apns_key_id: str = ""            # 10-char key id from the developer portal
+    apns_team_id: str = ""           # 10-char Apple team id
+    apns_topic: str = ""             # app bundle id, e.g. dev.example.vmux
+    apns_environment: str = "sandbox"   # sandbox | production
+    push_on_error: bool = False      # also push on error status (not just needs_input)
+    push_cooldown: float = 30.0      # min seconds between pushes for the same pane
+
+    # where registered device tokens persist (set by load(); like overlay_path)
+    push_store_path: Optional[str] = field(default=None, repr=False)
+
+    # optional tokscale usage/quota tracking (YAML `usage:` section). The
+    # command itself is YAML-only — a string that gets exec'd must not be
+    # settable over HTTP. See vmux/usage.py.
+    usage_enabled: bool = True
+    usage_command: str = "tokscale"      # may include args, e.g. "npx -y tokscale"
+    usage_quota_refresh: float = 180.0   # seconds between `tokscale usage` calls
+    usage_report_refresh: float = 300.0  # seconds between report scans (CPU-heavy)
+    usage_alert_threshold: float = 20.0  # push when quota drops below this %; 0 = off
+
     # compiled, filled in __post_init__
     generic_re: List["re.Pattern"] = field(default_factory=list, repr=False)
     error_re: List["re.Pattern"] = field(default_factory=list, repr=False)
@@ -102,6 +124,10 @@ class Config:
             ],
             "generic_prompt_patterns": list(self.generic_prompt_patterns),
             "error_patterns": list(self.error_patterns),
+            "usage_enabled": self.usage_enabled,
+            "usage_quota_refresh": self.usage_quota_refresh,
+            "usage_report_refresh": self.usage_report_refresh,
+            "usage_alert_threshold": self.usage_alert_threshold,
         }
 
     def apply_patch(self, data: dict) -> None:
@@ -140,6 +166,28 @@ class Config:
                     continue   # an override with nothing set is dropped
                 ov[target] = PaneOverride(target=target, name=name, kind=kind, star=star)
             self.overrides = ov
+        if "usage_enabled" in data:
+            self.usage_enabled = bool(data["usage_enabled"])
+        if "usage_quota_refresh" in data:
+            try:
+                v = float(data["usage_quota_refresh"])
+            except (TypeError, ValueError):
+                raise ValueError("usage_quota_refresh must be a number")
+            self.usage_quota_refresh = min(3600.0, max(30.0, v))
+        if "usage_report_refresh" in data:
+            try:
+                v = float(data["usage_report_refresh"])
+            except (TypeError, ValueError):
+                raise ValueError("usage_report_refresh must be a number")
+            self.usage_report_refresh = min(3600.0, max(60.0, v))
+        if "usage_alert_threshold" in data:
+            try:
+                v = float(data["usage_alert_threshold"])
+            except (TypeError, ValueError):
+                raise ValueError("usage_alert_threshold must be a number")
+            self.usage_alert_threshold = min(100.0, max(0.0, v))
+        # usage_command is deliberately NOT patchable: it is exec'd, so it may
+        # only come from the local YAML file, never over the HTTP API.
         for key in ("generic_prompt_patterns", "error_patterns"):
             if key in data:
                 pats = data[key]
@@ -214,6 +262,12 @@ def load(path: Optional[str]) -> Config:
     server = data.get("server", {}) or {}
     discovery = data.get("discovery", {}) or {}
     detectors = data.get("detectors", {}) or {}
+    push = data.get("push", {}) or {}
+    usage = data.get("usage", {}) or {}
+
+    apns_env = str(push.get("environment", "sandbox") or "sandbox")
+    if apns_env not in ("sandbox", "production"):
+        raise SystemExit("push.environment must be 'sandbox' or 'production', got: %s" % apns_env)
 
     overrides: Dict[str, PaneOverride] = {}
     for entry in data.get("panes", []) or []:
@@ -234,9 +288,22 @@ def load(path: Optional[str]) -> Config:
         overrides=overrides,
         generic_prompt_patterns=detectors.get("generic_prompt_patterns", list(DEFAULT_GENERIC_PROMPTS)),
         error_patterns=detectors.get("error_patterns", list(DEFAULT_ERROR_PATTERNS)),
+        apns_key_path=os.path.expanduser(str(push.get("apns_key_path", "") or "")),
+        apns_key_id=str(push.get("apns_key_id", "") or ""),
+        apns_team_id=str(push.get("apns_team_id", "") or ""),
+        apns_topic=str(push.get("apns_topic", "") or ""),
+        apns_environment=apns_env,
+        push_on_error=bool(push.get("on_error", False)),
+        push_cooldown=min(3600.0, max(5.0, float(push.get("cooldown", 30.0)))),
+        usage_enabled=bool(usage.get("enabled", True)),
+        usage_command=str(usage.get("command", "tokscale") or "tokscale")[:200],
+        usage_quota_refresh=min(3600.0, max(30.0, float(usage.get("quota_refresh", 180.0)))),
+        usage_report_refresh=min(3600.0, max(60.0, float(usage.get("report_refresh", 300.0)))),
+        usage_alert_threshold=min(100.0, max(0.0, float(usage.get("alert_threshold", 20.0)))),
     )
     # layer UI-managed settings (if any) over the YAML — overlay wins
     cfg.overlay_path = _overlay_path_for(path)
+    cfg.push_store_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-push.json")
     overlay = _load_overlay(cfg.overlay_path)
     if overlay:
         try:

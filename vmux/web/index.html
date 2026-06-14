@@ -332,6 +332,36 @@
   .sheet-title { flex:1; min-width:0; font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sheet-scroll { overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:14px 16px 4px; }
 
+  /* landscape: right-side detail panel (replaces the near-fullscreen bottom sheet).
+     bottom:0 declared before height:100lvh so pre-iOS-15.4 falls back to bottom:0;
+     100lvh lets the panel follow the keyboard-shrunk layout viewport. */
+  .side-scrim { position:fixed; inset:0; height:100lvh; background:rgba(0,0,0,.32); z-index:60; animation:fade .25s ease; }
+  .side-scrim.closing { animation:fadeout .26s ease forwards; }
+  .side-panel { position:fixed; top:0; right:0; bottom:0; height:100lvh; width:min(440px,78vw); background:var(--bg-elevated);
+    border-left:1px solid var(--separator); box-shadow:var(--shadow); display:flex; flex-direction:column;
+    padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); padding-right:env(safe-area-inset-right);
+    animation:slidein .34s cubic-bezier(.32,.72,0,1); transition:transform .3s cubic-bezier(.32,.72,0,1); }
+  @keyframes slidein { from{ transform:translateX(100%); } to{ transform:translateX(0); } }
+  .side-grab-zone { display:flex; align-items:center; gap:12px; padding:12px 16px 0; touch-action:none; }
+  .side-grabber { width:5px; height:38px; border-radius:3px; background:var(--label-3); flex:none; }
+  .side-grab-zone .sheet-head { flex:1; min-width:0; }
+  .side-scroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:8px 16px 12px; }
+  .side-panel .output { max-height:60vh; }
+
+  /* landscape touch: clear the side notch + keep tablet rows readable */
+  @media (orientation:landscape) and (pointer:coarse) {
+    .ios-nav { padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+    .ios-scroll { padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+    .mobile-dock { max-width:calc(100% - 28px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
+    .mobile-attention-home { max-width:min(820px,100%); margin:0 auto; width:100%; }
+  }
+  /* short landscape phones: compact the hero to recover vertical space (tablets are >600h) */
+  @media (orientation:landscape) and (pointer:coarse) and (max-height:600px) {
+    .large-title { font-size:24px; }
+    .mobile-hero { padding-top:2px; padding-bottom:6px; }
+    .ios-summary { padding-top:4px; padding-bottom:8px; }
+  }
+
   /* broadcast modal */
   .modal-scrim { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:80; display:flex;
     align-items:center; justify-content:center; padding:20px; animation:fade .15s ease; }
@@ -659,6 +689,14 @@ function useIdiom(){
   useEffect(()=>{ const m=window.matchMedia(Q); const on=()=>setMac(m.matches);
     m.addEventListener("change",on); return ()=>m.removeEventListener("change",on); },[]);
   return mac?"mac":"ios";
+}
+
+function useLandscape(){
+  const Q="(orientation:landscape) and (pointer:coarse)";
+  const [land,setLand]=useState(()=> window.matchMedia(Q).matches);
+  useEffect(()=>{ const m=window.matchMedia(Q); const on=()=>setLand(m.matches);
+    m.addEventListener("change",on); return ()=>m.removeEventListener("change",on); },[]);
+  return land;
 }
 
 function StatusPill({status, compact}){
@@ -1024,20 +1062,25 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
 }
 
 /* ===================== iOS ===================== */
-function MobileSheet({title, subtitle, onClose, children}){
-  const [dy,setDy]=useState(0);
+function MobileSheet({title, subtitle, onClose, children, landscape}){
+  const [d,setD]=useState(0);
   const [closing,setClosing]=useState(false);
   const drag=useRef(null);
+  const pos=(e)=>landscape?e.clientX:e.clientY;
   const close=()=>{ setClosing(true); setTimeout(onClose,260); };
-  const onDown=(e)=>{ drag.current=e.clientY; try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
-  const onMove=(e)=>{ if(drag.current==null) return; setDy(Math.max(0,e.clientY-drag.current)); };
-  const onUp=(e)=>{ if(drag.current==null) return; const d=Math.max(0,e.clientY-drag.current); drag.current=null;
-    if(d>120) close(); else setDy(0); };
-  const style = closing ? {transform:"translateY(100%)"} : (dy ? {transform:"translateY("+dy+"px)", transition:"none"} : null);
-  return html`<div class=${"sheet-scrim"+(closing?" closing":"")} onClick=${close}>
-    <div class=${"sheet"+(closing?" closing":"")} style=${style} onClick=${e=>e.stopPropagation()}>
-      <div class="sheet-grab-zone" onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp}>
-        <div class="grabber"></div>
+  const onDown=(e)=>{ drag.current=pos(e); try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){} };
+  const onMove=(e)=>{ if(drag.current==null) return; setD(Math.max(0,pos(e)-drag.current)); };
+  const onUp=(e)=>{ if(drag.current==null) return; const dist=Math.max(0,pos(e)-drag.current); drag.current=null;
+    if(dist>(landscape?100:120)) close(); else setD(0); };
+  const ax=landscape?"X":"Y";
+  const style = closing ? {transform:"translate"+ax+"(100%)"} : (d ? {transform:"translate"+ax+"("+d+"px)", transition:"none"} : null);
+  const C = landscape
+    ? {scrim:"side-scrim", panel:"side-panel", grab:"side-grab-zone", grabber:"side-grabber", scroll:"side-scroll"}
+    : {scrim:"sheet-scrim", panel:"sheet", grab:"sheet-grab-zone", grabber:"grabber", scroll:"sheet-scroll"};
+  return html`<div class=${C.scrim+(closing?" closing":"")} onClick=${close}>
+    <div class=${C.panel+(closing?" closing":"")} style=${style} onClick=${e=>e.stopPropagation()}>
+      <div class=${C.grab} onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp}>
+        <div class=${C.grabber}></div>
         <div class="sheet-head">
           <div style=${{minWidth:0,flex:1}}>
             <div class="sheet-title">${title}</div>
@@ -1046,13 +1089,13 @@ function MobileSheet({title, subtitle, onClose, children}){
           <button class="btn" onClick=${close}>Done</button>
         </div>
       </div>
-      <div class="sheet-scroll">${children}</div>
+      <div class=${C.scroll}>${children}</div>
     </div>
   </div>`;
 }
 
-function PaneDetailSheet({pane, onClose}){
-  return html`<${MobileSheet} title=${pane.name} subtitle=${pane.target+" · "+pane.kind} onClose=${onClose}>
+function PaneDetailSheet({pane, onClose, landscape}){
+  return html`<${MobileSheet} title=${pane.name} subtitle=${pane.target+" · "+pane.kind} onClose=${onClose} landscape=${landscape}>
     <div style=${{display:"flex",alignItems:"center",gap:"10px",marginBottom:"12px"}}>
       <${StatusPill} status=${pane.status} />
       <${StarBtn} pane=${pane} />
@@ -1118,6 +1161,7 @@ function IOSApp({panes, connected, onBroadcast, onSettings}){
   const [sheetMode,setSheetMode]=useState(null);
   const [mobileMode,setMobileMode]=useState("queue");
   const [scrolled,setScrolled]=useState(false);
+  const landscape=useLandscape();
   const open=panes.find(p=>p.id===openId)||null;
   const openDetail=(id)=>{ setOpen(id); setSheetMode("detail"); };
   const counts=countOf(panes);
@@ -1135,10 +1179,10 @@ function IOSApp({panes, connected, onBroadcast, onSettings}){
         ${label}${count?html` <b>${count}</b>`:null}
       </button>`)}
     </nav>
-    ${sheetMode==="tree" && html`<${MobileSheet} title="Swarm tree" subtitle=${panes.length+" panes"} onClose=${()=>setSheetMode(null)}>
+    ${sheetMode==="tree" && html`<${MobileSheet} title="Swarm tree" subtitle=${panes.length+" panes"} onClose=${()=>setSheetMode(null)} landscape=${landscape}>
       <div class="ios-tree"><${TreeView} panes=${panes} onOpen=${id=>{ setOpen(id); setSheetMode("detail"); }} /></div>
     <//>`}
-    ${sheetMode==="detail" && open && html`<${PaneDetailSheet} pane=${open} onClose=${()=>{ setSheetMode(null); setOpen(null); }} />`}
+    ${sheetMode==="detail" && open && html`<${PaneDetailSheet} pane=${open} onClose=${()=>{ setSheetMode(null); setOpen(null); }} landscape=${landscape} />`}
   </div>`;
 }
 
