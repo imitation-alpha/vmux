@@ -84,6 +84,20 @@ _PROMPT_WORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Option labels that, when chosen, drop the user into a free-text reply instead
+# of committing a canned choice ("No, and tell Claude what to do differently
+# (esc)", Codex's "tell Codex what to do"). Used only to *annotate* an option
+# that already passed the menu gates — never to create a dialog.
+_FREEFORM_RE = re.compile(
+    r"tell (?:claude|codex|the agent|it) what|type your own|write your own|"
+    r"something else|none of (?:these|the above)|\bdifferently\b|\(esc\)|\bother\b",
+    re.IGNORECASE,
+)
+
+
+def _is_freeform(label: str) -> bool:
+    return bool(_FREEFORM_RE.search(label or ""))
+
 
 def _is_braille(ch: str) -> bool:
     """True only for Braille-block glyphs (⠂ ⣾ …), Claude's *animated* spinner.
@@ -138,6 +152,62 @@ def _last_lines(text: str, n: int) -> List[str]:
     while lines and not lines[-1].strip():
         lines.pop()
     return lines[-n:]
+
+
+# Bounds for how much prompt text above a menu we carry into `question`. Enough
+# to keep a multi-line prompt intact (a command/diff preview, a plan body, a
+# trust warning) without ever pulling in unbounded scrollback.
+_Q_MAX_LINES = 6
+_Q_MAX_LINE_CHARS = 200
+_Q_MAX_CHARS = 600
+
+# A box top/bottom border or a section rule contains these. Checked on the RAW
+# line (a cleaned border collapses to ""), and deliberately stricter than
+# _BOX_CHARS so an inner padding line ("│       │", just sides + spaces) reads as
+# blank, not as a boundary.
+_BORDER_RULE_CHARS = set("─━╌╍═╭╮╰╯┌┐└┘├┤┬┴┼")
+
+
+def _question_above(lines: List[str], cleaned: List[str], start_idx: int) -> Optional[str]:
+    """Collect the prompt text directly above a menu block, newline-joined.
+
+    Walks up from start_idx-1: skips interleaved option lines, stops at a box
+    border / section rule or a paragraph gap (2+ blank lines), tolerates a single
+    blank line inside the prompt, and is bounded by line/char caps. Runs only
+    AFTER a menu passed its gates, so it never manufactures a dialog — it only
+    chooses which already-visible lines become the question string. A single-line
+    prompt comes back as that one line (no newline), preserving prior behaviour.
+    """
+    collected: List[str] = []
+    total = 0
+    blanks = 0
+    for i in range(start_idx - 1, -1, -1):
+        if any(ch in _BORDER_RULE_CHARS for ch in lines[i]):
+            break                         # a box border / section rule bounds the prompt
+        c = cleaned[i]
+        if not c:
+            if not collected:
+                continue                  # padding between the box top and the options
+            blanks += 1
+            if blanks >= 2:
+                break                     # a paragraph gap marks the top of this prompt
+            continue
+        if _OPTION_RE.match(c):
+            continue                      # an interleaved / earlier option line
+        blanks = 0
+        if len(collected) >= _Q_MAX_LINES:
+            break
+        line = c[:_Q_MAX_LINE_CHARS]
+        collected.insert(0, line)
+        total += len(line)
+        if total >= _Q_MAX_CHARS:
+            break
+    if not collected:
+        return None
+    text = "\n".join(collected)
+    if len(text) > _Q_MAX_CHARS:
+        text = text[:_Q_MAX_CHARS].rstrip() + "…"
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -207,7 +277,8 @@ def parse_claude_menu(lines: List[str]) -> Tuple[Optional[str], List[MenuOption]
         seen.add(num)
         selected = bool(m.group("cur") and m.group("cur") in _SELECT_CURSORS)
         any_cursor = any_cursor or selected
-        options.append(MenuOption(key=num, label=m.group("label").strip(), selected=selected))
+        label = m.group("label").strip()
+        options.append(MenuOption(key=num, label=label, selected=selected, freeform=_is_freeform(label)))
 
     # Confidence gate: a real Claude selection box always marks the active
     # choice with a cursor (❯). Requiring it avoids reading a plain numbered
@@ -215,16 +286,9 @@ def parse_claude_menu(lines: List[str]) -> Tuple[Optional[str], List[MenuOption]
     if not any_cursor:
         return None, []
 
-    # question: nearest meaningful line above the block
-    question = None
-    for i in range(block[0] - 1, -1, -1):
-        c = cleaned[i]
-        if not c or _is_border(c):
-            continue
-        if _OPTION_RE.match(c):
-            continue
-        question = c
-        break
+    # question: the prompt text directly above the block (multi-line aware, so a
+    # command/diff/plan preview or trust warning is carried, not truncated).
+    question = _question_above(lines, cleaned, block[0])
 
     return question, options
 
@@ -263,16 +327,13 @@ def parse_question_menu(lines: List[str]) -> Tuple[Optional[str], List[MenuOptio
         if c and not _is_border(c):
             return None, []
 
-    question = None
-    for i in range(block[0] - 1, -1, -1):
-        c = cleaned[i]
-        if not c or _is_border(c) or _OPTION_RE.match(c):
-            continue
-        question = c
-        break
+    question = _question_above(lines, cleaned, block[0])
     if not question or "optional" in question.lower():
         return None, []
-    if not (question.rstrip().endswith("?") or _PROMPT_WORDS.search(question)):
+    # the prompt-introducing line is the last one (closest to the options); keep
+    # the gate exactly as strict as before by checking only that line.
+    last = question.splitlines()[-1]
+    if not (last.rstrip().endswith("?") or _PROMPT_WORDS.search(last)):
         return None, []
 
     options: List[MenuOption] = []
@@ -284,7 +345,8 @@ def parse_question_menu(lines: List[str]) -> Tuple[Optional[str], List[MenuOptio
             continue
         seen.add(num)
         sel = bool(m.group("cur") and m.group("cur") in _SELECT_CURSORS)
-        options.append(MenuOption(key=num, label=m.group("label").strip(), selected=sel))
+        label = m.group("label").strip()
+        options.append(MenuOption(key=num, label=label, selected=sel, freeform=_is_freeform(label)))
     return question, options
 
 
@@ -304,6 +366,14 @@ def _build_generic_menu(line: str) -> List[MenuOption]:
         ]
     if re.search(r"press \[?enter\]?|press return|press any key", low):
         return [MenuOption(key="enter", label="Continue", selected=True)]
+    # single-default confirm, e.g. npm's "Ok to proceed? (y)" or "... (N)"
+    m = re.search(r"\(([yn])\)\s*[:?]?\s*$", line.strip(), re.IGNORECASE)
+    if m:
+        d = m.group(1).lower()
+        return [
+            MenuOption(key="y", label="Yes", selected=(d == "y")),
+            MenuOption(key="n", label="No", selected=(d == "n")),
+        ]
     return []
 
 

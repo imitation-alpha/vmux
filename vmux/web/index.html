@@ -91,7 +91,15 @@
   .conn.on { background:var(--green); box-shadow:0 0 6px var(--green); }
 
   /* shared detail body */
-  .question { font-size:15px; font-weight:600; margin:0 0 12px; }
+  .question { font-size:15px; font-weight:600; margin:0 0 12px; white-space:pre-line; }
+  /* freeform option + inline "type a reply" affordance */
+  .opt.freeform { border-style:dashed; }
+  .ios-row.freeform .ios-row-key { background:var(--label-2); }
+  .freeform-hint { color:var(--label-3); font-size:11px; font-weight:500; margin-left:6px; }
+  .reply-hint { font-size:12px; color:var(--label-3); margin:0 0 10px; }
+  .composer.compact { margin-top:8px; gap:6px; }
+  .composer.compact .field { padding:8px 10px; font-size:14px; }
+  .composer.compact .btn { padding:7px 10px; font-size:13px; }
   .menu { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   .opt { background:var(--fill); border:1px solid var(--separator); border-radius:10px;
     padding:9px 13px; font-size:14px; }
@@ -215,7 +223,7 @@
   .attention-top { display:flex; align-items:center; gap:8px; min-width:0; }
   .attention-name { flex:1; min-width:0; font-size:15px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .attention-meta { margin:4px 0 8px; font-size:11.5px; color:var(--label-3); font-variant-numeric:tabular-nums; }
-  .attention-copy { margin:0 0 10px; color:var(--label-2); font-size:13.5px; line-height:1.35; }
+  .attention-copy { margin:0 0 10px; color:var(--label-2); font-size:13.5px; line-height:1.35; white-space:pre-line; }
   .attention-card .menu { margin:0; }
   .attention-card .opt { padding:7px 10px; font-size:13px; max-width:100%; white-space:normal; text-align:left; }
   .attention-card .card-preview { margin-top:9px; max-height:96px; }
@@ -486,7 +494,7 @@
   .tw-seg.s-error { color:var(--orange); }
   .tw-seg.s-working { color:var(--label-2); }
   .tree-needs { padding:0 10px 10px 42px; }
-  .tree-q { font-size:12.5px; color:var(--label-2); margin:0 0 8px; }
+  .tree-q { font-size:12.5px; color:var(--label-2); margin:0 0 8px; white-space:pre-line; }
   .tree-needs .menu { margin-bottom:0; }
   .tree-needs .opt { padding:6px 10px; font-size:13px; }
   .ios-tree { padding:0 10px; }
@@ -567,6 +575,8 @@ async function api(path, body, method) {
 }
 const act = {
   select:(p,key)=>api("/select",{id:p.id,key}).catch(()=>{}),
+  selectThenCompose:(p,key)=>{ api("/select",{id:p.id,key}).catch(()=>{});
+    window.dispatchEvent(new CustomEvent("vmux:focus-composer",{detail:{id:p.id}})); },
   key:(p,k)=>api("/key",{id:p.id,key:k}).catch(()=>{}),
   text:(p,text,enter)=>api("/text",{id:p.id,text,enter}),
   star:(p)=>api("/star",{target:p.target,starred:!p.starred}).catch(()=>{}),
@@ -711,45 +721,55 @@ function StarBtn({pane}){
 
 function Menu({pane, variant}){
   if(!pane.menu||!pane.menu.length) return null;
-  const tap=(e,key)=>{ e.stopPropagation(); act.select(pane,key); };
+  // A freeform option (e.g. "tell Claude what to do differently") selects, then
+  // focuses the composer for the follow-up note. Plain options send immediately.
+  const tap=(e,o)=>{ e.stopPropagation(); if(o.freeform) act.selectThenCompose(pane,o.key); else act.select(pane,o.key); };
   if(variant==="rows") return html`<div class="ios-group">
-    ${pane.menu.map(o=>html`<button class="ios-row" key=${o.key} onClick=${e=>tap(e,o.key)}>
+    ${pane.menu.map(o=>html`<button class=${"ios-row"+(o.freeform?" freeform":"")} key=${o.key} onClick=${e=>tap(e,o)}>
       <span class="ios-row-key">${o.key}</span>
-      <span class="ios-row-label">${o.label}</span>
+      <span class="ios-row-label">${o.label}${o.freeform?html`<span class="freeform-hint">then type ↵</span>`:null}</span>
       ${o.selected ? html`<span class="ios-row-check">✓</span>` : html`<span class="chev">›</span>`}
     </button>`)}
   </div>`;
   return html`<div class="menu">
-    ${pane.menu.map(o=>html`<button class=${"opt"+(o.selected?" sel":"")} key=${o.key}
-      onClick=${e=>tap(e,o.key)}><b>${o.key}</b>${o.label}</button>`)}
+    ${pane.menu.map(o=>html`<button class=${"opt"+(o.selected?" sel":"")+(o.freeform?" freeform":"")} key=${o.key}
+      onClick=${e=>tap(e,o)}><b>${o.key}</b>${o.label}${o.freeform?html`<span class="freeform-hint">type ↵</span>`:null}</button>`)}
   </div>`;
 }
 
-function Composer({pane}){
+function Composer({pane, compact}){
   const prefs=usePrefs();
   const [text,setText]=useState("");
   const [snipOpen,setSnipOpen]=useState(false);
+  const inputRef=useRef();
   const send=(enter)=>{ if(!text&&!enter) return; act.text(pane,text,enter).then(()=>setText("")).catch(()=>{}); };
   const snippets=prefs.snippets||[];
   const pick=(s)=>{ setText(t=>t?t+s:s); setSnipOpen(false); };
+  useEffect(()=>{   // a freeform menu pick fires this to drop focus straight into the field
+    const onFocus=(e)=>{ if(e.detail&&e.detail.id===pane.id&&inputRef.current) inputRef.current.focus(); };
+    window.addEventListener("vmux:focus-composer",onFocus);
+    return ()=>window.removeEventListener("vmux:focus-composer",onFocus);
+  },[pane.id]);
   useEffect(()=>{ if(!snipOpen) return;
     const onDoc=(e)=>{ if(!e.target.closest||!e.target.closest(".snip-wrap")) setSnipOpen(false); };
     const onKey=(e)=>{ if(e.key==="Escape") setSnipOpen(false); };
     document.addEventListener("mousedown",onDoc); document.addEventListener("keydown",onKey);
     return ()=>{ document.removeEventListener("mousedown",onDoc); document.removeEventListener("keydown",onKey); };
   },[snipOpen]);
-  return html`<div class="composer">
-    <div class="snip-wrap">
+  // stopPropagation so typing/tapping inside the composer never bubbles up to an
+  // AttentionCard's onClick/onKeyDown (which would open the detail sheet).
+  return html`<div class=${"composer"+(compact?" compact":"")} onClick=${e=>e.stopPropagation()}>
+    ${compact?null:html`<div class="snip-wrap">
       <button class="snip-btn" title="Snippets" onClick=${()=>setSnipOpen(o=>!o)} aria-label="Snippets">⧉</button>
       ${snipOpen && html`<div class="snip-menu glass">
         ${snippets.length
           ? snippets.map((s,i)=>html`<button class="snip-item" key=${i} onClick=${()=>pick(s)}>${s}</button>`)
           : html`<div class="snip-empty">No snippets — add in Settings</div>`}
       </div>`}
-    </div>
-    <input class="field" name="message" autocomplete="off" placeholder="Type a message…" value=${text}
+    </div>`}
+    <input class="field" name="message" ref=${inputRef} autocomplete="off" placeholder="Type a message…" value=${text}
       onInput=${e=>setText(e.target.value)}
-      onKeyDown=${e=>{ if(e.key==="Enter"){ e.preventDefault(); send(true); } }} />
+      onKeyDown=${e=>{ e.stopPropagation(); if(e.key==="Enter"){ e.preventDefault(); send(true); } }} />
     <button class="btn" onClick=${()=>send(false)}>Send</button>
     <button class="btn accent" onClick=${()=>send(true)}>↵</button>
   </div>`;
@@ -768,6 +788,7 @@ function DetailBody({pane, variant}){
   return html`<${F}>
     ${pane.status==="needs_input" && pane.question && html`<div class="question">${pane.question}</div>`}
     <${Menu} pane=${pane} variant=${variant==="ios"?"rows":"buttons"} />
+    ${pane.status==="needs_input" && pane.menu && pane.menu.length ? html`<div class="reply-hint">Pick an option — or type a reply below.</div>` : null}
     <pre class="output" ref=${outRef} onScroll=${onScroll}>${text}</pre>
     <div class="actions">
       ${actions.map(([lbl,k],i)=>html`<button class="keycap" key=${i} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
@@ -826,8 +847,8 @@ function AttentionCard({pane, selected, onOpen, mobile}){
     <div class="attention-meta">${pane.target} · ${pane.kind} · ${timeAgo(Math.max(pane.updated||0,pane.interacted||0))}</div>
     <p class="attention-copy">${copy}</p>
     ${isNeed && pane.menu && pane.menu.length ? html`<${Menu} pane=${pane} />` : null}
+    ${isNeed ? html`<${Composer} pane=${pane} compact=${true} />` : null}
     ${!isNeed && previewText(pane) ? html`<pre class="card-preview">${previewText(pane)}</pre>` : null}
-    ${isNeed && (!pane.menu || !pane.menu.length) ? html`<button class="link-btn" onClick=${e=>{ e.stopPropagation(); onOpen(pane.id); }}>Reply in inspector</button>` : null}
   </div>`;
 }
 

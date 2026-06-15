@@ -29,9 +29,10 @@ class MenuOption:
     key: str          # what identifies the choice ("1", "y", "enter")
     label: str        # human text shown on the button
     selected: bool = False  # currently highlighted in the TUI (the default)
+    freeform: bool = False  # picking this drops into a free-text reply ("tell Claude what to do")
 
     def to_dict(self) -> dict:
-        return {"key": self.key, "label": self.label, "selected": self.selected}
+        return {"key": self.key, "label": self.label, "selected": self.selected, "freeform": self.freeform}
 
 
 @dataclass

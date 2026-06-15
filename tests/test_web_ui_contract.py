@@ -53,6 +53,19 @@ def test_frontend_keeps_existing_action_endpoints():
         assert endpoint in text
 
 
+def test_frontend_offers_freeform_reply_from_queue():
+    text = HTML.read_text()
+    # the select-then-compose path + its focus event exist, reusing /select (no new endpoint)
+    assert "selectThenCompose" in text
+    assert "vmux:focus-composer" in text
+    assert 'api("/select"' in text
+    # the queue card renders a composer so you can type a reply without opening detail
+    start = text.index("function AttentionCard(")
+    end = text.index("\nfunction ", start)
+    card = text[start:end]
+    assert "Composer" in card
+
+
 def test_settings_editors_close_fragment_wrappers():
     text = HTML.read_text()
     for name in ["ShortcutEditor", "SnippetEditor"]:
