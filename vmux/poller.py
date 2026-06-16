@@ -82,9 +82,9 @@ class Hub:
         panes = await asyncio.to_thread(tmux.list_panes)
         present_targets = {p["target"] for p in panes}
 
-        # capture all panes concurrently
+        # capture all panes concurrently (with configured scrollback depth)
         captures = await asyncio.gather(
-            *[asyncio.to_thread(tmux.capture, p["id"]) for p in panes]
+            *[asyncio.to_thread(tmux.capture, p["id"], self.cfg.capture_lines) for p in panes]
         )
 
         now = time.time()

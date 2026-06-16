@@ -2,7 +2,7 @@
 
 Stays a silent no-op unless BOTH are true:
   * config.yaml has a `push:` section pointing at a local APNs auth key
-  * the optional deps are installed:  pip install 'vmux[push]'
+  * the optional deps are installed:  pip install 'vmux-agent[push]'
 
 Design mirrors the rest of vmux: the transition logic is pure and unit-testable
 (`collect_alerts`), the network client is lazy (imported only when actually
@@ -189,7 +189,7 @@ class PushManager:
     def collect(self, prev: Dict[str, PaneState], new: Dict[str, PaneState]) -> List[PaneState]:
         if not (self.configured and self.available):
             if self.configured and not self.available and not self._warned:
-                print("[vmux] push: configured but deps missing — pip install 'vmux[push]'")
+                print("[vmux] push: configured but deps missing — pip install 'vmux-agent[push]'")
                 self._warned = True
             return []
         return collect_alerts(

@@ -67,6 +67,7 @@ class Config:
     port: int = 8787
     token: str = ""
     poll_interval: float = 0.7
+    capture_lines: int = 200     # lines of scrollback captured per pane (0 = visible screen only)
     auto_discover: bool = True
     include_shells: bool = False
     naming_mode: str = "title"   # title | window | target | command
@@ -90,7 +91,7 @@ class Config:
     # optional tokscale usage/quota tracking (YAML `usage:` section). The
     # command itself is YAML-only — a string that gets exec'd must not be
     # settable over HTTP. See vmux/usage.py.
-    usage_enabled: bool = True
+    usage_enabled: bool = False
     usage_command: str = "tokscale"      # may include args, e.g. "npx -y tokscale"
     usage_quota_refresh: float = 180.0   # seconds between `tokscale usage` calls
     usage_report_refresh: float = 300.0  # seconds between report scans (CPU-heavy)
@@ -115,6 +116,7 @@ class Config:
     def editable_dict(self) -> dict:
         return {
             "poll_interval": self.poll_interval,
+            "capture_lines": self.capture_lines,
             "auto_discover": self.auto_discover,
             "include_shells": self.include_shells,
             "naming_mode": self.naming_mode,
@@ -140,6 +142,12 @@ class Config:
             except (TypeError, ValueError):
                 raise ValueError("poll_interval must be a number")
             self.poll_interval = min(10.0, max(0.2, pi))
+        if "capture_lines" in data:
+            try:
+                cl = int(data["capture_lines"])
+            except (TypeError, ValueError):
+                raise ValueError("capture_lines must be an integer")
+            self.capture_lines = min(2000, max(40, cl))
         if "auto_discover" in data:
             self.auto_discover = bool(data["auto_discover"])
         if "include_shells" in data:
@@ -283,6 +291,7 @@ def load(path: Optional[str]) -> Config:
         port=int(server.get("port", 8787)),
         token=str(server.get("token", "") or ""),
         poll_interval=float(data.get("poll_interval", 0.7)),
+        capture_lines=min(2000, max(40, int(data.get("capture_lines", 200)))),
         auto_discover=bool(discovery.get("auto", True)),
         include_shells=bool(discovery.get("include_shells", False)),
         overrides=overrides,
@@ -295,7 +304,7 @@ def load(path: Optional[str]) -> Config:
         apns_environment=apns_env,
         push_on_error=bool(push.get("on_error", False)),
         push_cooldown=min(3600.0, max(5.0, float(push.get("cooldown", 30.0)))),
-        usage_enabled=bool(usage.get("enabled", True)),
+        usage_enabled=bool(usage.get("enabled", False)),
         usage_command=str(usage.get("command", "tokscale") or "tokscale")[:200],
         usage_quota_refresh=min(3600.0, max(30.0, float(usage.get("quota_refresh", 180.0)))),
         usage_report_refresh=min(3600.0, max(60.0, float(usage.get("report_refresh", 300.0)))),

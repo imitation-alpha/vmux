@@ -114,6 +114,12 @@
     padding:7px 11px; font-size:13px; min-width:42px; }
   .keycap:active { transform:translateY(1px); }
   @media (hover:hover){ .keycap:hover { background:var(--fill); } }
+  .links-panel { border:1px solid var(--separator); border-radius:10px; background:var(--bg);
+    padding:6px 8px; margin:0 0 12px; max-height:32vh; overflow:auto; }
+  .link-row { display:flex; align-items:center; gap:8px; padding:6px 2px; border-bottom:1px solid var(--separator); }
+  .link-row:last-child { border-bottom:none; }
+  .link-url { flex:1; min-width:0; font:12px/1.4 "SF Mono",ui-monospace,Menlo,monospace; color:var(--accent);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .composer { display:flex; gap:8px; align-items:center; }
   .snip-wrap { position:relative; flex:none; }
   .snip-btn { width:42px; height:42px; border-radius:10px; background:var(--bg-secondary);
@@ -775,14 +781,41 @@ function Composer({pane, compact}){
   </div>`;
 }
 
+// Pull http(s) URLs out of captured terminal text. Pure + dedup, trailing
+// punctuation trimmed so "see https://x/pr/1)." yields "https://x/pr/1".
+function extractLinks(lines){
+  const text=(lines||[]).join("\n");
+  const re=/\bhttps?:\/\/[^\s<>"')\]]+/g;
+  const seen=new Set(); const out=[]; let m;
+  while((m=re.exec(text))){
+    const u=m[0].replace(/[.,;:!?)\]}>'"]+$/,"");
+    if(u && !seen.has(u)){ seen.add(u); out.push(u); }
+  }
+  return out;
+}
+
+function LinksPanel({links}){
+  const open=(u)=>{ try{ window.open(u,"_blank","noopener"); }catch(_){} };
+  const copy=(u)=>{ try{ navigator.clipboard && navigator.clipboard.writeText(u); }catch(_){} };
+  return html`<div class="links-panel">
+    ${links.map((u,i)=>html`<div class="link-row" key=${i}>
+      <span class="link-url" title=${u}>${u}</span>
+      <button class="keycap" onClick=${()=>open(u)}>Open</button>
+      <button class="keycap" onClick=${()=>copy(u)}>Copy</button>
+    </div>`)}
+  </div>`;
+}
+
 function DetailBody({pane, variant}){
   const prefs=usePrefs();
   const actions=prefs.actions||DEFAULT_ACTIONS;
   const outRef=useRef();
   const stick=useRef(true);                                 // keep pinned to the newest output, like a real terminal
+  const [linksOpen,setLinksOpen]=useState(false);
   const text=(pane.lines||[]).join("\n") || "(no output)";
+  const links=extractLinks(pane.lines);
   const toBottom=()=>{ const el=outRef.current; if(el) el.scrollTop=el.scrollHeight; };
-  useEffect(()=>{ stick.current=true; toBottom(); },[pane.id]);   // jump to bottom when opening a pane
+  useEffect(()=>{ stick.current=true; setLinksOpen(false); toBottom(); },[pane.id]);   // reset when opening a pane
   useEffect(()=>{ if(stick.current) toBottom(); },[text]);        // follow new output unless the user scrolled up
   const onScroll=()=>{ const el=outRef.current; if(el) stick.current=(el.scrollHeight-el.scrollTop-el.clientHeight)<24; };
   return html`<${F}>
@@ -792,7 +825,9 @@ function DetailBody({pane, variant}){
     <pre class="output" ref=${outRef} onScroll=${onScroll}>${text}</pre>
     <div class="actions">
       ${actions.map(([lbl,k],i)=>html`<button class="keycap" key=${i} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
+      ${links.length?html`<button class="keycap" onClick=${()=>setLinksOpen(o=>!o)}>🔗 ${links.length}</button>`:null}
     </div>
+    ${linksOpen && links.length ? html`<${LinksPanel} links=${links} />` : null}
     <${Composer} pane=${pane} />
   <//>`;
 }
@@ -1288,6 +1323,7 @@ function PatternEditor({label, value, onSave}){
 
 function ServerSettings({cfg, err, patch, panes}){
   const setPoll=(d)=>patch({poll_interval: Math.round((cfg.poll_interval + d)*10)/10});
+  const setCap=(d)=>patch({capture_lines: Math.min(2000, Math.max(40, (cfg.capture_lines||200) + d))});
   const ovMap={}; cfg.overrides.forEach(o=>ovMap[o.target]=o);
   const targets = Array.from(new Set([
     ...((cfg._info&&cfg._info.targets)||[]), ...cfg.overrides.map(o=>o.target), ...panes.map(p=>p.target),
@@ -1307,6 +1343,13 @@ function ServerSettings({cfg, err, patch, panes}){
           <button onClick=${()=>setPoll(-0.1)}>−</button>
           <span class="val">${cfg.poll_interval.toFixed(1)}s</span>
           <button onClick=${()=>setPoll(0.1)}>+</button>
+        </div>
+      <//>
+      <${Row} label="Scrollback" sub="lines of history captured per pane">
+        <div class="set-stepper">
+          <button onClick=${()=>setCap(-50)}>−</button>
+          <span class="val">${cfg.capture_lines||200}</span>
+          <button onClick=${()=>setCap(50)}>+</button>
         </div>
       <//>
       <${Row} label="Auto-discover panes"><${Switch} on=${cfg.auto_discover} onChange=${v=>patch({auto_discover:v})} /><//>

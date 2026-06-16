@@ -16,7 +16,7 @@ from vmux.models import KIND_GENERIC, STATUS_NEEDS_INPUT
 def test_editable_dict_has_expected_keys():
     d = config.Config().editable_dict()
     assert set(d) == {
-        "poll_interval", "auto_discover", "include_shells", "naming_mode",
+        "poll_interval", "capture_lines", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
         "usage_enabled", "usage_quota_refresh", "usage_report_refresh",
         "usage_alert_threshold",
@@ -40,6 +40,24 @@ def test_poll_interval_clamped():
     assert c.poll_interval == 10.0
     c.apply_patch({"poll_interval": 0.001})
     assert c.poll_interval == 0.2
+
+
+def test_capture_lines_default_and_clamp():
+    c = config.Config()
+    assert c.capture_lines == 200            # bumped default (was visible-only)
+    c.apply_patch({"capture_lines": 99999})
+    assert c.capture_lines == 2000           # clamped to ceiling
+    c.apply_patch({"capture_lines": 1})
+    assert c.capture_lines == 40             # clamped to floor
+    with pytest.raises(ValueError):
+        c.apply_patch({"capture_lines": "lots"})
+
+
+def test_capture_lines_yaml_clamped(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("capture_lines: 5\n")   # below floor -> clamped up
+    c = config.load(str(cfgfile))
+    assert c.capture_lines == 40
 
 
 def test_booleans_and_overrides():
@@ -129,9 +147,16 @@ def test_usage_yaml_section(tmp_path):
     assert c.usage_alert_threshold == 100.0
 
 
+def test_usage_yaml_can_enable_tracking(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("usage:\n  enabled: true\n")
+    c = config.load(str(cfgfile))
+    assert c.usage_enabled is True
+
+
 def test_usage_defaults():
     c = config.Config()
-    assert c.usage_enabled is True
+    assert c.usage_enabled is False
     assert c.usage_command == "tokscale"
     assert c.usage_quota_refresh == 180.0
     assert c.usage_report_refresh == 300.0

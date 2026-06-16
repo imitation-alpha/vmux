@@ -267,6 +267,7 @@ def test_fmt_reset():
 def _collector(**cfg_kw):
     # default the command to a binary that exists everywhere so payload
     # availability doesn't depend on tokscale being installed on the test host
+    cfg_kw.setdefault("usage_enabled", True)
     cfg_kw.setdefault("usage_command", sys.executable)
     return UsageCollector(Config(**cfg_kw))
 

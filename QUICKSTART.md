@@ -2,6 +2,14 @@
 
 Run a phone/desktop control panel over your tmux agent swarm. No config needed to start.
 
+## Install
+
+```bash
+pipx install vmux-agent
+```
+
+The PyPI package is `vmux-agent`; the command is still `vmux`.
+
 ## Run it
 
 ```bash
@@ -37,8 +45,9 @@ and notifies you (tap 🔔 once to grant permission) when an agent needs you.
   (red = needs input, orange = error, yellow = working, green = idle, grey = offline).
 - A red card shows the parsed question and **tappable menu buttons** — tap `1`/Yes
   without touching a keyboard.
-- **Tap a card** for the full pane: scrollback, the menu, a text box (with `↵`), and an
-  action row (`Ctrl+C`, `Esc`, `Tab`, arrows, `Enter`).
+- **Tap a card** for the full pane: scrollback, extracted links, the menu, a text
+  box (with `↵`), saved snippets, and a customizable action row (`Ctrl+C`, `Esc`,
+  `Tab`, arrows, `Enter`).
 - **Broadcast:** toggle it, pick a few agents, send one message to all.
 
 ## Config (optional)
@@ -48,7 +57,10 @@ cp config.example.yaml config.yaml
 uv run python -m vmux -c config.yaml
 ```
 
-See `config.example.yaml` for poll interval, pinned panes, token, and detector patterns.
+See `config.example.yaml` for poll interval, scrollback capture, starred panes,
+token, APNs push, opt-in tokscale usage tracking, and detector patterns. UI edits
+persist to `vmux-settings.json`; vmux never rewrites your hand-authored
+`config.yaml`.
 
 ## Tests
 

@@ -7,6 +7,7 @@ server:
   token: ""           # set a long random string for LAN mode
 
 poll_interval: 0.7    # seconds between tmux capture passes
+capture_lines: 200    # lines of scrollback captured per pane for the detail view (40–2000)
 
 discovery:
   auto: true          # discover all panes automatically
@@ -20,7 +21,7 @@ panes:
   #   kind: claude-code         # claude-code | generic | shell
 
 # Optional APNs push for registered mobile clients.
-# Requires the extra deps:  pip install 'vmux[push]'
+# Requires the extra deps:  pip install 'vmux-agent[push]'
 # Store key material outside the repo and keep config.yaml local.
 # push:
 #   apns_key_path: <APNS_KEY_PATH>
@@ -32,9 +33,10 @@ panes:
 #   cooldown: 30                   # min seconds between pushes for the same pane
 
 # Optional token-usage + quota tracking via tokscale (https://github.com/junhoyeo/tokscale).
-# Powers the Stats screens: remaining provider quotas, usage charts, daily summary.
+# Powers the usage API: remaining provider quotas, usage history, daily summary.
 # Install tokscale yourself:  npm i -g tokscale   (or: bun i -g tokscale)
-# vmux deliberately never auto-downloads it.
+# vmux deliberately never auto-downloads it, and tracking is off unless enabled here
+# or in Settings.
 # usage:
 #   enabled: true
 #   command: tokscale       # if vmux runs under launchd/systemd it may not see your

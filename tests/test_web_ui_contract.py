@@ -66,6 +66,26 @@ def test_frontend_offers_freeform_reply_from_queue():
     assert "Composer" in card
 
 
+def test_frontend_surfaces_link_extraction_tools():
+    text = HTML.read_text()
+    assert "function extractLinks(" in text
+    assert "function LinksPanel(" in text
+    assert "navigator.clipboard.writeText" in text
+    assert "window.open(u,\"_blank\",\"noopener\")" in text
+    detail = text[text.index("function DetailBody("):text.index("\nfunction", text.index("function DetailBody(") + 1)]
+    assert "extractLinks(pane.lines)" in detail
+    assert "LinksPanel" in detail
+
+
+def test_settings_exposes_scrollback_capture_setting():
+    text = HTML.read_text()
+    assert "capture_lines" in text
+    assert "setCap" in text
+    assert 'label="Scrollback"' in text
+    assert "lines of history captured per pane" in text
+    assert "Math.min(2000, Math.max(40" in text
+
+
 def test_settings_editors_close_fragment_wrappers():
     text = HTML.read_text()
     for name in ["ShortcutEditor", "SnippetEditor"]:
