@@ -17,10 +17,11 @@ _PANE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pan
 
 # Named keys the API is allowed to send. Anything else is rejected.
 ALLOWED_KEYS = {
-    "Enter", "Escape", "Tab", "Space", "BSpace",
+    "Enter", "Escape", "Tab", "BTab", "Space", "BSpace",
     "Up", "Down", "Left", "Right",
     "Home", "End", "PageUp", "PageDown",
-    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l", "C-r", "C-w",
+    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l",
+    "C-r", "C-w", "C-o", "C-n", "C-p",
 }
 
 _PANE_ID_RE = re.compile(r"^%\d+$")
@@ -76,13 +77,22 @@ def list_panes() -> List[Dict[str, str]]:
     return panes
 
 
-def capture(pane_id: str) -> Optional[str]:
-    """Visible pane content as plain text, or None if the pane is gone."""
+def capture(pane_id: str, scrollback: int = 0) -> Optional[str]:
+    """Pane content as plain text, or None if the pane is gone.
+
+    With scrollback > 0, also include that many lines of history above the
+    visible screen (tmux `-S -N`), so the detail view and link extraction see
+    more than just the current screen. scrollback == 0 keeps the visible-only
+    behaviour. `-J` joins wrapped lines, so a wrapped URL stays on one line.
+    """
     if not valid_pane_id(pane_id):
         return None
+    args = ["capture-pane", "-p", "-J"]
+    if scrollback > 0:
+        args += ["-S", "-%d" % scrollback]
+    args += ["-t", pane_id]
     try:
-        # -p print to stdout, -J join wrapped lines, visible screen only.
-        return _run(["capture-pane", "-p", "-J", "-t", pane_id])
+        return _run(args)
     except TmuxError:
         return None
 

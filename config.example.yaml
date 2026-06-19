@@ -7,17 +7,45 @@ server:
   token: ""           # set a long random string for LAN mode
 
 poll_interval: 0.7    # seconds between tmux capture passes
+capture_lines: 200    # lines of scrollback captured per pane for the detail view (40–2000)
 
 discovery:
   auto: true          # discover all panes automatically
   include_shells: false   # set true to also show plain idle shells
 
-# Optional per-pane overrides / pinned panes. A target listed here is always
-# shown; if its pane dies it shows as "offline" instead of vanishing.
+# Optional per-pane overrides / starred panes. A target listed here is always
+# shown; starred panes stay near the top and remain visible if they go offline.
 panes:
   # - target: "work:1.1"        # session:window.pane (see `tmux list-panes -a`)
   #   name: "API refactor"
   #   kind: claude-code         # claude-code | generic | shell
+  #   star: true
+
+# Optional APNs push for registered mobile clients.
+# Requires the extra deps:  pip install 'vmux-agent[push]'
+# Store key material outside the repo and keep config.yaml local.
+# push:
+#   apns_key_path: <APNS_KEY_PATH>
+#   apns_key_id: <KEY_ID>
+#   apns_team_id: <TEAM_ID>
+#   apns_topic: <BUNDLE_ID>
+#   environment: sandbox           # sandbox | production
+#   on_error: false                # also push on error status, not just needs_input
+#   cooldown: 30                   # min seconds between pushes for the same pane
+
+# Optional token-usage + quota tracking via tokscale (https://github.com/junhoyeo/tokscale).
+# Powers the usage API: remaining provider quotas, usage history, daily summary.
+# Install tokscale yourself:  npm i -g tokscale   (or: bun i -g tokscale)
+# vmux deliberately never auto-downloads it, and tracking is off unless enabled here
+# or in Settings.
+# usage:
+#   enabled: true
+#   command: tokscale       # if vmux runs under launchd/systemd it may not see your
+#                           # shell PATH — use an absolute path, e.g. ~/.bun/bin/tokscale
+#   quota_refresh: 180      # seconds between provider-quota checks (`tokscale usage`)
+#   report_refresh: 300     # seconds between usage scans (CPU-heavy, keep >= 60)
+#   alert_threshold: 20     # server push when a quota drops below this % (0 disables;
+#                           # needs the push: section above to be configured)
 
 # Detector tuning for non-Claude agents (regex).
 detectors:

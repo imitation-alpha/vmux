@@ -16,9 +16,13 @@ from vmux.models import KIND_GENERIC, STATUS_NEEDS_INPUT
 def test_editable_dict_has_expected_keys():
     d = config.Config().editable_dict()
     assert set(d) == {
-        "poll_interval", "auto_discover", "include_shells", "naming_mode",
+        "poll_interval", "capture_lines", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
+        "usage_enabled", "usage_quota_refresh", "usage_report_refresh",
+        "usage_alert_threshold",
     }
+    # the exec'd command must never be exposed to (or settable from) the UI
+    assert "usage_command" not in d
 
 
 def test_naming_mode():
@@ -38,6 +42,24 @@ def test_poll_interval_clamped():
     assert c.poll_interval == 0.2
 
 
+def test_capture_lines_default_and_clamp():
+    c = config.Config()
+    assert c.capture_lines == 200            # bumped default (was visible-only)
+    c.apply_patch({"capture_lines": 99999})
+    assert c.capture_lines == 2000           # clamped to ceiling
+    c.apply_patch({"capture_lines": 1})
+    assert c.capture_lines == 40             # clamped to floor
+    with pytest.raises(ValueError):
+        c.apply_patch({"capture_lines": "lots"})
+
+
+def test_capture_lines_yaml_clamped(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("capture_lines: 5\n")   # below floor -> clamped up
+    c = config.load(str(cfgfile))
+    assert c.capture_lines == 40
+
+
 def test_booleans_and_overrides():
     c = config.Config()
     c.apply_patch({"include_shells": True, "auto_discover": False,
@@ -45,6 +67,40 @@ def test_booleans_and_overrides():
     assert c.include_shells is True and c.auto_discover is False
     assert c.overrides["a:1.1"].name == "API"
     assert c.overrides["a:1.1"].kind == "generic"
+
+
+def test_override_star_roundtrips():
+    c = config.Config()
+    c.apply_patch({"overrides": [{"target": "a:1.1", "star": True}]})
+    assert c.overrides["a:1.1"].star is True
+    assert c.editable_dict()["overrides"][0]["star"] is True
+    # unstarring a pane that has no name/kind drops the override entirely
+    c.apply_patch({"overrides": [{"target": "a:1.1", "star": False}]})
+    assert "a:1.1" not in c.overrides
+    # star coexists with a rename
+    c.apply_patch({"overrides": [{"target": "b:1.1", "name": "X", "star": True}]})
+    assert c.overrides["b:1.1"].star is True and c.overrides["b:1.1"].name == "X"
+    # legacy "pin" key still loads as star (back-compat)
+    c.apply_patch({"overrides": [{"target": "c:1.1", "pin": True}]})
+    assert c.overrides["c:1.1"].star is True
+
+
+def test_yaml_pane_star_and_legacy_pin(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "panes:\n"
+        "  - target: work:1.1\n"
+        "    name: API refactor\n"
+        "    kind: claude-code\n"
+        "    star: true\n"
+        "  - target: old:2.1\n"
+        "    pin: true\n"
+    )
+    c = config.load(str(cfgfile))
+    assert c.overrides["work:1.1"].star is True
+    assert c.overrides["work:1.1"].name == "API refactor"
+    assert c.overrides["work:1.1"].kind == "claude-code"
+    assert c.overrides["old:2.1"].star is True
 
 
 def test_bad_kind_rejected():
@@ -89,6 +145,55 @@ def test_patterns_recompile_and_affect_detection():
     c.apply_patch({"generic_prompt_patterns": [r"DEPLOY NOW\?"]})
     res = detect("about to ship\nDEPLOY NOW?", KIND_GENERIC, False, c, "")
     assert res.status == STATUS_NEEDS_INPUT
+
+
+def test_usage_yaml_section(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "usage:\n"
+        "  enabled: false\n"
+        "  command: /opt/bin/tokscale\n"
+        "  quota_refresh: 5\n"        # below floor -> clamped up
+        "  report_refresh: 99999\n"   # above ceiling -> clamped down
+        "  alert_threshold: 150\n"
+    )
+    c = config.load(str(cfgfile))
+    assert c.usage_enabled is False
+    assert c.usage_command == "/opt/bin/tokscale"
+    assert c.usage_quota_refresh == 30.0
+    assert c.usage_report_refresh == 3600.0
+    assert c.usage_alert_threshold == 100.0
+
+
+def test_usage_yaml_can_enable_tracking(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("usage:\n  enabled: true\n")
+    c = config.load(str(cfgfile))
+    assert c.usage_enabled is True
+
+
+def test_usage_defaults():
+    c = config.Config()
+    assert c.usage_enabled is False
+    assert c.usage_command == "tokscale"
+    assert c.usage_quota_refresh == 180.0
+    assert c.usage_report_refresh == 300.0
+    assert c.usage_alert_threshold == 20.0
+
+
+def test_usage_patch_clamps_and_command_immutable():
+    c = config.Config()
+    c.apply_patch({"usage_enabled": False, "usage_quota_refresh": 1,
+                   "usage_report_refresh": 999999, "usage_alert_threshold": -5})
+    assert c.usage_enabled is False
+    assert c.usage_quota_refresh == 30.0
+    assert c.usage_report_refresh == 3600.0
+    assert c.usage_alert_threshold == 0.0
+    with pytest.raises(ValueError):
+        c.apply_patch({"usage_quota_refresh": "soon"})
+    # usage_command silently ignored by apply_patch — HTTP must not set it
+    c.apply_patch({"usage_command": "/tmp/evil"})
+    assert c.usage_command == "tokscale"
 
 
 def test_overlay_roundtrip_preserves_yaml(tmp_path):

@@ -20,6 +20,7 @@ from .models import (
     STATUS_OFFLINE,
     PaneState,
 )
+from .push import PushManager
 
 
 def _strip_spinner(s: str) -> str:
@@ -56,8 +57,14 @@ class Hub:
         self.order: List[str] = []
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
+        self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
+        self.push = PushManager(cfg)
         self._wake = asyncio.Event()
         self._stop = False
+
+    def mark_interaction(self, pane_id: str) -> None:
+        """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
+        self.interactions[pane_id] = time.time()
 
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
@@ -75,9 +82,9 @@ class Hub:
         panes = await asyncio.to_thread(tmux.list_panes)
         present_targets = {p["target"] for p in panes}
 
-        # capture all panes concurrently
+        # capture all panes concurrently (with configured scrollback depth)
         captures = await asyncio.gather(
-            *[asyncio.to_thread(tmux.capture, p["id"]) for p in panes]
+            *[asyncio.to_thread(tmux.capture, p["id"], self.cfg.capture_lines) for p in panes]
         )
 
         now = time.time()
@@ -122,6 +129,9 @@ class Hub:
                 lines=text.splitlines(),
                 updated=updated,
                 changed=changed,
+                window=pane.get("window", ""),
+                starred=bool(override and override.star),
+                interacted=self.interactions.get(pid, 0.0),
             )
             new_states[pid] = st
             new_order.append(pid)
@@ -137,11 +147,16 @@ class Hub:
                 name=ov.name or target,
                 kind=ov.kind or "generic",
                 status=STATUS_OFFLINE,
+                starred=ov.star,
             )
             new_order.append(pid)
 
+        alerts = self.push.collect(self.states, new_states)
         self.states = new_states
         self.order = new_order
+        # drop interaction timestamps for panes that no longer exist
+        self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
+        self.push.fire(alerts)   # async, best-effort; never blocks the poll
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
@@ -210,6 +225,7 @@ class Hub:
             tmux.send_key(real, "Enter")
         else:
             tmux.send_literal(real, key, enter=True)
+        self.mark_interaction(real)
 
     def kick(self) -> None:
         self._wake.set()

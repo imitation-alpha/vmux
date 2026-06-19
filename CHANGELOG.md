@@ -6,6 +6,39 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Scrollback capture + link extraction.** Pane detail captures 200 lines of
+  scrollback by default (configurable 40–2000), joins wrapped tmux lines, and
+  surfaces detected URLs with open/copy actions.
+- **Starred panes and larger-swarm navigation.** Tree, active, all, and starred
+  views keep busy tmux workspaces navigable, with interaction timestamps used
+  for recent-activity sorting.
+- **Snippets and shortcut keys.** Saved phrase snippets and customizable action
+  buttons backed by the server key allowlist.
+- **Freeform reply flow.** Parsed menu options can open a text reply instead of
+  sending a fixed key immediately.
+- **Optional APNs push.** Local registered-device storage and best-effort APNs
+  alerts when panes need input, with optional error alerts.
+- **Opt-in tokscale usage tracking.** Quota, usage summary, history API, and low
+  quota push alerts when `usage.enabled: true` is configured.
+
+### Changed
+
+- The intended public PyPI distribution name is `vmux-agent`; the command and
+  Python import remain `vmux`.
+- Settings now include scrollback capture depth, per-pane star state,
+  customizable shortcut buttons, snippets, and opt-in usage tracking toggles.
+- The service worker cache was refreshed for the updated PWA.
+
+### Security
+
+- tmux and tokscale subprocesses use argument lists, not shell strings; pane ids
+  are validated, named keys are allow-listed, and literal text uses
+  `send-keys -l --`.
+- Push device tokens are validated and truncated in UI/API info responses; APNs
+  key paths and `usage.command` remain YAML-only.
+
 ## [0.1.0] — 2026-06-08
 
 First public release.

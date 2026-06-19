@@ -29,9 +29,10 @@ class MenuOption:
     key: str          # what identifies the choice ("1", "y", "enter")
     label: str        # human text shown on the button
     selected: bool = False  # currently highlighted in the TUI (the default)
+    freeform: bool = False  # picking this drops into a free-text reply ("tell Claude what to do")
 
     def to_dict(self) -> dict:
-        return {"key": self.key, "label": self.label, "selected": self.selected}
+        return {"key": self.key, "label": self.label, "selected": self.selected, "freeform": self.freeform}
 
 
 @dataclass
@@ -47,6 +48,9 @@ class PaneState:
     lines: List[str] = field(default_factory=list)   # captured visible lines (detail view)
     updated: float = 0.0                      # epoch seconds of last *change*
     changed: bool = False                     # changed since previous poll (working hint)
+    window: str = ""                          # tmux window name (for the tree view)
+    starred: bool = False                     # user-starred (PaneOverride.star)
+    interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
 
     def preview(self, n: int = 6) -> List[str]:
         """Last n non-empty-ish lines, for the grid card snippet."""
@@ -67,4 +71,7 @@ class PaneState:
             "lines": self.lines,
             "updated": self.updated,
             "changed": self.changed,
+            "window": self.window,
+            "starred": self.starred,
+            "interacted": self.interacted,
         }
