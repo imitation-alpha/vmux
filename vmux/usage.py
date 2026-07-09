@@ -333,8 +333,10 @@ class UsageCollector:
             for k in ("quota", "hourly", "daily", "monthly")
         }
         self._alerted: Dict[str, float] = {}
-        self._lock = asyncio.Lock()
-        self._wake = asyncio.Event()
+        # created lazily: on Python 3.9 asyncio primitives bind the current loop
+        # at construction, and UsageCollector is built before the server loop exists
+        self._lock: Optional[asyncio.Lock] = None
+        self._wake: Optional[asyncio.Event] = None
         self._stop = False
         self._warned_version = False
 
@@ -455,24 +457,31 @@ class UsageCollector:
         anything refreshed seconds ago."""
         if not self.cfg.usage_enabled:
             return
-        async with self._lock:
+        async with self._refresh_lock():
             now = time.time()
             if scope in ("quota", "all") and now - self.slots["quota"]["fetched_at"] > 2:
                 await self.refresh_quota()
             if scope in ("reports", "all") and now - self.slots["daily"]["fetched_at"] > 2:
                 await self.refresh_reports(include_monthly=True)
 
+    def _refresh_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
     # -- the background loop -------------------------------------------------- #
     async def run(self) -> None:
+        if self._wake is None:
+            self._wake = asyncio.Event()
         await asyncio.sleep(5)   # let the first pane poll win the startup race
         while not self._stop:
             try:
                 now = time.time()
                 if now - self.slots["quota"]["fetched_at"] >= self.cfg.usage_quota_refresh:
-                    async with self._lock:
+                    async with self._refresh_lock():
                         await self.refresh_quota()
                 if now - self.slots["daily"]["fetched_at"] >= self.cfg.usage_report_refresh:
-                    async with self._lock:
+                    async with self._refresh_lock():
                         monthly_age = now - self.slots["monthly"]["fetched_at"]
                         await self.refresh_reports(
                             include_monthly=monthly_age >= 6 * self.cfg.usage_report_refresh)
@@ -485,11 +494,13 @@ class UsageCollector:
                 pass
 
     def kick(self) -> None:
-        self._wake.set()
+        if self._wake is not None:
+            self._wake.set()
 
     def stop(self) -> None:
         self._stop = True
-        self._wake.set()
+        if self._wake is not None:
+            self._wake.set()
 
     # -- payloads -------------------------------------------------------------- #
     def _availability(self) -> Optional[dict]:

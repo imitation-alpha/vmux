@@ -82,7 +82,9 @@ class Hub:
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
         self.push = PushManager(cfg)
-        self._wake = asyncio.Event()
+        # created in run(): on Python 3.9 asyncio.Event() binds the current loop
+        # at construction, and Hub is built before the server loop exists
+        self._wake: Optional[asyncio.Event] = None
         self._stop = False
         self.namer = SmartNamer(cfg, on_update=self.kick)
 
@@ -257,10 +259,13 @@ class Hub:
         self.mark_interaction(real)
 
     def kick(self) -> None:
-        self._wake.set()
+        if self._wake is not None:
+            self._wake.set()
 
     # -- main loop ---------------------------------------------------------- #
     async def run(self) -> None:
+        if self._wake is None:
+            self._wake = asyncio.Event()
         while not self._stop:
             try:
                 await self.poll_once()
@@ -276,4 +281,5 @@ class Hub:
     def stop(self) -> None:
         self._stop = True
         self.namer.stop()
-        self._wake.set()
+        if self._wake is not None:
+            self._wake.set()
