@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -20,6 +21,7 @@ from .models import (
     STATUS_OFFLINE,
     PaneState,
 )
+from .naming import SmartNamer
 from .push import PushManager
 
 
@@ -30,17 +32,38 @@ def _strip_spinner(s: str) -> str:
     return t
 
 
-def choose_name(mode, *, title, window, target, command, override_name):
+_TARGET_RE = re.compile(r"^(.+):([0-9]+)\.([0-9]+)$")
+
+
+def _target_parts(target: str) -> Optional[tuple[str, str, str]]:
+    m = _TARGET_RE.match(target or "")
+    if not m:
+        return None
+    return m.group(1), m.group(2), m.group(3)
+
+
+def choose_name(mode, *, title, window, target, command, override_name, smart_name=None):
     """Pick a pane's display name. A manual override always wins; otherwise the
     chosen source (spinner-stripped where it's a title); empty -> target."""
     if override_name:
         return override_name
-    if mode == "window":
+    parts = _target_parts(target)
+    if mode == "pane":
+        cand = parts[2] if parts else target
+    elif mode == "window_pane":
+        cand = "%s:%s" % (parts[1], parts[2]) if parts else target
+    elif mode == "session_pane":
+        cand = "%s:%s" % (parts[0], parts[2]) if parts else target
+    elif mode == "session_window_pane":
+        cand = "%s:%s:%s" % parts if parts else target
+    elif mode == "window":
         cand = _strip_spinner(window)
     elif mode == "target":
         cand = target
     elif mode == "command":
         cand = (command or "").split("/")[-1]
+    elif mode == "smart":
+        cand = smart_name
     else:  # "title" (default)
         cand = _strip_spinner(title)
     return cand or target
@@ -61,6 +84,7 @@ class Hub:
         self.push = PushManager(cfg)
         self._wake = asyncio.Event()
         self._stop = False
+        self.namer = SmartNamer(cfg, on_update=self.kick)
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
@@ -110,11 +134,16 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
+            override_name = override.name if override else None
+            smart_name = None
+            if self.cfg.naming_mode == "smart" and not override_name:
+                smart_name = self.namer.name(pane, text, target)
             name = choose_name(
                 self.cfg.naming_mode,
                 title=pane["title"], window=pane.get("window", ""),
                 target=target, command=pane["cmd"],
-                override_name=(override.name if override else None),
+                override_name=override_name,
+                smart_name=smart_name,
             )
 
             st = PaneState(
@@ -246,4 +275,5 @@ class Hub:
 
     def stop(self) -> None:
         self._stop = True
+        self.namer.stop()
         self._wake.set()

@@ -8,6 +8,45 @@ server:
 
 poll_interval: 0.7    # seconds between tmux capture passes
 capture_lines: 200    # lines of scrollback captured per pane for the detail view (40–2000)
+naming_mode: session_window_pane  # pane names default to session:window:pane
+                                  # also: pane, window_pane, session_pane,
+                                  # title, window, target, command, smart
+
+tmux:
+  disable_auto_rename: true  # set tmux automatic-rename off at startup
+
+# Optional smart pane naming. Set `naming_mode: smart` to use local heuristics
+# inspired by auto-naming-tmux: shells show the directory, editors show
+# command:directory, agents prefer useful pane titles, and ssh shows ssh:<host>
+# when vmux can read the ssh argv.
+#
+# The AI layer is off by default because it sends recent pane output to the
+# configured backend. These fields are YAML-only and are not exposed in Settings.
+# auto_naming:
+#   ai_enabled: false
+#   ai_backend: claude          # claude | local | codex | agy | antigravity
+#   ai_programs: claude,node,python,bun,deno,codex,agy
+#   prefix_apps:
+#     claude: cc
+#     node: node
+#     codex: cx
+#     agy: ay
+#     antigravity: ay
+#     opencode: oc
+#     oc: oc
+#   max_len: 24
+#   timeout: 60
+#   system_prompt: ""          # empty = built-in prompt
+#   claude_bin: claude
+#   claude_model: haiku
+#   local_url: http://localhost:8080/v1/chat/completions
+#   local_model: default
+#   local_api_key: ""
+#   codex_bin: codex
+#   codex_model: ""
+#   antigravity_bin: agy
+#   antigravity_model: ""
+#   antigravity_flags: []      # list preferred, e.g. ["--sandbox"]
 
 discovery:
   auto: true          # discover all panes automatically
@@ -24,12 +63,14 @@ panes:
 # Optional APNs push for registered mobile clients.
 # Requires the extra deps:  pip install 'vmux-agent[push]'
 # Store key material outside the repo and keep config.yaml local.
+# Full walkthrough: docs/PUSH_NOTIFICATIONS.md — note APNs keys are team-scoped,
+# so self-hosted push works only with an app you build yourself.
 # push:
 #   apns_key_path: <APNS_KEY_PATH>
 #   apns_key_id: <KEY_ID>
 #   apns_team_id: <TEAM_ID>
-#   apns_topic: <BUNDLE_ID>
-#   environment: sandbox           # sandbox | production
+#   apns_topic: <BUNDLE_ID>        # must equal the receiving app's bundle id
+#   environment: sandbox           # sandbox = Xcode builds, production = TestFlight/App Store
 #   on_error: false                # also push on error status, not just needs_input
 #   cooldown: 30                   # min seconds between pushes for the same pane
 
@@ -37,7 +78,7 @@ panes:
 # Powers the usage API: remaining provider quotas, usage history, daily summary.
 # Install tokscale yourself:  npm i -g tokscale   (or: bun i -g tokscale)
 # vmux deliberately never auto-downloads it, and tracking is off unless enabled here
-# or in Settings.
+# or in Settings. How-to: QUICKSTART.md, "Optional: usage & quota tracking".
 # usage:
 #   enabled: true
 #   command: tokscale       # if vmux runs under launchd/systemd it may not see your

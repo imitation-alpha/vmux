@@ -21,10 +21,13 @@ uv.lock
 /CLAUDE.md
 
 # Native app / App Store materials live outside this backend/PWA repository.
+# (PRIVACY.md is tracked: the iOS app links to blob/main/PRIVACY.md.)
 /ios/
 /docs/app-store/
-/PRIVACY.md
 /.github/workflows/ios.yml
+
+# Local agent-session state.
+/.hermes/
 
 # Local Apple/Xcode/App Store credentials and generated artifacts.
 *.p8

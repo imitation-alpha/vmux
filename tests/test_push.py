@@ -14,10 +14,17 @@ from vmux.models import (
     STATUS_IDLE,
     STATUS_NEEDS_INPUT,
     STATUS_WORKING,
+    MenuOption,
     PaneState,
 )
 from vmux.poller import Hub
-from vmux.push import DeviceRegistry, PushManager, collect_alerts, valid_device_token
+from vmux.push import (
+    DeviceRegistry,
+    PushManager,
+    classify_category,
+    collect_alerts,
+    valid_device_token,
+)
 
 
 def pane(pid, status, question=None):
@@ -181,3 +188,73 @@ def test_provider_jwt_shape(tmp_path):
     assert header["alg"] == "ES256" and header["kid"] == "KEY123"
     claims = pyjwt.decode(tok, key.public_key(), algorithms=["ES256"])
     assert claims["iss"] == "TEAM456"
+
+
+# -- classify_category: pure menu-shape mapping ----------------------------- #
+
+def menu(*pairs):
+    return [MenuOption(key=k, label=label) for k, label in pairs]
+
+
+def test_classify_empty_menu_is_generic():
+    assert classify_category([]) == "vmux.generic"
+
+
+def test_classify_yes_no_is_confirm2():
+    assert classify_category(menu(("1", "Yes"), ("2", "No"))) == "vmux.confirm2"
+
+
+def test_classify_yes_always_no_is_confirm3():
+    m = menu(
+        ("1", "Yes"),
+        ("2", "Yes, and don't ask again"),
+        ("3", "No, and tell Claude what to do differently"),
+    )
+    assert classify_category(m) == "vmux.confirm3"
+
+
+def test_classify_ambiguous_three_is_numbered_menu():
+    assert classify_category(menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))) == "vmux.menu"
+
+
+def test_classify_many_options_is_numbered_menu():
+    m = menu(("1", "Yes"), ("2", "No"), ("3", "Maybe"), ("4", "Later"))
+    assert classify_category(m) == "vmux.menu"
+
+
+# -- _payload: category + actionable menu ride the push --------------------- #
+
+def _mgr(tmp_path):
+    cfg = Config(apns_key_path="k", apns_key_id="K", apns_team_id="T", apns_topic="b")
+    cfg.push_store_path = str(tmp_path / "push.json")
+    return PushManager(cfg)
+
+
+def test_payload_confirm3_carries_menu_without_legend(tmp_path):
+    m = menu(("1", "Yes"), ("2", "Yes, and don't ask again"), ("3", "No, tell Claude"))
+    p = _mgr(tmp_path)._payload(PaneState(
+        id="%1", target="w:1.1", name="agent",
+        status=STATUS_NEEDS_INPUT, question="Allow edit?", menu=m))
+    assert p["aps"]["category"] == "vmux.confirm3"
+    assert p["aps"]["alert"]["body"] == "Allow edit?"        # friendly titles -> no legend
+    assert p["aps"]["relevance-score"] == 1.0
+    assert p["vmux"]["menu"] == [
+        {"i": 0, "key": "1", "label": "Yes"},
+        {"i": 1, "key": "2", "label": "Yes, and don't ask again"},
+        {"i": 2, "key": "3", "label": "No, tell Claude"},
+    ]
+
+
+def test_payload_numbered_menu_adds_legend(tmp_path):
+    m = menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))
+    p = _mgr(tmp_path)._payload(PaneState(
+        id="%1", target="w:1.1", name="agent",
+        status=STATUS_NEEDS_INPUT, question="Pick one", menu=m))
+    assert p["aps"]["category"] == "vmux.menu"
+    assert p["aps"]["alert"]["body"] == "Pick one\n1) Apple  2) Banana  3) Cherry"
+
+
+def test_payload_generic_when_no_menu(tmp_path):
+    p = _mgr(tmp_path)._payload(pane("%1", STATUS_NEEDS_INPUT, "Continue?"))
+    assert p["aps"]["category"] == "vmux.generic"
+    assert p["vmux"]["menu"] == []

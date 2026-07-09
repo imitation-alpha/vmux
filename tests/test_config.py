@@ -23,13 +23,24 @@ def test_editable_dict_has_expected_keys():
     }
     # the exec'd command must never be exposed to (or settable from) the UI
     assert "usage_command" not in d
+    assert not any(k.startswith("auto_naming_") for k in d)
 
 
 def test_naming_mode():
     c = config.Config()
-    assert c.naming_mode == "title"
+    assert c.naming_mode == "session_window_pane"
     c.apply_patch({"naming_mode": "window"})
     assert c.naming_mode == "window"
+    c.apply_patch({"naming_mode": "pane"})
+    assert c.naming_mode == "pane"
+    c.apply_patch({"naming_mode": "window_pane"})
+    assert c.naming_mode == "window_pane"
+    c.apply_patch({"naming_mode": "session_pane"})
+    assert c.naming_mode == "session_pane"
+    c.apply_patch({"naming_mode": "smart"})
+    assert c.naming_mode == "smart"
+    c.apply_patch({"naming_mode": "session_window_pane"})
+    assert c.naming_mode == "session_window_pane"
     with pytest.raises(ValueError):
         c.apply_patch({"naming_mode": "bogus"})
 
@@ -58,6 +69,60 @@ def test_capture_lines_yaml_clamped(tmp_path):
     cfgfile.write_text("capture_lines: 5\n")   # below floor -> clamped up
     c = config.load(str(cfgfile))
     assert c.capture_lines == 40
+
+
+def test_tmux_auto_rename_disabled_by_default():
+    assert config.Config().disable_tmux_auto_rename is True
+
+
+def test_tmux_auto_rename_yaml_can_opt_out(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("tmux:\n  disable_auto_rename: false\n")
+    c = config.load(str(cfgfile))
+    assert c.disable_tmux_auto_rename is False
+
+
+def test_naming_mode_loads_from_yaml(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("naming_mode: smart\n")
+    c = config.load(str(cfgfile))
+    assert c.naming_mode == "smart"
+
+
+def test_auto_naming_yaml_section_is_yaml_only(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "auto_naming:\n"
+        "  ai_enabled: true\n"
+        "  ai_backend: local\n"
+        "  ai_programs: claude,codex\n"
+        "  prefix_apps:\n"
+        "    codex: cx\n"
+        "  max_len: 999\n"
+        "  timeout: 999\n"
+        "  local_url: http://127.0.0.1:9999/v1/chat/completions\n"
+        "  local_api_key: secret-token\n"
+        "  antigravity_flags: [--sandbox]\n"
+    )
+    c = config.load(str(cfgfile))
+    assert c.auto_naming_ai_enabled is True
+    assert c.auto_naming_ai_backend == "local"
+    assert c.auto_naming_ai_programs == ["claude", "codex"]
+    assert c.auto_naming_prefix_apps["codex"] == "cx"
+    assert c.auto_naming_max_len == 80
+    assert c.auto_naming_timeout == 300.0
+    assert c.auto_naming_local_url == "http://127.0.0.1:9999/v1/chat/completions"
+    assert c.auto_naming_local_api_key == "secret-token"
+    assert c.auto_naming_antigravity_flags == ["--sandbox"]
+    assert c.auto_naming_cache_path == str(tmp_path / "vmux-names.json")
+    assert "local_api_key" not in c.editable_dict()
+
+
+def test_bad_auto_naming_backend_exits(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("auto_naming:\n  ai_backend: nope\n")
+    with pytest.raises(SystemExit):
+        config.load(str(cfgfile))
 
 
 def test_booleans_and_overrides():

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -42,7 +43,35 @@ DEFAULT_ERROR_PATTERNS = [
 # Limits for UI-supplied detector patterns (the editor holds the token, so this
 # guards against fat-finger mistakes, not malice).
 PANE_KINDS = {"claude-code", "generic", "shell"}
-NAMING_MODES = {"title", "window", "target", "command"}
+NAMING_MODES = {
+    "pane",
+    "window_pane",
+    "session_pane",
+    "session_window_pane",
+    "title",
+    "window",
+    "target",
+    "command",
+    "smart",
+}
+AUTO_NAMING_BACKENDS = {"claude", "local", "codex", "agy", "antigravity"}
+DEFAULT_AUTO_NAMING_AI_PROGRAMS = ["claude", "node", "python", "bun", "deno", "codex", "agy"]
+DEFAULT_AUTO_NAMING_PREFIX_APPS = {
+    "claude": "cc",
+    "node": "node",
+    "nvim": "nvim",
+    "codex": "cx",
+    "agy": "ay",
+    "antigravity": "ay",
+    "opencode": "oc",
+    "oc": "oc",
+}
+DEFAULT_AUTO_NAMING_SYSTEM_PROMPT = (
+    "Generate a SHORT kebab-case tmux pane title (max 4 words) describing what "
+    "this terminal is working on. Prioritize the git branch name, then the "
+    "task/file/topic visible. Output ONLY the title — no quotes, no punctuation, "
+    "no explanation."
+)
 MAX_PATTERNS = 40
 MAX_PATTERN_LEN = 200
 
@@ -70,7 +99,8 @@ class Config:
     capture_lines: int = 200     # lines of scrollback captured per pane (0 = visible screen only)
     auto_discover: bool = True
     include_shells: bool = False
-    naming_mode: str = "title"   # title | window | target | command
+    disable_tmux_auto_rename: bool = True
+    naming_mode: str = "session_window_pane"
     overrides: Dict[str, PaneOverride] = field(default_factory=dict)  # keyed by target
     generic_prompt_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_GENERIC_PROMPTS))
     error_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_ERROR_PATTERNS))
@@ -97,6 +127,28 @@ class Config:
     usage_report_refresh: float = 300.0  # seconds between report scans (CPU-heavy)
     usage_alert_threshold: float = 20.0  # push when quota drops below this %; 0 = off
 
+    # optional smart pane naming (`naming_mode: smart`). The heuristic layer is
+    # always local; the AI layer is YAML-only because it can capture pane text,
+    # read local executable paths, and call external backends.
+    auto_naming_ai_enabled: bool = False
+    auto_naming_ai_backend: str = "claude"
+    auto_naming_ai_programs: List[str] = field(default_factory=lambda: list(DEFAULT_AUTO_NAMING_AI_PROGRAMS))
+    auto_naming_prefix_apps: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_AUTO_NAMING_PREFIX_APPS))
+    auto_naming_max_len: int = 24
+    auto_naming_timeout: float = 60.0
+    auto_naming_system_prompt: str = DEFAULT_AUTO_NAMING_SYSTEM_PROMPT
+    auto_naming_claude_bin: str = "claude"
+    auto_naming_claude_model: str = "haiku"
+    auto_naming_local_url: str = "http://localhost:8080/v1/chat/completions"
+    auto_naming_local_model: str = "default"
+    auto_naming_local_api_key: str = ""
+    auto_naming_codex_bin: str = "codex"
+    auto_naming_codex_model: str = ""
+    auto_naming_antigravity_bin: str = "agy"
+    auto_naming_antigravity_model: str = ""
+    auto_naming_antigravity_flags: List[str] = field(default_factory=list)
+    auto_naming_cache_path: Optional[str] = field(default=None, repr=False)
+
     # compiled, filled in __post_init__
     generic_re: List["re.Pattern"] = field(default_factory=list, repr=False)
     error_re: List["re.Pattern"] = field(default_factory=list, repr=False)
@@ -105,6 +157,10 @@ class Config:
     overlay_path: Optional[str] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if self.naming_mode not in NAMING_MODES:
+            raise ValueError("bad naming_mode: %s" % self.naming_mode)
+        if self.auto_naming_ai_backend not in AUTO_NAMING_BACKENDS:
+            raise ValueError("bad auto_naming.ai_backend: %s" % self.auto_naming_ai_backend)
         self._recompile()
 
     def _recompile(self) -> None:
@@ -247,6 +303,41 @@ def _load_overlay(path: str) -> Optional[dict]:
         return None
 
 
+def _string_list(value, default: List[str], *, split_shell: bool = False) -> List[str]:
+    if value is None:
+        return list(default)
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        if split_shell:
+            return [str(v).strip() for v in shlex.split(value) if str(v).strip()]
+        return [p.strip() for p in value.split(",") if p.strip()]
+    return list(default)
+
+
+def _string_map(value, default: Dict[str, str]) -> Dict[str, str]:
+    out = dict(default)
+    if value is None:
+        return out
+    if isinstance(value, dict):
+        for k, v in value.items():
+            key = str(k).strip()
+            val = str(v).strip()
+            if key and val:
+                out[key] = val
+        return out
+    if isinstance(value, str):
+        for pair in value.split(","):
+            if ":" not in pair:
+                continue
+            key, val = pair.split(":", 1)
+            key = key.strip()
+            val = val.strip()
+            if key and val:
+                out[key] = val
+    return out
+
+
 def save_overlay(cfg: "Config") -> None:
     if not cfg.overlay_path:
         return
@@ -268,14 +359,22 @@ def load(path: Optional[str]) -> Config:
             data = yaml.safe_load(fh) or {}
 
     server = data.get("server", {}) or {}
+    tmux_settings = data.get("tmux", {}) or {}
     discovery = data.get("discovery", {}) or {}
     detectors = data.get("detectors", {}) or {}
     push = data.get("push", {}) or {}
     usage = data.get("usage", {}) or {}
+    auto_naming = data.get("auto_naming", {}) or {}
 
     apns_env = str(push.get("environment", "sandbox") or "sandbox")
     if apns_env not in ("sandbox", "production"):
         raise SystemExit("push.environment must be 'sandbox' or 'production', got: %s" % apns_env)
+    auto_backend = str(auto_naming.get("ai_backend", "claude") or "claude")
+    if auto_backend not in AUTO_NAMING_BACKENDS:
+        raise SystemExit("auto_naming.ai_backend must be one of %s, got: %s" % (
+            ", ".join(sorted(AUTO_NAMING_BACKENDS)),
+            auto_backend,
+        ))
 
     overrides: Dict[str, PaneOverride] = {}
     for entry in data.get("panes", []) or []:
@@ -297,6 +396,8 @@ def load(path: Optional[str]) -> Config:
         capture_lines=min(2000, max(40, int(data.get("capture_lines", 200)))),
         auto_discover=bool(discovery.get("auto", True)),
         include_shells=bool(discovery.get("include_shells", False)),
+        disable_tmux_auto_rename=bool(tmux_settings.get("disable_auto_rename", True)),
+        naming_mode=str(data.get("naming_mode", "session_window_pane") or "session_window_pane"),
         overrides=overrides,
         generic_prompt_patterns=detectors.get("generic_prompt_patterns", list(DEFAULT_GENERIC_PROMPTS)),
         error_patterns=detectors.get("error_patterns", list(DEFAULT_ERROR_PATTERNS)),
@@ -312,10 +413,44 @@ def load(path: Optional[str]) -> Config:
         usage_quota_refresh=min(3600.0, max(30.0, float(usage.get("quota_refresh", 180.0)))),
         usage_report_refresh=min(3600.0, max(60.0, float(usage.get("report_refresh", 300.0)))),
         usage_alert_threshold=min(100.0, max(0.0, float(usage.get("alert_threshold", 20.0)))),
+        auto_naming_ai_enabled=bool(auto_naming.get("ai_enabled", False)),
+        auto_naming_ai_backend=auto_backend,
+        auto_naming_ai_programs=_string_list(
+            auto_naming.get("ai_programs"),
+            DEFAULT_AUTO_NAMING_AI_PROGRAMS,
+        ),
+        auto_naming_prefix_apps=_string_map(
+            auto_naming.get("prefix_apps"),
+            DEFAULT_AUTO_NAMING_PREFIX_APPS,
+        ),
+        auto_naming_max_len=min(80, max(8, int(auto_naming.get("max_len", 24)))),
+        auto_naming_timeout=max(0.0, min(300.0, float(auto_naming.get("timeout", 60.0)))),
+        auto_naming_system_prompt=str(
+            auto_naming.get("system_prompt", DEFAULT_AUTO_NAMING_SYSTEM_PROMPT)
+            or DEFAULT_AUTO_NAMING_SYSTEM_PROMPT
+        )[:1000],
+        auto_naming_claude_bin=str(auto_naming.get("claude_bin", "claude") or "claude")[:300],
+        auto_naming_claude_model=str(auto_naming.get("claude_model", "haiku") or "haiku")[:100],
+        auto_naming_local_url=str(
+            auto_naming.get("local_url", "http://localhost:8080/v1/chat/completions")
+            or "http://localhost:8080/v1/chat/completions"
+        )[:500],
+        auto_naming_local_model=str(auto_naming.get("local_model", "default") or "default")[:100],
+        auto_naming_local_api_key=str(auto_naming.get("local_api_key", "") or "")[:500],
+        auto_naming_codex_bin=str(auto_naming.get("codex_bin", "codex") or "codex")[:300],
+        auto_naming_codex_model=str(auto_naming.get("codex_model", "") or "")[:100],
+        auto_naming_antigravity_bin=str(auto_naming.get("antigravity_bin", "agy") or "agy")[:300],
+        auto_naming_antigravity_model=str(auto_naming.get("antigravity_model", "") or "")[:100],
+        auto_naming_antigravity_flags=_string_list(
+            auto_naming.get("antigravity_flags"),
+            [],
+            split_shell=True,
+        ),
     )
     # layer UI-managed settings (if any) over the YAML — overlay wins
     cfg.overlay_path = _overlay_path_for(path)
     cfg.push_store_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-push.json")
+    cfg.auto_naming_cache_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-names.json")
     overlay = _load_overlay(cfg.overlay_path)
     if overlay:
         try:

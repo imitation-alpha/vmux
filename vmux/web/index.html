@@ -343,6 +343,7 @@
   .sheet-grab-zone { padding:8px 16px 4px; touch-action:none; }
   .grabber { width:38px; height:5px; border-radius:3px; background:var(--label-3); margin:0 auto 10px; }
   .sheet-head { display:flex; align-items:center; gap:10px; padding-bottom:12px; border-bottom:1px solid var(--separator); }
+  .sheet-actions { display:flex; align-items:center; gap:7px; flex:none; }
   .sheet-title { flex:1; min-width:0; font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sheet-scroll { overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:14px 16px 4px; }
 
@@ -436,6 +437,7 @@
   .set-input { background:var(--bg); border:1px solid var(--separator); border-radius:8px; padding:7px 10px;
     font-size:14px; color:var(--label); outline:none; width:140px; }
   .set-input:focus { border-color:var(--accent); }
+  .set-select { width:178px; max-width:46vw; }
   .kb-edit-row { gap:6px; }
   .kb-edit-row .kb-label { flex:1; min-width:0; width:auto; }
   .kb-edit-row .kb-key { flex:none; width:96px; }
@@ -806,12 +808,14 @@ function LinksPanel({links}){
   </div>`;
 }
 
-function DetailBody({pane, variant}){
+function DetailBody({pane, variant, linksOpen: controlledLinksOpen, setLinksOpen: controlledSetLinksOpen}){
   const prefs=usePrefs();
   const actions=prefs.actions||DEFAULT_ACTIONS;
   const outRef=useRef();
   const stick=useRef(true);                                 // keep pinned to the newest output, like a real terminal
-  const [linksOpen,setLinksOpen]=useState(false);
+  const [localLinksOpen,setLocalLinksOpen]=useState(false);
+  const linksOpen=controlledLinksOpen==null ? localLinksOpen : controlledLinksOpen;
+  const setLinksOpen=controlledSetLinksOpen || setLocalLinksOpen;
   const text=(pane.lines||[]).join("\n") || "(no output)";
   const links=extractLinks(pane.lines);
   const toBottom=()=>{ const el=outRef.current; if(el) el.scrollTop=el.scrollHeight; };
@@ -1118,7 +1122,7 @@ function MacApp({panes, connected, onBroadcast, onSettings}){
 }
 
 /* ===================== iOS ===================== */
-function MobileSheet({title, subtitle, onClose, children, landscape}){
+function MobileSheet({title, subtitle, onClose, children, landscape, actions}){
   const [d,setD]=useState(0);
   const [closing,setClosing]=useState(false);
   const drag=useRef(null);
@@ -1142,6 +1146,7 @@ function MobileSheet({title, subtitle, onClose, children, landscape}){
             <div class="sheet-title">${title}</div>
             ${subtitle?html`<div class="sheet-subtitle">${subtitle}</div>`:null}
           </div>
+          ${actions?html`<div class="sheet-actions">${actions}</div>`:null}
           <button class="btn" onClick=${close}>Done</button>
         </div>
       </div>
@@ -1151,14 +1156,20 @@ function MobileSheet({title, subtitle, onClose, children, landscape}){
 }
 
 function PaneDetailSheet({pane, onClose, landscape}){
-  return html`<${MobileSheet} title=${pane.name} subtitle=${pane.target+" · "+pane.kind} onClose=${onClose} landscape=${landscape}>
+  const [linksOpen,setLinksOpen]=useState(false);
+  const links=extractLinks(pane.lines);
+  useEffect(()=>setLinksOpen(false),[pane.id]);
+  const linkAction=links.length
+    ? html`<button class="keycap" title="Links" aria-label=${"Links "+links.length} onClick=${()=>setLinksOpen(o=>!o)}>🔗 ${links.length}</button>`
+    : null;
+  return html`<${MobileSheet} title=${pane.name} subtitle=${pane.target+" · "+pane.kind} onClose=${onClose} landscape=${landscape} actions=${linkAction}>
     <div style=${{display:"flex",alignItems:"center",gap:"10px",marginBottom:"12px"}}>
       <${StatusPill} status=${pane.status} />
       <${StarBtn} pane=${pane} />
       <div class="spacer"></div>
       <span class="surface-sub">Updated ${timeAgo(pane.updated)}</span>
     </div>
-    <${DetailBody} pane=${pane} variant="ios" />
+    <${DetailBody} pane=${pane} variant="ios" linksOpen=${linksOpen} setLinksOpen=${setLinksOpen} />
   <//>`;
 }
 
@@ -1355,9 +1366,20 @@ function ServerSettings({cfg, err, patch, panes}){
       <${Row} label="Auto-discover panes"><${Switch} on=${cfg.auto_discover} onChange=${v=>patch({auto_discover:v})} /><//>
       <${Row} label="Show idle shells"><${Switch} on=${cfg.include_shells} onChange=${v=>patch({include_shells:v})} /><//>
       <${Row} label="Pane name" sub="default source — manual renames always win">
-        <${Seg} value=${cfg.naming_mode||"title"}
-          options=${[["title","Task"],["window","Window"],["target","ID"],["command","Cmd"]]}
-          onChange=${v=>patch({naming_mode:v})} />
+        <select class="set-input set-select" value=${cfg.naming_mode||"session_window_pane"}
+          onChange=${e=>patch({naming_mode:e.target.value})}>
+          ${[
+            ["session_window_pane","Session:window:pane"],
+            ["session_pane","Session:pane"],
+            ["window_pane","Window:pane"],
+            ["pane","Pane"],
+            ["title","Title"],
+            ["window","Window name"],
+            ["target","Target"],
+            ["command","Command"],
+            ["smart","Smart task"],
+          ].map(([v,l])=>html`<option key=${v} value=${v}>${l}</option>`)}
+        </select>
       <//>
     </div>
 

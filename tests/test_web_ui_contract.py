@@ -77,6 +77,20 @@ def test_frontend_surfaces_link_extraction_tools():
     assert "LinksPanel" in detail
 
 
+def test_mobile_detail_sheet_surfaces_links_in_fullscreen_chrome():
+    text = HTML.read_text()
+    sheet = text[text.index("function MobileSheet(") : text.index("\nfunction", text.index("function MobileSheet(") + 1)]
+    detail_sheet = text[
+        text.index("function PaneDetailSheet(") : text.index("\nfunction", text.index("function PaneDetailSheet(") + 1)
+    ]
+    assert "actions" in sheet
+    assert "sheet-actions" in sheet
+    assert "extractLinks(pane.lines)" in detail_sheet
+    assert "setLinksOpen" in detail_sheet
+    assert "🔗 ${links.length}" in detail_sheet
+    assert "linksOpen=${linksOpen}" in detail_sheet
+
+
 def test_settings_exposes_scrollback_capture_setting():
     text = HTML.read_text()
     assert "capture_lines" in text
@@ -84,6 +98,26 @@ def test_settings_exposes_scrollback_capture_setting():
     assert 'label="Scrollback"' in text
     assert "lines of history captured per pane" in text
     assert "Math.min(2000, Math.max(40" in text
+
+
+def test_settings_exposes_all_pane_naming_modes():
+    text = HTML.read_text()
+    start = text.index('<${Row} label="Pane name"')
+    end = text.index("<//>", start)
+    row = text[start:end]
+    assert "<select" in row
+    for value in [
+        "session_window_pane",
+        "session_pane",
+        "window_pane",
+        "pane",
+        "title",
+        "window",
+        "target",
+        "command",
+        "smart",
+    ]:
+        assert value in row
 
 
 def test_settings_editors_close_fragment_wrappers():

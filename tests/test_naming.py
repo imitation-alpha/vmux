@@ -27,8 +27,29 @@ def test_target_mode():
     assert choose_name("target", override_name=None, **BASE) == "edu:1.1"
 
 
+def test_stable_target_part_modes():
+    base = {**BASE, "target": "work:1.3"}
+    assert choose_name("pane", override_name=None, **base) == "3"
+    assert choose_name("window_pane", override_name=None, **base) == "1:3"
+    assert choose_name("session_pane", override_name=None, **base) == "work:3"
+    assert choose_name("session_window_pane", override_name=None, **base) == "work:1:3"
+
+
+def test_malformed_target_part_mode_falls_back_to_target():
+    base = {**BASE, "target": "not-a-canonical-target"}
+    assert choose_name("session_window_pane", override_name=None, **base) == "not-a-canonical-target"
+
+
 def test_command_mode_basename():
     assert choose_name("command", override_name=None, **BASE) == "zsh"
+
+
+def test_smart_mode_uses_supplied_smart_name():
+    assert choose_name("smart", override_name=None, smart_name="cc:fix-auth", **BASE) == "cc:fix-auth"
+
+
+def test_smart_mode_falls_back_to_target_without_smart_name():
+    assert choose_name("smart", override_name=None, smart_name="", **BASE) == "edu:1.1"
 
 
 def test_empty_source_falls_back_to_target():
