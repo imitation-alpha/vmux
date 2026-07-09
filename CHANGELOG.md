@@ -6,6 +6,53 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Scrollback capture + link extraction.** Pane detail captures 200 lines of
+  scrollback by default (configurable 40–2000), joins wrapped tmux lines, and
+  surfaces detected URLs with open/copy actions.
+- **Starred panes and larger-swarm navigation.** Tree, active, all, and starred
+  views keep busy tmux workspaces navigable, with interaction timestamps used
+  for recent-activity sorting.
+- **Snippets and shortcut keys.** Saved phrase snippets and customizable action
+  buttons backed by the server key allowlist.
+- **Freeform reply flow.** Parsed menu options can open a text reply instead of
+  sending a fixed key immediately.
+- **Optional APNs push.** Local registered-device storage and best-effort APNs
+  alerts when panes need input, with optional error alerts.
+- **Opt-in tokscale usage tracking.** Quota, usage summary, history API, and low
+  quota push alerts when `usage.enabled: true` is configured.
+- **Smart pane naming.** A new `naming_mode: smart` option ports the
+  auto-naming-tmux heuristic/AI naming strategy into vmux display names without
+  installing tmux hooks or renaming tmux windows.
+- **Companion app docs.** A backend contract reference for client implementers
+  (`docs/COMPANION_APP_BACKEND.md`) and a push-notification guide covering
+  APNs setup and its team-scoping constraint
+  (`docs/PUSH_NOTIFICATIONS.md`).
+- When bound to a non-loopback host with a token set, the startup banner now
+  prints the ready-to-paste app server address.
+
+### Changed
+
+- The intended public PyPI distribution name is `vmux-agent`; the command and
+  Python import remain `vmux`.
+- Settings now include scrollback capture depth, per-pane star state,
+  customizable shortcut buttons, snippets, and opt-in usage tracking toggles.
+- The service worker cache was refreshed for the updated PWA.
+- vmux now disables tmux `automatic-rename` by default at startup; set
+  `tmux.disable_auto_rename: false` in YAML to leave tmux's option unchanged.
+- QUICKSTART was expanded for app onboarding: keep-it-running and token
+  rotation guidance, usage-tracking setup, and troubleshooting keyed to the
+  app's exact error messages.
+
+### Security
+
+- tmux and tokscale subprocesses use argument lists, not shell strings; pane ids
+  are validated, named keys are allow-listed, and literal text uses
+  `send-keys -l --`.
+- Push device tokens are validated and truncated in UI/API info responses; APNs
+  key paths and `usage.command` remain YAML-only.
+
 ## [0.1.0] — 2026-06-08
 
 First public release.

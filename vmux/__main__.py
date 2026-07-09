@@ -39,6 +39,14 @@ def main(argv=None) -> int:
         cfg.include_shells = True
     cfg.validate()
 
+    if cfg.disable_tmux_auto_rename:
+        try:
+            tmux.disable_automatic_rename()
+        except tmux.TmuxError as exc:
+            if "no server running" not in str(exc).lower():
+                print("vmux: could not disable tmux automatic rename: %s" % exc,
+                      file=sys.stderr)
+
     if not tmux.list_panes():
         print("vmux: no tmux panes found. Start some agents in tmux, then reload.",
               file=sys.stderr)
@@ -52,6 +60,9 @@ def main(argv=None) -> int:
         __version__, scheme_host, cfg.port,
         "token set" if cfg.token else "no token, localhost only",
     ))
+    if cfg.token and cfg.host not in ("127.0.0.1", "localhost", "::1"):
+        # the app's server-address field takes host:port; the token is never printed
+        print("       app server address: %s:%d" % (scheme_host, cfg.port))
     uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="warning")
     return 0
 

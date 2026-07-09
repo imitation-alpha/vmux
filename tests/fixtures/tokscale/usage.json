@@ -1,0 +1,72 @@
+[
+  {
+    "provider": "Claude",
+    "plan": "Max 20x",
+    "email": null,
+    "metrics": [
+      {
+        "label": "Session",
+        "used_percent": 6.0,
+        "remaining_percent": 94.0,
+        "remaining_label": null,
+        "resets_at": "2026-06-12T19:50:00.046076+00:00"
+      },
+      {
+        "label": "Weekly",
+        "used_percent": 5.0,
+        "remaining_percent": 95.0,
+        "remaining_label": null,
+        "resets_at": "2026-06-19T11:00:00.046099+00:00"
+      }
+    ]
+  },
+  {
+    "provider": "Codex",
+    "plan": "Pro",
+    "email": "user@example.com",
+    "metrics": [
+      {
+        "label": "Session",
+        "used_percent": 1.0,
+        "remaining_percent": 99.0,
+        "remaining_label": null,
+        "resets_at": "2026-06-12T17:46:04+00:00"
+      },
+      {
+        "label": "Weekly",
+        "used_percent": 12.0,
+        "remaining_percent": 88.0,
+        "remaining_label": null,
+        "resets_at": "2026-06-18T05:01:27+00:00"
+      }
+    ]
+  },
+  {
+    "provider": "Copilot",
+    "plan": "Individual",
+    "email": null,
+    "metrics": [
+      {
+        "label": "Chat",
+        "used_percent": 2.9000000000000057,
+        "remaining_percent": 97.1,
+        "remaining_label": "194/200 left",
+        "resets_at": "2026-07-01"
+      },
+      {
+        "label": "Completions",
+        "used_percent": 0.0,
+        "remaining_percent": 100.0,
+        "remaining_label": "2000/2000 left",
+        "resets_at": "2026-07-01"
+      },
+      {
+        "label": "Premium",
+        "used_percent": 100.0,
+        "remaining_percent": 0.0,
+        "remaining_label": "0/0 left",
+        "resets_at": "2026-07-01"
+      }
+    ]
+  }
+]

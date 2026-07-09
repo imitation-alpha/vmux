@@ -13,14 +13,24 @@ import subprocess
 from typing import Dict, List, Optional
 
 # Fields we pull for every pane. Order matters: parsed positionally below.
-_PANE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}\t#{window_name}"
+_PANE_FORMAT = (
+    "#{pane_id}\t"
+    "#{session_name}:#{window_index}.#{pane_index}\t"
+    "#{pane_current_command}\t"
+    "#{pane_title}\t"
+    "#{window_name}\t"
+    "#{pane_current_path}\t"
+    "#{pane_pid}\t"
+    "#{window_id}"
+)
 
 # Named keys the API is allowed to send. Anything else is rejected.
 ALLOWED_KEYS = {
-    "Enter", "Escape", "Tab", "Space", "BSpace",
+    "Enter", "Escape", "Tab", "BTab", "Space", "BSpace",
     "Up", "Down", "Left", "Right",
     "Home", "End", "PageUp", "PageDown",
-    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l", "C-r", "C-w",
+    "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l",
+    "C-r", "C-w", "C-o", "C-n", "C-p",
 }
 
 _PANE_ID_RE = re.compile(r"^%\d+$")
@@ -33,6 +43,11 @@ class TmuxError(RuntimeError):
 
 def available() -> bool:
     return shutil.which("tmux") is not None
+
+
+def disable_automatic_rename() -> None:
+    """Turn off tmux's global automatic window renaming."""
+    _run(["set-window-option", "-g", "automatic-rename", "off"])
 
 
 def _run(args: List[str], timeout: float = 3.0) -> str:
@@ -57,7 +72,7 @@ def valid_pane_id(pane_id: str) -> bool:
 
 
 def list_panes() -> List[Dict[str, str]]:
-    """Every pane on the server, as dicts: id, target, cmd, title."""
+    """Every pane on the server, as dicts with tmux metadata."""
     try:
         raw = _run(["list-panes", "-a", "-F", _PANE_FORMAT])
     except TmuxError:
@@ -67,22 +82,32 @@ def list_panes() -> List[Dict[str, str]]:
         if not line:
             continue
         parts = line.split("\t")
-        while len(parts) < 5:
+        while len(parts) < 8:
             parts.append("")
         panes.append(
             {"id": parts[0], "target": parts[1], "cmd": parts[2],
-             "title": parts[3], "window": parts[4]}
+             "title": parts[3], "window": parts[4], "path": parts[5],
+             "pid": parts[6], "window_id": parts[7]}
         )
     return panes
 
 
-def capture(pane_id: str) -> Optional[str]:
-    """Visible pane content as plain text, or None if the pane is gone."""
+def capture(pane_id: str, scrollback: int = 0) -> Optional[str]:
+    """Pane content as plain text, or None if the pane is gone.
+
+    With scrollback > 0, also include that many lines of history above the
+    visible screen (tmux `-S -N`), so the detail view and link extraction see
+    more than just the current screen. scrollback == 0 keeps the visible-only
+    behaviour. `-J` joins wrapped lines, so a wrapped URL stays on one line.
+    """
     if not valid_pane_id(pane_id):
         return None
+    args = ["capture-pane", "-p", "-J"]
+    if scrollback > 0:
+        args += ["-S", "-%d" % scrollback]
+    args += ["-t", pane_id]
     try:
-        # -p print to stdout, -J join wrapped lines, visible screen only.
-        return _run(["capture-pane", "-p", "-J", "-t", pane_id])
+        return _run(args)
     except TmuxError:
         return None
 

@@ -13,8 +13,8 @@ tmux ──capture-pane──▶ poller ──detect()──▶ PaneState ──
 
 1. **`poller.py` — `Hub.poll_once()`** runs on a loop (`poll_interval`, default
    0.7s; an action `kick()`s an immediate re-poll). It lists panes, captures each
-   concurrently (`asyncio.to_thread`), diffs against the last capture, and builds
-   a `PaneState` per pane.
+   concurrently (`asyncio.to_thread`) with `capture_lines` lines of scrollback
+   by default, diffs against the last capture, and builds a `PaneState` per pane.
 2. **`detectors.py`** turns raw pane text into a status + a parsed menu. Pure
    functions — input is text, output is a `DetectResult`. Two strategies:
    Claude Code TUI box parsing (`parse_claude_menu`, the `╭ │ ❯` characters) and
@@ -34,7 +34,8 @@ tmux ──capture-pane──▶ poller ──detect()──▶ PaneState ──
 
 `id` (tmux pane id) · `target` (session:window.pane) · `name` · `kind`
 (`claude-code` / `generic` / `shell`) · `status` · `title` · `question` ·
-`menu` (parsed options) · `preview` / `lines` · `updated` · `changed`.
+`menu` (parsed options) · `preview` / `lines` · `updated` · `changed` · `window`
+· `starred` · `interacted`.
 
 ## Config & settings
 
@@ -43,7 +44,20 @@ config). The Settings UI edits a live-mutable subset (`editable_dict` /
 `apply_patch`) which is persisted to a JSON **overlay** file layered over the
 YAML — so the user's hand-authored `config.yaml` (comments, token) is never
 rewritten. `apply_patch` validates everything (regex compile + caps, enum checks)
-and recompiles patterns so changes apply on the next poll.
+and recompiles patterns so changes apply on the next poll. Token material, APNs
+key paths, and `usage.command` are YAML-only; the API can toggle
+`usage_enabled`, but it cannot replace the executable string.
+
+## Optional subsystems
+
+- **Push (`push.py`)** stores registered APNs device tokens next to the overlay
+  in `vmux-push.json`, exposes only truncated token labels to the UI, and reads
+  APNs key material only from the local YAML path when sending.
+- **Usage (`usage.py`)** is disabled by default. When `usage.enabled: true` is
+  set, it shells out to the YAML-configured tokscale command via argument lists,
+  normalizes quota/report JSON, and can send low-quota alerts through push.
+- **PWA link extraction** is client-side: the backend sends pane lines, and the
+  UI extracts URLs for open/copy actions without adding another server endpoint.
 
 ## Safety invariants (don't break these)
 
@@ -51,4 +65,5 @@ and recompiles patterns so changes apply on the next poll.
   pane ids are format-checked; literal text uses `send-keys -l --`.
 - Auth uses `hmac.compare_digest`. The token never appears in API responses.
 - User regexes always run with a timeout.
+- The overlay and push registry never write `config.yaml`.
 - In `web/index.html`, `style` props are objects, not strings.

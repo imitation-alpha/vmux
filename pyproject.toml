@@ -1,5 +1,5 @@
 [project]
-name = "vmux"
+name = "vmux-agent"
 version = "0.1.0"
 description = "Attention router for a swarm of CLI coding agents running in tmux — drive your Claude Code / Codex / Gemini swarm from your phone."
 readme = "README.md"
@@ -39,6 +39,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Optional APNs push support: pip install 'vmux-agent[push]'
+push = ["httpx[http2]>=0.27", "PyJWT[crypto]>=2.8"]
 
 [project.urls]
 Homepage = "https://github.com/imitation-alpha/vmux"

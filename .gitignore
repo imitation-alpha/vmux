@@ -15,7 +15,35 @@ uv.lock
 # doesn't accidentally match e.g. .github/ISSUE_TEMPLATE/config.yml
 /config.yaml
 /config.yml
-vmux-settings.json
+/vmux-settings.json
+/vmux-push.json
+/.superpowers/
+/CLAUDE.md
+
+# Native app / App Store materials live outside this backend/PWA repository.
+# (PRIVACY.md is tracked: the iOS app links to blob/main/PRIVACY.md.)
+/ios/
+/docs/app-store/
+/.github/workflows/ios.yml
+
+# Local agent-session state.
+/.hermes/
+
+# Local Apple/Xcode/App Store credentials and generated artifacts.
+*.p8
+AuthKey_*.p8
+*.jwt
+*.ipa
+*.xcarchive/
+*.xcodeproj/
+*.xcworkspace/
+*.mobileprovision
+*.provisionprofile
+DerivedData/
+xcuserdata/
+/.asc-*
+/asc-*.json
+/app-store-connect*.json
 
 # OS
 .DS_Store

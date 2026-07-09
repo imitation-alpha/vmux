@@ -1,0 +1,28 @@
+[
+  {
+    "provider": "NewVendor",
+    "plan": null,
+    "email": null,
+    "metrics": [
+      {
+        "label": "Session",
+        "used_percent": "12",
+        "remaining_percent": "88",
+        "remaining_label": null,
+        "resets_at": "not a date"
+      },
+      {
+        "label": null,
+        "used_percent": null
+      }
+    ]
+  },
+  {
+    "provider": "Broken"
+  },
+  null,
+  {
+    "plan": "Pro",
+    "metrics": "oops"
+  }
+]

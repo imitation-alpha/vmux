@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -20,6 +21,8 @@ from .models import (
     STATUS_OFFLINE,
     PaneState,
 )
+from .naming import SmartNamer
+from .push import PushManager
 
 
 def _strip_spinner(s: str) -> str:
@@ -29,17 +32,38 @@ def _strip_spinner(s: str) -> str:
     return t
 
 
-def choose_name(mode, *, title, window, target, command, override_name):
+_TARGET_RE = re.compile(r"^(.+):([0-9]+)\.([0-9]+)$")
+
+
+def _target_parts(target: str) -> Optional[tuple[str, str, str]]:
+    m = _TARGET_RE.match(target or "")
+    if not m:
+        return None
+    return m.group(1), m.group(2), m.group(3)
+
+
+def choose_name(mode, *, title, window, target, command, override_name, smart_name=None):
     """Pick a pane's display name. A manual override always wins; otherwise the
     chosen source (spinner-stripped where it's a title); empty -> target."""
     if override_name:
         return override_name
-    if mode == "window":
+    parts = _target_parts(target)
+    if mode == "pane":
+        cand = parts[2] if parts else target
+    elif mode == "window_pane":
+        cand = "%s:%s" % (parts[1], parts[2]) if parts else target
+    elif mode == "session_pane":
+        cand = "%s:%s" % (parts[0], parts[2]) if parts else target
+    elif mode == "session_window_pane":
+        cand = "%s:%s:%s" % parts if parts else target
+    elif mode == "window":
         cand = _strip_spinner(window)
     elif mode == "target":
         cand = target
     elif mode == "command":
         cand = (command or "").split("/")[-1]
+    elif mode == "smart":
+        cand = smart_name
     else:  # "title" (default)
         cand = _strip_spinner(title)
     return cand or target
@@ -56,8 +80,17 @@ class Hub:
         self.order: List[str] = []
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
-        self._wake = asyncio.Event()
+        self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
+        self.push = PushManager(cfg)
+        # created in run(): on Python 3.9 asyncio.Event() binds the current loop
+        # at construction, and Hub is built before the server loop exists
+        self._wake: Optional[asyncio.Event] = None
         self._stop = False
+        self.namer = SmartNamer(cfg, on_update=self.kick)
+
+    def mark_interaction(self, pane_id: str) -> None:
+        """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
+        self.interactions[pane_id] = time.time()
 
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
@@ -75,9 +108,9 @@ class Hub:
         panes = await asyncio.to_thread(tmux.list_panes)
         present_targets = {p["target"] for p in panes}
 
-        # capture all panes concurrently
+        # capture all panes concurrently (with configured scrollback depth)
         captures = await asyncio.gather(
-            *[asyncio.to_thread(tmux.capture, p["id"]) for p in panes]
+            *[asyncio.to_thread(tmux.capture, p["id"], self.cfg.capture_lines) for p in panes]
         )
 
         now = time.time()
@@ -103,11 +136,16 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
+            override_name = override.name if override else None
+            smart_name = None
+            if self.cfg.naming_mode == "smart" and not override_name:
+                smart_name = self.namer.name(pane, text, target)
             name = choose_name(
                 self.cfg.naming_mode,
                 title=pane["title"], window=pane.get("window", ""),
                 target=target, command=pane["cmd"],
-                override_name=(override.name if override else None),
+                override_name=override_name,
+                smart_name=smart_name,
             )
 
             st = PaneState(
@@ -122,6 +160,9 @@ class Hub:
                 lines=text.splitlines(),
                 updated=updated,
                 changed=changed,
+                window=pane.get("window", ""),
+                starred=bool(override and override.star),
+                interacted=self.interactions.get(pid, 0.0),
             )
             new_states[pid] = st
             new_order.append(pid)
@@ -137,11 +178,16 @@ class Hub:
                 name=ov.name or target,
                 kind=ov.kind or "generic",
                 status=STATUS_OFFLINE,
+                starred=ov.star,
             )
             new_order.append(pid)
 
+        alerts = self.push.collect(self.states, new_states)
         self.states = new_states
         self.order = new_order
+        # drop interaction timestamps for panes that no longer exist
+        self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
+        self.push.fire(alerts)   # async, best-effort; never blocks the poll
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
@@ -210,12 +256,16 @@ class Hub:
             tmux.send_key(real, "Enter")
         else:
             tmux.send_literal(real, key, enter=True)
+        self.mark_interaction(real)
 
     def kick(self) -> None:
-        self._wake.set()
+        if self._wake is not None:
+            self._wake.set()
 
     # -- main loop ---------------------------------------------------------- #
     async def run(self) -> None:
+        if self._wake is None:
+            self._wake = asyncio.Event()
         while not self._stop:
             try:
                 await self.poll_once()
@@ -230,4 +280,6 @@ class Hub:
 
     def stop(self) -> None:
         self._stop = True
-        self._wake.set()
+        self.namer.stop()
+        if self._wake is not None:
+            self._wake.set()

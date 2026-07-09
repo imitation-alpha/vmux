@@ -1,0 +1,80 @@
+{
+  "entries": [
+    {
+      "hour": "2026-06-12 00:00",
+      "clients": [
+        "codex",
+        "hermes"
+      ],
+      "models": [
+        "gpt-5.5"
+      ],
+      "input": 1096553,
+      "output": 44595,
+      "cacheRead": 6417152,
+      "cacheWrite": 0,
+      "messageCount": 142,
+      "turnCount": 0,
+      "cost": 10.598501
+    },
+    {
+      "hour": "2026-06-12 01:00",
+      "clients": [
+        "codex"
+      ],
+      "models": [
+        "gpt-5.5"
+      ],
+      "input": 654742,
+      "output": 19627,
+      "cacheRead": 3323136,
+      "cacheWrite": 0,
+      "messageCount": 30,
+      "turnCount": 0,
+      "cost": 5.764568000000001
+    },
+    {
+      "hour": "2026-06-12 02:00",
+      "clients": [
+        "claude",
+        "codex"
+      ],
+      "models": [
+        "claude-opus-4-8",
+        "codex-auto-review",
+        "gpt-5.5"
+      ],
+      "input": 812472,
+      "output": 120719,
+      "cacheRead": 24118352,
+      "cacheWrite": 389657,
+      "messageCount": 148,
+      "turnCount": 1,
+      "cost": 21.188987100000013
+    },
+    {
+      "hour": "2026-06-12 03:00",
+      "clients": [
+        "claude",
+        "codex"
+      ],
+      "models": [
+        "claude-fable-5",
+        "claude-haiku-4-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4-5",
+        "codex-auto-review",
+        "gpt-5.5"
+      ],
+      "input": 1135001,
+      "output": 211623,
+      "cacheRead": 22498262,
+      "cacheWrite": 958904,
+      "messageCount": 309,
+      "turnCount": 12,
+      "cost": 33.96630564999998
+    }
+  ],
+  "totalCost": 194.6077531,
+  "processingTimeMs": 6043
+}
