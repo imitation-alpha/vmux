@@ -127,3 +127,26 @@ def test_settings_editors_close_fragment_wrappers():
         end = text.index("\n}\n\nfunction", start)
         body = text[start:end]
         assert "<//>`;" in body
+
+
+def test_glyph_only_buttons_have_accessible_names():
+    text = HTML.read_text()
+    assert 'aria-label="Send and press Enter"' in text
+    assert 'aria-label="Broadcast"' in text
+    assert 'aria-label="Settings"' in text
+    assert 'aria-label="Decrease poll interval"' in text
+    assert 'aria-label="Increase poll interval"' in text
+    assert 'aria-label="Decrease scrollback"' in text
+    assert 'aria-label="Increase scrollback"' in text
+    assert 'aria-label="Move shortcut up"' in text
+    assert 'aria-label="Move shortcut down"' in text
+    assert 'aria-label="Remove shortcut"' in text
+    assert 'aria-label="Move snippet up"' in text
+    assert 'aria-label="Move snippet down"' in text
+    assert 'aria-label="Remove snippet"' in text
+    # both desktop and mobile Broadcast/Settings icon buttons are covered
+    assert text.count('aria-label="Broadcast"') == 2
+    assert text.count('aria-label="Settings"') == 2
+    # both the desktop DetailBody and mobile PaneDetailSheet link toggles
+    # expose the current link count, matching the existing mobile convention
+    assert text.count('aria-label=${"Links "+links.length}') == 2

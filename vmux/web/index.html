@@ -779,7 +779,7 @@ function Composer({pane, compact}){
       onInput=${e=>setText(e.target.value)}
       onKeyDown=${e=>{ e.stopPropagation(); if(e.key==="Enter"){ e.preventDefault(); send(true); } }} />
     <button class="btn" onClick=${()=>send(false)}>Send</button>
-    <button class="btn accent" onClick=${()=>send(true)}>↵</button>
+    <button class="btn accent" aria-label="Send and press Enter" onClick=${()=>send(true)}>↵</button>
   </div>`;
 }
 
@@ -829,7 +829,7 @@ function DetailBody({pane, variant, linksOpen: controlledLinksOpen, setLinksOpen
     <pre class="output" ref=${outRef} onScroll=${onScroll}>${text}</pre>
     <div class="actions">
       ${actions.map(([lbl,k],i)=>html`<button class="keycap" key=${i} onClick=${()=>act.key(pane,k)}>${lbl}</button>`)}
-      ${links.length?html`<button class="keycap" onClick=${()=>setLinksOpen(o=>!o)}>🔗 ${links.length}</button>`:null}
+      ${links.length?html`<button class="keycap" title="Links" aria-label=${"Links "+links.length} onClick=${()=>setLinksOpen(o=>!o)}>🔗 ${links.length}</button>`:null}
     </div>
     ${linksOpen && links.length ? html`<${LinksPanel} links=${links} />` : null}
     <${Composer} pane=${pane} />
@@ -1005,8 +1005,8 @@ function SwarmNavigator({panes, connected, selId, onOpen, onBroadcast, onSetting
         <div class="surface-sub">${connected?"Live swarm":"Reconnecting to server"}</div>
       </div>
       <div class="spacer"></div>
-      <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
-      <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+      <button class="iconbtn" title="Broadcast" aria-label="Broadcast" onClick=${onBroadcast}>⇪</button>
+      <button class="iconbtn" title="Settings" aria-label="Settings" onClick=${onSettings}>⚙</button>
       <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
     </div>
     <${StatusStrip} counts=${counts} />
@@ -1182,8 +1182,8 @@ function MobileAttentionHome({panes, connected, mode, onOpenDetail, onOpenTree, 
   return html`<div class="mobile-attention-home">
     <div class="lt-row mobile-hero">
       <h1 class="large-title">vmux</h1>
-      <button class="iconbtn" title="Broadcast" onClick=${onBroadcast}>⇪</button>
-      <button class="iconbtn" title="Settings" onClick=${onSettings}>⚙</button>
+      <button class="iconbtn" title="Broadcast" aria-label="Broadcast" onClick=${onBroadcast}>⇪</button>
+      <button class="iconbtn" title="Settings" aria-label="Settings" onClick=${onSettings}>⚙</button>
       <span class=${"conn"+(connected?" on":"")} title=${connected?"live":"reconnecting…"}></span>
     </div>
     <div class="ios-summary">
@@ -1351,16 +1351,16 @@ function ServerSettings({cfg, err, patch, panes}){
     <div class="set-group">
       <${Row} label="Poll interval" sub="how often panes are read">
         <div class="set-stepper">
-          <button onClick=${()=>setPoll(-0.1)}>−</button>
+          <button aria-label="Decrease poll interval" onClick=${()=>setPoll(-0.1)}>−</button>
           <span class="val">${cfg.poll_interval.toFixed(1)}s</span>
-          <button onClick=${()=>setPoll(0.1)}>+</button>
+          <button aria-label="Increase poll interval" onClick=${()=>setPoll(0.1)}>+</button>
         </div>
       <//>
       <${Row} label="Scrollback" sub="lines of history captured per pane">
         <div class="set-stepper">
-          <button onClick=${()=>setCap(-50)}>−</button>
+          <button aria-label="Decrease scrollback" onClick=${()=>setCap(-50)}>−</button>
           <span class="val">${cfg.capture_lines||200}</span>
-          <button onClick=${()=>setCap(50)}>+</button>
+          <button aria-label="Increase scrollback" onClick=${()=>setCap(50)}>+</button>
         </div>
       <//>
       <${Row} label="Auto-discover panes"><${Switch} on=${cfg.auto_discover} onChange=${v=>patch({auto_discover:v})} /><//>
@@ -1457,9 +1457,9 @@ function ShortcutEditor({prefs, allowedKeys}){
         <select class="set-input kb-key" value=${k} onChange=${e=>save(arrSet(actions,i,[lbl,e.target.value]))}>
           ${allowedKeys.map(ak=>html`<option key=${ak} value=${ak} selected=${ak===k}>${ak}</option>`)}
         </select>
-        <button class="iconbtn kb-mini" title="Move up" disabled=${i===0} onClick=${()=>save(arrMove(actions,i,-1))}>↑</button>
-        <button class="iconbtn kb-mini" title="Move down" disabled=${i===actions.length-1} onClick=${()=>save(arrMove(actions,i,1))}>↓</button>
-        <button class="iconbtn kb-mini danger" title="Remove" onClick=${()=>save(arrRemove(actions,i))}>×</button>
+        <button class="iconbtn kb-mini" title="Move up" aria-label="Move shortcut up" disabled=${i===0} onClick=${()=>save(arrMove(actions,i,-1))}>↑</button>
+        <button class="iconbtn kb-mini" title="Move down" aria-label="Move shortcut down" disabled=${i===actions.length-1} onClick=${()=>save(arrMove(actions,i,1))}>↓</button>
+        <button class="iconbtn kb-mini danger" title="Remove" aria-label="Remove shortcut" onClick=${()=>save(arrRemove(actions,i))}>×</button>
       </div>`)}
       <div class="set-row kb-foot">
         <button class="link-btn" onClick=${()=>save([...actions,["Key","Enter"]])}>+ Add button</button>
@@ -1479,9 +1479,9 @@ function SnippetEditor({prefs}){
       ${snippets.map((s,i)=>html`<div class="set-row kb-edit-row" key=${i}>
         <input class="set-input kb-label" placeholder="Snippet text" value=${s}
           onInput=${e=>save(arrSet(snippets,i,e.target.value))} />
-        <button class="iconbtn kb-mini" title="Move up" disabled=${i===0} onClick=${()=>save(arrMove(snippets,i,-1))}>↑</button>
-        <button class="iconbtn kb-mini" title="Move down" disabled=${i===snippets.length-1} onClick=${()=>save(arrMove(snippets,i,1))}>↓</button>
-        <button class="iconbtn kb-mini danger" title="Remove" onClick=${()=>save(arrRemove(snippets,i))}>×</button>
+        <button class="iconbtn kb-mini" title="Move up" aria-label="Move snippet up" disabled=${i===0} onClick=${()=>save(arrMove(snippets,i,-1))}>↑</button>
+        <button class="iconbtn kb-mini" title="Move down" aria-label="Move snippet down" disabled=${i===snippets.length-1} onClick=${()=>save(arrMove(snippets,i,1))}>↓</button>
+        <button class="iconbtn kb-mini danger" title="Remove" aria-label="Remove snippet" onClick=${()=>save(arrRemove(snippets,i))}>×</button>
       </div>`)}
       <div class="set-row kb-foot">
         <button class="link-btn" onClick=${()=>save([...snippets,""])}>+ Add snippet</button>
