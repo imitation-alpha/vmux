@@ -58,5 +58,7 @@ This section is the release candidate for v0.1.0. It will become
   execution time.
 - Push tokens are validated and redacted; APNs key paths and executable usage
   commands remain YAML-only.
+- Starlette is constrained to 1.3.1 or newer to exclude
+  GHSA-82w8-qh3p-5jfq, a denial-of-service flaw in URL-encoded form parsing.
 
 [Unreleased]: https://github.com/imitation-alpha/vmux/commits/main
