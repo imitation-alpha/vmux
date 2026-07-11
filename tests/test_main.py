@@ -4,6 +4,8 @@ import os
 import sys
 import types
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vmux import __main__ as cli
@@ -93,9 +95,19 @@ def test_main_prints_app_address_hint_for_token_lan_bind(monkeypatch, capsys):
 
     assert cli.main(["--host", "0.0.0.0", "--token", "s3cret"]) == 0
 
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert "app server address: <this-machine>:8787" in out
     assert "s3cret" not in out
+    assert "listener serves plain HTTP" in captured.err
+    assert "never expose bare vmux HTTP publicly" in captured.err
+
+
+def test_main_refuses_non_loopback_bind_without_token(monkeypatch):
+    _stub_startup(monkeypatch)
+
+    with pytest.raises(SystemExit, match="Refusing to bind 0.0.0.0 with an empty token"):
+        cli.main(["--host", "0.0.0.0"])
 
 
 def test_main_omits_app_address_hint_on_localhost(monkeypatch, capsys):
@@ -104,4 +116,6 @@ def test_main_omits_app_address_hint_on_localhost(monkeypatch, capsys):
 
     assert cli.main([]) == 0
 
-    assert "app server address" not in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "app server address" not in captured.out
+    assert "plain HTTP" not in captured.err

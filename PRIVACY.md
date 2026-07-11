@@ -1,11 +1,15 @@
 # Privacy Policy
 
-Last updated: June 14, 2026
+Last updated: July 11, 2026
 
 vmux for iOS is a companion app for a user-controlled vmux server. It connects to
 the server address you enter so you can monitor tmux panes, send input to those
 panes, and optionally receive Apple Push Notification service alerts when a pane
 needs attention.
+
+The native companion is a separate project under development. It is not
+publicly available and its source is not included in this repository; the
+bundled PWA is the current public client.
 
 ## Data Collection
 

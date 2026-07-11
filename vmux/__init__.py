@@ -7,4 +7,11 @@ The whole tool is one pipeline:
     deliver -> put it on whatever screen you're at        (web UI + notifications)
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("vmux-agent")
+except PackageNotFoundError:
+    # Source trees can be imported without installing the project. Release and
+    # editable installs always resolve the version from pyproject metadata.
+    __version__ = "0+unknown"

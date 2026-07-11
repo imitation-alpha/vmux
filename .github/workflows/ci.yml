@@ -2,51 +2,192 @@ name: CI
 
 on:
   push:
-    branches: [main, mvp]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: tests (py${{ matrix.python-version }})
+  lockfile:
+    name: lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
+      - name: Check that uv.lock is current
+        run: uv lock --check
+
+  tests:
+    name: tests (Ubuntu, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --extra dev
-      - run: uv run pytest -q
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: tests-py${{ matrix.python-version }}
+      - name: Install test dependencies
+        run: uv sync --locked --group dev
+      - name: Run tests
+        run: uv run pytest -q
+
+  macos:
+    name: tests (macOS, Python 3.13)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: tests-py3.13
+      - name: Install test dependencies
+        run: uv sync --locked --group dev
+      - name: Run tests
+        run: uv run pytest -q
 
   lint:
+    name: Ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
         with:
-          python-version: "3.12"
-      - run: uv sync --extra dev
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: lint-py3.13
+      - name: Install development dependencies
+        run: uv sync --locked --group dev
       - run: uv run ruff check vmux tests
 
-  build:
-    name: build + package check
+  docs:
+    name: documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
         with:
-          python-version: "3.12"
-      - run: uv build
-      - name: Assert the web UI ships in the wheel
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: docs-py3.13
+      - name: Install documentation dependencies
+        run: uv sync --locked --group docs
+      - name: Build documentation strictly
+        run: uv run mkdocs build --strict
+
+  package:
+    name: distribution + clean-install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: package-py3.13
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Inspect distribution contents and metadata
         run: |
           uv run --no-project python - <<'PY'
-          import glob, zipfile
-          whl = glob.glob("dist/*.whl")[0]
-          names = zipfile.ZipFile(whl).namelist()
-          assert any(n.endswith("vmux/web/index.html") for n in names), "index.html missing from wheel"
-          assert any("vmux/web/vendor/react" in n for n in names), "vendored libs missing from wheel"
-          print("OK:", whl, "contains the web UI")
+          import pathlib
+          import tarfile
+          import zipfile
+
+          dist = pathlib.Path("dist")
+          wheels = list(dist.glob("*.whl"))
+          sdists = list(dist.glob("*.tar.gz"))
+          assert len(wheels) == 1, wheels
+          assert len(sdists) == 1, sdists
+
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+              required = {
+                  "vmux/web/index.html",
+                  "vmux/web/icon.svg",
+                  "vmux/web/manifest.webmanifest",
+                  "vmux/web/sw.js",
+                  "vmux/web/vendor/htm.umd.js",
+                  "vmux/web/vendor/react-dom.production.min.js",
+                  "vmux/web/vendor/react.production.min.js",
+              }
+              assert not (required - names), sorted(required - names)
+              metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+              metadata = archive.read(metadata_name).decode()
+              assert "Name: vmux-agent\n" in metadata
+              assert "Requires-Python: >=3.10\n" in metadata
+              assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names)
+
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              names = set(archive.getnames())
+              for suffix in (
+                  "config.example.yaml",
+                  "LICENSE",
+                  "README.md",
+                  "pyproject.toml",
+                  "vmux/web/index.html",
+                  "vmux/web/vendor/react.production.min.js",
+              ):
+                  assert any(name.endswith("/" + suffix) for name in names), suffix
+              assert any(name.endswith("/PKG-INFO") for name in names)
+
+          print("OK:", wheels[0], "and", sdists[0])
           PY
+      - name: Install the wheel in a clean environment
+        run: |
+          smoke="${RUNNER_TEMP}/vmux-smoke"
+          uv venv --python 3.13 "$smoke"
+          uv pip install --python "$smoke/bin/python" dist/*.whl
+          expected_version="$(uv run --no-project python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          test "$("$smoke/bin/vmux" --version)" = "vmux $expected_version"
+          (
+          cd "$smoke"
+          "$smoke/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+
+          import vmux
+
+          web = Path(vmux.__file__).parent / "web"
+          assert vmux.__version__ == version("vmux-agent")
+          assert (web / "index.html").is_file()
+          assert (web / "vendor" / "react.production.min.js").is_file()
+          print("OK: installed", version("vmux-agent"), "with static assets")
+          PY
+          )
+      - uses: actions/upload-artifact@v7
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  quality-gate:
+    name: quality-gate
+    if: ${{ always() }}
+    needs: [lockfile, tests, macos, lint, docs, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every quality job to pass
+        env:
+          LOCKFILE_RESULT: ${{ needs.lockfile.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          for result in "$LOCKFILE_RESULT" "$TESTS_RESULT" "$MACOS_RESULT" "$LINT_RESULT" "$DOCS_RESULT" "$PACKAGE_RESULT"; do
+            test "$result" = "success"
+          done

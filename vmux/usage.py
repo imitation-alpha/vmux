@@ -333,7 +333,7 @@ class UsageCollector:
             for k in ("quota", "hourly", "daily", "monthly")
         }
         self._alerted: Dict[str, float] = {}
-        # created lazily: on Python 3.9 asyncio primitives bind the current loop
+        # Created lazily so asyncio primitives bind to the active server loop.
         # at construction, and UsageCollector is built before the server loop exists
         self._lock: Optional[asyncio.Lock] = None
         self._wake: Optional[asyncio.Event] = None

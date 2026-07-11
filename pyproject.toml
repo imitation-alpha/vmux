@@ -1,9 +1,9 @@
 [project]
 name = "vmux-agent"
 version = "0.1.0"
-description = "Attention router for a swarm of CLI coding agents running in tmux — drive your Claude Code / Codex / Gemini swarm from your phone."
+description = "Attention router for CLI coding-agent swarms in tmux—monitor and respond from your phone."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "imitation-alpha" }]
@@ -21,11 +21,11 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
     "Topic :: Terminals",
     "Topic :: Utilities",
@@ -38,12 +38,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
 # Optional APNs push support: pip install 'vmux-agent[push]'
 push = ["httpx[http2]>=0.27", "PyJWT[crypto]>=2.8"]
 
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+docs = ["mkdocs-material>=9.6"]
+
 [project.urls]
-Homepage = "https://github.com/imitation-alpha/vmux"
+Homepage = "https://imitation-alpha.github.io/vmux/"
+Documentation = "https://imitation-alpha.github.io/vmux/"
 Repository = "https://github.com/imitation-alpha/vmux"
 Issues = "https://github.com/imitation-alpha/vmux/issues"
 Changelog = "https://github.com/imitation-alpha/vmux/blob/main/CHANGELOG.md"
@@ -67,10 +71,10 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Real issues only (errors, pyflakes, import order) — not style modernization,
-# to keep the contributor bar low on a deliberately small, 3.9-simple codebase.
+# to keep the contributor bar low on a deliberately small codebase.
 select = ["E", "F", "I"]
 ignore = ["E501"]   # long lines are fine here

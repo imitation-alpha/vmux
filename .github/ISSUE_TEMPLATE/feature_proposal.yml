@@ -1,0 +1,93 @@
+name: Feature proposal
+description: Propose a scoped change for maintainer consideration before implementation.
+title: "[Feature]: "
+labels: ["enhancement", "needs-decision"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Significant features require an issue labeled `accepted` before implementation. Acceptance confirms direction and scope; it does not guarantee a schedule or merge. Networking, authentication, wire-contract, and dependency-expanding changes always require prior acceptance.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete problem or limitation, not just the requested mechanism. Include evidence or frequency when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: users
+    attributes:
+      label: Who is affected?
+      description: Which vmux users, environments, agents, or workflows experience this problem?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_behavior
+    attributes:
+      label: Proposed behavior
+      description: Explain the smallest user-visible change that would solve the problem. Mockups and example commands or payloads are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include workarounds, configuration-only options, and simpler approaches you considered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security_privacy
+    attributes:
+      label: Security and privacy impact
+      description: Consider tokens, network exposure, tmux input, subprocesses, regexes, pane contents, stored data, telemetry, and third-party services. Write "none identified" only after considering them.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope_fit
+    attributes:
+      label: Project-scope fit
+      description: vmux is a local-first attention router, not a hosted agent platform.
+      options:
+        - "Fits the current local-first scope"
+        - "May stretch the scope; tradeoffs explained below"
+        - "Unsure; maintainer guidance requested"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_notes
+    attributes:
+      label: Scope and compatibility notes
+      description: Identify effects on CLI behavior, YAML/overlays, REST/WebSocket, PaneState, dependencies, or supported deployment models.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Willingness to implement
+      description: Implementation should begin only after the issue is accepted.
+      options:
+        - "Yes, after scope is accepted"
+        - "Maybe, with maintainer guidance"
+        - "No; proposing for consideration"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and the roadmap for related proposals.
+          required: true
+        - label: I have not treated opening this issue as approval to implement a significant feature.
+          required: true
+        - label: This proposal does not contain secrets or a vulnerability report.
+          required: true

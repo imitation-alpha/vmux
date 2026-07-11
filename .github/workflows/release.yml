@@ -1,29 +1,246 @@
 name: Release
 
-# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build and publish
-# the vmux-agent distribution to PyPI. Configure PyPI Trusted Publishing first:
-# project vmux-agent, owner/repo imitation-alpha/vmux, workflow release.yml,
-# environment pypi.
+# Before creating a tag, configure PyPI Trusted Publishing for:
+#   project vmux-agent; repository imitation-alpha/vmux; workflow release.yml;
+#   environment pypi.
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
-  publish:
+  validate:
+    name: validate release tag
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write   # PyPI Trusted Publishing (OIDC) — no token/secret needed once configured
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
         with:
-          python-version: "3.12"
-      - run: uv build
-      - name: Publish to PyPI
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v8
+        with:
+          python-version: "3.13"
+      - name: Require a current lockfile
+        run: uv lock --check
+      - name: Match the tag to pyproject.toml
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must have the form vX.Y.Z" >&2
+            exit 1
+          fi
+          project_version="$(uv run --no-project python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          test "$GITHUB_REF_NAME" = "v$project_version" || {
+            echo "Tag $GITHUB_REF_NAME does not match project version $project_version" >&2
+            exit 1
+          }
+      - name: Require release notes for this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          CHANGELOG_VERSION="$version" uv run --no-project python - <<'PY'
+          import datetime as dt
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["CHANGELOG_VERSION"]
+          text = pathlib.Path("CHANGELOG.md").read_text()
+          same_version = re.compile(
+              rf"^## \[{re.escape(version)}\].*$",
+              re.MULTILINE,
+          )
+          if len(list(same_version.finditer(text))) != 1:
+              raise SystemExit(
+                  f"CHANGELOG.md needs exactly one heading for version [{version}]"
+              )
+          heading = re.compile(
+              rf"^## \[{re.escape(version)}\] - (?P<date>\d{{4}}-\d{{2}}-\d{{2}})$",
+              re.MULTILINE,
+          )
+          matches = list(heading.finditer(text))
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"CHANGELOG.md needs exactly one '## [{version}] - YYYY-MM-DD' section"
+              )
+          try:
+              dt.date.fromisoformat(matches[0].group("date"))
+          except ValueError as exc:
+              raise SystemExit(f"invalid release date: {exc}") from exc
+
+          start = matches[0].end()
+          next_section = re.search(r"^## \[", text[start:], re.MULTILINE)
+          body = text[start:start + next_section.start()] if next_section else text[start:]
+          body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+          substantive = [
+              line for line in body.splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          ]
+          if not substantive:
+              raise SystemExit(f"CHANGELOG.md section [{version}] has no release notes")
+          PY
+      - name: Require the tagged commit to be on main
+        run: |
+          git fetch --force --no-tags origin main:refs/remotes/origin/main
+          tag_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main || {
+            echo "Tagged commit $tag_commit is not reachable from main" >&2
+            exit 1
+          }
+
+  build:
+    name: build and verify distributions
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: release-py3.13
+      - name: Build wheel and source distribution once
+        run: uv build
+      - name: Inspect distribution contents and metadata
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          uv run --no-project python - <<'PY'
+          import os
+          import pathlib
+          import tarfile
+          import zipfile
+
+          version = os.environ["RELEASE_VERSION"].removeprefix("v")
+          dist = pathlib.Path("dist")
+          wheels = list(dist.glob("*.whl"))
+          sdists = list(dist.glob("*.tar.gz"))
+          assert len(wheels) == 1, wheels
+          assert len(sdists) == 1, sdists
+
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+              required = {
+                  "vmux/web/index.html",
+                  "vmux/web/icon.svg",
+                  "vmux/web/manifest.webmanifest",
+                  "vmux/web/sw.js",
+                  "vmux/web/vendor/htm.umd.js",
+                  "vmux/web/vendor/react-dom.production.min.js",
+                  "vmux/web/vendor/react.production.min.js",
+              }
+              assert not (required - names), sorted(required - names)
+              metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+              metadata = archive.read(metadata_name).decode()
+              assert "Name: vmux-agent\n" in metadata
+              assert f"Version: {version}\n" in metadata
+              assert "Requires-Python: >=3.10\n" in metadata
+              assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names)
+
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              names = set(archive.getnames())
+              for suffix in (
+                  "config.example.yaml",
+                  "LICENSE",
+                  "README.md",
+                  "pyproject.toml",
+                  "vmux/web/index.html",
+                  "vmux/web/vendor/react.production.min.js",
+              ):
+                  assert any(name.endswith("/" + suffix) for name in names), suffix
+              assert any(name.endswith("/PKG-INFO") for name in names)
+
+          print("OK:", wheels[0], "and", sdists[0])
+          PY
+      - name: Install the wheel in a clean environment
+        run: |
+          smoke="${RUNNER_TEMP}/vmux-release-smoke"
+          uv venv --python 3.13 "$smoke"
+          uv pip install --python "$smoke/bin/python" dist/*.whl
+          expected_version="${GITHUB_REF_NAME#v}"
+          test "$("$smoke/bin/vmux" --version)" = "vmux $expected_version"
+          (
+          cd "$smoke"
+          "$smoke/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+
+          import vmux
+
+          web = Path(vmux.__file__).parent / "web"
+          assert vmux.__version__ == version("vmux-agent")
+          assert (web / "index.html").is_file()
+          assert (web / "vendor" / "react.production.min.js").is_file()
+          print("OK: installed", version("vmux-agent"), "with static assets")
+          PY
+          )
+      - name: Upload verified distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vmux-agent
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-distributions
+          path: dist/
+      - name: Publish with PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          # If you haven't set up Trusted Publishing, instead add a PYPI_API_TOKEN
-          # secret and uncomment:
-          # password: ${{ secrets.PYPI_API_TOKEN }}
+
+  github-release:
+    name: create GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-distributions
+          path: dist/
+      - name: Extract this version's changelog section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## [$version] - " '
+            index($0, heading) == 1 {
+              date = substr($0, length(heading) + 1)
+              if (date ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+                found = 1
+                next
+              }
+            }
+            found && /^## \[/ { exit }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+      - name: Create the release and attach distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "vmux $version" --notes-file release-notes.md
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --verify-tag \
+              --title "vmux $version" \
+              --notes-file release-notes.md
+          fi
