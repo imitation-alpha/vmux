@@ -1,0 +1,68 @@
+name: Question / support
+description: Ask for help using or configuring existing vmux behavior.
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Support is public and best effort. Search the documentation and existing issues first. Never paste a bearer token, credential, or confidential pane contents. Report suspected vulnerabilities [privately](https://github.com/imitation-alpha/vmux/security/advisories/new).
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What are you trying to accomplish with vmux?
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempts
+    attributes:
+      label: Steps already attempted
+      description: Include commands, configuration choices, and what happened after each step.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include vmux version and installation source, OS, Python, tmux, coding agent, and browser/client versions.
+      placeholder: |
+        vmux:
+        Installation source:
+        OS:
+        Python:
+        tmux:
+        Agent:
+        Browser/client:
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant redacted output
+      description: Include only the output needed to understand the question. Replace tokens, keys, private paths, hostnames, and confidential pane content.
+      render: shell
+
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Documentation already checked
+      description: Link or name the vmux guides, troubleshooting sections, and existing issues you reviewed.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same question.
+          required: true
+        - label: This is a usage question, not a feature proposal or vulnerability report.
+          required: true
+        - label: I removed all real tokens, credentials, and confidential pane contents.
+          required: true

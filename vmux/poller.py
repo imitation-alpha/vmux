@@ -82,7 +82,7 @@ class Hub:
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
         self.push = PushManager(cfg)
-        # created in run(): on Python 3.9 asyncio.Event() binds the current loop
+        # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
         self._wake: Optional[asyncio.Event] = None
         self._stop = False

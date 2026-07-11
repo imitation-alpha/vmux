@@ -96,7 +96,7 @@ class Config:
     port: int = 8787
     token: str = ""
     poll_interval: float = 0.7
-    capture_lines: int = 200     # lines of scrollback captured per pane (0 = visible screen only)
+    capture_lines: int = 200     # lines of scrollback captured per pane (40-2000)
     auto_discover: bool = True
     include_shells: bool = False
     disable_tmux_auto_rename: bool = True

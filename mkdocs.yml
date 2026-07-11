@@ -1,0 +1,97 @@
+site_name: vmux
+site_description: Attention router for CLI coding-agent swarms in tmux
+site_url: https://imitation-alpha.github.io/vmux/
+repo_url: https://github.com/imitation-alpha/vmux
+repo_name: imitation-alpha/vmux
+edit_uri: edit/main/docs/
+copyright: vmux is available under the MIT License.
+
+exclude_docs: |
+  ARCHITECTURE.md
+  COMPANION_APP_BACKEND.md
+  PUSH_NOTIFICATIONS.md
+  app-store/
+
+theme:
+  name: material
+  language: en
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Use dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Use light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Remote access: remote-access.md
+  - Configuration: configuration.md
+  - Guides:
+      - guides/index.md
+      - Pane discovery: guides/pane-discovery.md
+      - Agent detectors: guides/agent-detectors.md
+      - Smart naming: guides/smart-naming.md
+      - Snippets and shortcuts: guides/snippets-shortcuts.md
+      - Usage tracking: guides/usage-tracking.md
+      - Push notifications: guides/push-notifications.md
+  - Troubleshooting: troubleshooting.md
+  - Reference:
+      - reference/index.md
+      - Architecture: reference/architecture.md
+      - CLI: reference/cli.md
+      - REST and WebSocket API: reference/client-api.md
+      - PaneState wire format: reference/pane-state.md
+      - Compatibility and versioning: reference/compatibility.md
+  - Contributing: contributing.md
+  - Security and privacy: security.md
+  - Roadmap and changelog: roadmap.md

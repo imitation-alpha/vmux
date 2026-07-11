@@ -1,50 +1,119 @@
 name: Bug report
-description: Something isn't working
-labels: ["bug"]
+description: Report reproducible behavior that differs from what vmux documents or intends.
+title: "[Bug]: "
+labels: ["bug", "needs-reproduction"]
 body:
-  - type: textarea
-    id: what
+  - type: markdown
     attributes:
-      label: What happened?
-      description: What you expected vs. what actually happened.
-    validations:
-      required: true
-  - type: textarea
-    id: repro
-    attributes:
-      label: Steps to reproduce
-      placeholder: |
-        1. Run `vmux ...`
-        2. Open ...
-        3. ...
-    validations:
-      required: true
+      value: |
+        Thanks for helping improve vmux. Search existing issues first. For a suspected vulnerability, stop here and use [private vulnerability reporting](https://github.com/imitation-alpha/vmux/security/advisories/new). Never include a real token or confidential pane contents.
+
   - type: input
     id: version
     attributes:
       label: vmux version
-      placeholder: "output of `vmux --version`"
+      description: Run `vmux --version`. If this is a source checkout, also include the commit SHA.
+      placeholder: "vmux 0.1.0"
     validations:
       required: true
+
   - type: input
-    id: env
+    id: installation
     attributes:
-      label: Environment
-      placeholder: "OS (macOS 15 / Ubuntu 24.04 / WSL), Python version, tmux version, browser"
+      label: Installation source
+      description: Tell us how vmux was installed and whether it is an editable checkout.
+      placeholder: "pipx/PyPI, uv, GitHub URL, or source checkout"
     validations:
       required: true
+
+  - type: input
+    id: operating_system
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.5, Ubuntu 24.04, WSL2, etc."
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "Output of `python --version`"
+    validations:
+      required: true
+
+  - type: input
+    id: tmux_version
+    attributes:
+      label: tmux version
+      placeholder: "Output of `tmux -V`"
+    validations:
+      required: true
+
+  - type: input
+    id: agent
+    attributes:
+      label: Coding agent and version
+      description: Include the CLI agent involved, or write "not agent-specific."
+      placeholder: "Claude Code, Codex CLI, Gemini CLI, other"
+    validations:
+      required: true
+
+  - type: input
+    id: browser_client
+    attributes:
+      label: Browser or companion client
+      description: Include its version, or write "not applicable."
+      placeholder: "Safari 18.5, Chrome 138, PWA, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Start from a fresh vmux process where possible and include the smallest reliable sequence.
+      placeholder: |
+        1. Start vmux with ...
+        2. Open ...
+        3. Select ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include frequency and whether it regressed from a known version.
+    validations:
+      required: true
+
   - type: textarea
     id: logs
     attributes:
-      label: Logs / console output
-      description: Server output and/or browser console. **Do not paste your token.**
+      label: Redacted logs or pane fixture
+      description: Include the smallest relevant server/browser output or pane text. Replace all tokens, keys, private paths, hostnames, and confidential content.
       render: shell
+
   - type: checkboxes
-    id: checks
+    id: checklist
     attributes:
       label: Checklist
       options:
-        - label: I redacted any access token from logs/screenshots
+        - label: I searched existing issues and did not find a duplicate.
           required: true
-        - label: I'm on a recent version
+        - label: I checked the documentation and tested a current release when practical.
+          required: true
+        - label: This is not a public vulnerability report.
+          required: true
+        - label: I removed all real tokens, credentials, and confidential pane contents.
           required: true

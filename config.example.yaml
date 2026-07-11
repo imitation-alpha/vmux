@@ -2,9 +2,13 @@
 # auto-discovers every tmux pane and classifies it. Copy to config.yaml to tweak.
 
 server:
-  host: 127.0.0.1     # reach over SSH tunnel or Tailscale. 0.0.0.0 REQUIRES a token.
+  # vmux serves plain HTTP. Keep 127.0.0.1 for localhost or an SSH tunnel.
+  # Tailscale/LAN non-loopback binds require a token. Public access additionally
+  # requires HTTPS at a reverse proxy while this listener stays private; never
+  # expose bare vmux HTTP to the public internet.
+  host: 127.0.0.1
   port: 8787
-  token: ""           # set a long random string for LAN mode
+  token: ""           # set a long random string for Tailscale/LAN/proxy access
 
 poll_interval: 0.7    # seconds between tmux capture passes
 capture_lines: 200    # lines of scrollback captured per pane for the detail view (40–2000)

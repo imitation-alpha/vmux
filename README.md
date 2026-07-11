@@ -1,108 +1,114 @@
 # vmux
 
-**An attention router for your CLI coding-agent swarm — drive Claude Code / Codex / Gemini from your phone.**
+**Attention router for CLI coding-agent swarms in tmux—monitor and respond from your phone.**
 
-When you run a swarm of CLI coding agents, the hard part isn't running them — it's knowing *which one needs you right now*, and answering it without diving into a terminal, hunting the pane, and reconstructing context. `vmux` reads your tmux panes, figures out each agent's state (idle / working / **needs input** / error / offline), parses the dialog an agent is blocked on, and ships the menu choices to your phone (or desktop) as tappable buttons. You tap **Yes** from the couch.
+vmux watches your tmux panes, identifies which agent needs attention, turns
+supported terminal dialogs into tappable choices, and sends your response back
+through tmux. The backend and installable PWA run on your machine: no hosted
+account, telemetry, or cloud control plane.
 
-It's the missing control panel for [running 10+ coding agents in parallel](https://imitation-alpha.github.io/blog/orchestrating-coding-agents.html) without it collapsing into chaos.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/imitation-alpha/vmux/main/docs/images/panel-list-view.jpg" width="360" alt="vmux pane list showing coding agents grouped and color-coded by status">
+  <img src="https://raw.githubusercontent.com/imitation-alpha/vmux/main/docs/images/panel-session-view.jpg" width="360" alt="vmux pane detail showing captured output, a response composer, and shortcut keys">
+</p>
 
-![vmux PWA — grid of agent sessions, color-coded by status](docs/images/panel-list-view.jpg)
-![vmux PWA — session detail with menu options and action keys](docs/images/panel-session-view.jpg)
+> [!IMPORTANT]
+> vmux is a pre-release beta. macOS is used daily; Linux should work but needs
+> broader verification, and WSL support is not yet verified.
 
-> Like it? A ⭐ genuinely helps — it's the signal that keeps this maintained.
+## Requirements
 
----
+- Python 3.10–3.14
+- tmux
+- [pipx](https://pipx.pypa.io/) for an isolated source install
 
-## Install
+The planned PyPI distribution name is `vmux-agent`, but it is **not published
+yet**. Until v0.1.0 is released, install the current source:
 
-vmux needs **tmux** and **Python 3.9+**.
+~~~bash
+pipx install git+https://github.com/imitation-alpha/vmux.git
+~~~
 
-```bash
-# from PyPI
-pipx install vmux-agent
+After publication, the command will become `pipx install vmux-agent`. The
+distribution is named `vmux-agent`; the CLI command and Python import are both
+`vmux`.
 
-# or from GitHub for the latest unreleased backend
-pipx install git+https://github.com/imitation-alpha/vmux
-```
+## 60-second local quickstart
 
-(`pip install` works too; `pipx`/`uv` just keep it isolated. The package name is
-`vmux-agent`; the command and Python import remain `vmux`.)
+Start at least one coding agent inside tmux, then run:
 
-## Quickstart
-
-```bash
+~~~bash
 vmux
-```
+~~~
 
-Open **http://127.0.0.1:8787** on the same computer. That's it — vmux auto-discovers every tmux pane, classifies each as `claude-code` / `generic` / `shell`, and shows your agents. No config required. (Idle plain shells are hidden by default; `vmux --include-shells` shows them.)
+Open <http://127.0.0.1:8787>. vmux discovers agent panes automatically and
+places panes needing input first. To include ordinary shell panes while testing:
 
-## Reach it from your phone
+~~~bash
+vmux --include-shells
+~~~
 
-vmux binds `127.0.0.1` on purpose. Two safe ways to your phone:
+The PWA is the currently available client. Use your browser's **Add to Home
+Screen** action for an app-like launcher. A separate native iOS companion is in
+development, is not publicly available, and is not part of this repository.
 
-- **[Tailscale](https://tailscale.com) (easiest):**
-  ```bash
-  VMUX_TOKEN="$(openssl rand -hex 16)"
-  echo "$VMUX_TOKEN"
-  vmux --host 0.0.0.0 --token "$VMUX_TOKEN"
-  ```
-  then open `http://<machine-name>.<tailnet>.ts.net:8787/?token=<VMUX_TOKEN>` on your phone. In the companion app, enter `<machine-name>.<tailnet>.ts.net:8787` as the server address and paste the token printed by `echo "$VMUX_TOKEN"`.
-- **SSH tunnel:** `ssh -L 8787:localhost:8787 you@box`, then open `http://localhost:8787` on the phone.
+## Remote access
 
-`--host 0.0.0.0` with an empty token is a hard error, by design — see [SECURITY.md](SECURITY.md).
+vmux sends keystrokes to processes running as you, so network access is
+security-sensitive:
 
-## Get the app
+- **Localhost** is the default and safest mode.
+- **Tailscale** is the recommended way to reach vmux remotely. Bind a reachable
+  interface and always set a bearer token.
+- **SSH local-port forwarding** is supported while vmux remains bound to
+  localhost. The tunnel must run on the device that opens the browser; on a
+  phone, this requires an SSH client that exposes a local forward.
+- **Direct LAN access** requires a bearer token and should be used only on a
+  trusted network.
+- **Public-internet access** requires a bearer token **and HTTPS** at a correctly
+  configured reverse proxy. Keep vmux's plain-HTTP listener private.
 
-- **PWA (zero install):** open the vmux URL in your phone browser and "Add to Home Screen" — it runs full-screen and notifies you when an agent needs you while it's open.
-- **Native iOS app:** the same control panel as a native app, plus real APNs push (get pinged even with the app closed) and Keychain token storage. It's on the App Store <!-- TODO(launch): add App Store link/badge --> and closed-source for now; the PWA covers everything else today.
-
-See [QUICKSTART.md](QUICKSTART.md) for the full backend and companion-app onboarding flow, and [docs/PUSH_NOTIFICATIONS.md](docs/PUSH_NOTIFICATIONS.md) for push setup.
-Native/PWA client implementers can use [docs/COMPANION_APP_BACKEND.md](docs/COMPANION_APP_BACKEND.md) for the backend contract.
+Never expose bare vmux HTTP to the public internet. WebRTC, PeerJS, signaling or
+hosted relays, automatic port forwarding, and unauthenticated public exposure
+are outside the supported model. See the
+[remote-access guide](https://imitation-alpha.github.io/vmux/remote-access/)
+before using a non-loopback bind.
 
 ## What it does
 
-- **Triage grid / sidebar** — one card per agent, color-coded and ordered so the ones that need you float to the top: 🔴 needs input · 🟠 error · 🟡 working · 🟢 idle · ⚫ offline. Tree, active, all, and starred views keep large swarms navigable.
-- **Dialog parsing, not screen-scraping** — for Claude Code, vmux parses the TUI selection box (`╭ │ ❯`) and turns the choices into native buttons. You tap **Yes / No / Edit** without arrow keys. Other agents fall back to configurable regex (`(y/n)`, "Do you want to…", "Press enter to…").
-- **Detail view** — scrollback-backed pane output, extracted links with open/copy actions, the menu, a text box with quick **snippets** (saved phrases you tap to drop into the message), and a **customizable shortcut-key row** (defaults to `Ctrl+C` `Esc` `Tab` `⇧Tab` `↵` `↑` `↓` `^R` `^O` `^E`).
-- **Broadcast** — send one message to several agents at once.
-- **Settings** — theme (auto/light/dark), Liquid Glass on/off, notifications/sound, **custom shortcut-key buttons** (relabel, reorder, pick the key from the server's allowlist) and **custom snippets**, plus live server config: poll interval, scrollback capture, discovery, per-agent rename/kind/star, detector patterns, stable pane naming (nine `naming_mode` values, `session:window:pane` by default), and optional smart task names (`naming_mode: smart`) inspired by `auto-naming-tmux`.
-- **Connected sessions** — see every device connected and disconnect any of them.
-- **Optional push + usage stats API** — APNs alerts for panes that need input, and opt-in tokscale quota/usage endpoints plus low-quota push alerts when you enable `usage.enabled`.
-- **Native feel** — a platform-adaptive PWA: macOS sidebar split-view on desktop, iOS bottom-sheet on mobile, Apple "Liquid Glass" styling, light/dark.
-- **Stays on your network** — localhost by default, bearer token for LAN/Tailscale, no cloud, no account, no telemetry.
+- Discovers tmux panes and classifies Claude Code, generic agents (including
+  Codex), and shells.
+- Ranks `needs_input`, `error`, `working`, `idle`, and `offline` states.
+- Parses Claude Code and conservative numbered dialogs; configurable regexes
+  cover common prompts from other CLIs.
+- Shows captured scrollback, extracted links, snippets, customizable allow-listed
+  shortcut keys, pane stars, and connected sessions.
+- Sends literal text, menu choices, or one broadcast message to multiple panes.
+- Supports optional smart pane names, tokscale usage views, and an APNs backend
+  for compatible companion clients.
+- Vendors the PWA runtime assets; no third-party CDN is loaded.
 
-## How it works
+## Documentation
 
-- **Backend** — FastAPI + WebSocket. Polls each tmux pane (`tmux capture-pane`) ~every 700 ms, captures 200 lines of scrollback by default, runs detectors, broadcasts state diffs. Sends keystrokes back via `tmux send-keys -l` (literal, shell-safe), and disables tmux `automatic-rename` by default so agent windows keep stable names. User-supplied detector regexes run with a hard timeout, so a bad pattern can't wedge the loop.
-- **Frontend** — a single HTML file with React + htm (vendored, no CDN, no build step), installable as a PWA.
-- **Config** — none needed (auto-discovery). Optional `config.yaml` and a live Settings UI; UI edits persist to an overlay file so your hand-authored config stays intact.
+- [Getting started](https://imitation-alpha.github.io/vmux/getting-started/)
+- [Remote access](https://imitation-alpha.github.io/vmux/remote-access/)
+- [Configuration](https://imitation-alpha.github.io/vmux/configuration/)
+- [Troubleshooting](https://imitation-alpha.github.io/vmux/troubleshooting/)
+- [Architecture and client API](https://imitation-alpha.github.io/vmux/reference/architecture/)
 
-More detail for contributors: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For a compact repository-local path, see
+[QUICKSTART.md](https://github.com/imitation-alpha/vmux/blob/main/QUICKSTART.md).
 
-## Configuration
+## Contributing and support
 
-```bash
-cp config.example.yaml config.yaml
-vmux -c config.yaml
-```
-
-See `config.example.yaml` for bind host/port, token, poll interval, scrollback
-capture, stable pane naming modes, smart pane naming, the tmux automatic-rename
-opt-out, discovery, starred panes, push, usage tracking, and detector patterns.
-Most runtime settings are editable live from in-app **Settings** and are written
-to an overlay, never to your `config.yaml`; token material, APNs key paths, and
-the exec'd `usage.command` stay YAML-only. Smart naming's optional AI backend
-settings are YAML-only too, because enabling them can send recent pane output to
-the configured local CLI or endpoint.
-
-## Status & roadmap
-
-Beta — runs daily on macOS, should work on Linux. Known gaps / next up: Linux/WSL path polish, dedicated Codex/Gemini dialog parsers (today they use the generic regex path), cross-agent piping, and smart triage/ranking (sort by *who needs you most*). Ideas and PRs welcome.
-
-## Contributing
-
-Contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup (`uv sync --extra dev`), tests, project layout, and how to add a new agent detector. Please also read the [Code of Conduct](CODE_OF_CONDUCT.md). For security issues, see [SECURITY.md](SECURITY.md).
+Bug fixes and objective documentation corrections may be submitted directly.
+Significant features—and all networking, authentication, wire-contract, or
+dependency-expanding changes—need maintainer agreement in an issue first. Read
+[CONTRIBUTING.md](https://github.com/imitation-alpha/vmux/blob/main/CONTRIBUTING.md),
+the [Code of Conduct](https://github.com/imitation-alpha/vmux/blob/main/CODE_OF_CONDUCT.md),
+and [SECURITY.md](https://github.com/imitation-alpha/vmux/blob/main/SECURITY.md)
+before opening a pull request or security report.
 
 ## License
 
-[MIT](LICENSE) © imitation-alpha · [@imitation-alpha](https://github.com/imitation-alpha) · [X](https://x.com/imitation_alpha)
+[MIT](https://github.com/imitation-alpha/vmux/blob/main/LICENSE) © imitation-alpha

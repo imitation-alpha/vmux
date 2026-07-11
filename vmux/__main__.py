@@ -55,12 +55,20 @@ def main(argv=None) -> int:
     import uvicorn
 
     app = create_app(cfg)
+    loopback_hosts = ("127.0.0.1", "localhost", "::1")
     scheme_host = cfg.host if cfg.host not in ("0.0.0.0", "::") else "<this-machine>"
     print("vmux %s -> http://%s:%d  (%s)" % (
         __version__, scheme_host, cfg.port,
         "token set" if cfg.token else "no token, localhost only",
     ))
-    if cfg.token and cfg.host not in ("127.0.0.1", "localhost", "::1"):
+    if cfg.host not in loopback_hosts:
+        print(
+            "vmux: WARNING: the listener serves plain HTTP. If it is reachable "
+            "from the public internet, terminate HTTPS at a correctly configured "
+            "reverse proxy; never expose bare vmux HTTP publicly.",
+            file=sys.stderr,
+        )
+    if cfg.token and cfg.host not in loopback_hosts:
         # the app's server-address field takes host:port; the token is never printed
         print("       app server address: %s:%d" % (scheme_host, cfg.port))
     uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="warning")

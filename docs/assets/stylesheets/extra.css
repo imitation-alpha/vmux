@@ -1,0 +1,83 @@
+:root {
+  --md-primary-fg-color: #151922;
+  --md-primary-fg-color--light: #262c39;
+  --md-primary-fg-color--dark: #0b0e14;
+  --md-accent-fg-color: #0a84ff;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0b0e14;
+  --md-default-fg-color: rgba(255, 255, 255, 0.9);
+  --md-accent-fg-color: #64a8ff;
+}
+
+.vmux-kicker {
+  color: var(--md-accent-fg-color);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vmux-lead {
+  font-size: 1.25rem;
+  line-height: 1.55;
+  max-width: 42rem;
+}
+
+.vmux-status {
+  border: 1px solid color-mix(in srgb, var(--md-accent-fg-color) 40%, transparent);
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.65rem;
+}
+
+.vmux-screenshots {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 2rem auto;
+  max-width: 48rem;
+}
+
+.vmux-screenshots img {
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 1.25rem;
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.2);
+  height: auto;
+  width: 100%;
+}
+
+.vmux-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 1.5rem 0;
+}
+
+.vmux-card {
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.vmux-card > :first-child {
+  margin-top: 0;
+}
+
+.vmux-card > :last-child {
+  margin-bottom: 0;
+}
+
+@media screen and (max-width: 44rem) {
+  .vmux-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vmux-screenshots {
+    gap: 0.65rem;
+    grid-template-columns: 1fr;
+  }
+}
