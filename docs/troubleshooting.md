@@ -71,13 +71,15 @@ and paste that exact value:
 
 ~~~bash
 VMUX_TOKEN="$(openssl rand -hex 32)"
-printf '%s\n' "$VMUX_TOKEN"
+printf 'vmux token: %s\n' "$VMUX_TOKEN"
 vmux --host 0.0.0.0 --token "$VMUX_TOKEN"
 ~~~
 
-Common causes are trailing whitespace, connecting to another vmux instance, or
-rotating the server token without updating the browser. Clearing site data also
-removes the token stored by the PWA.
+Paste only the generated value after `vmux token:`. Common causes are trailing
+whitespace, connecting to another vmux instance, or rotating the server token
+without updating the client. Clearing site data also removes the token stored by
+the PWA; the iOS app clears its saved token after a confirmed authentication
+failure so you can enter the new value.
 
 Do not include a real token in logs or an issue.
 
@@ -119,6 +121,41 @@ curl -H "Authorization: Bearer $VMUX_TOKEN" \
 If this works but the PWA does not update, investigate the WebSocket path. If it
 fails, fix routing, bind, firewall, or token before debugging the UI.
 
+### iPhone or iPad still cannot connect
+
+Use the vmux server root as the address, not an API endpoint or a browser page.
+These are supported forms:
+
+- `http://machine.tailnet-name.ts.net:8787` or
+  `machine.tailnet-name.ts.net:8787` over Tailscale
+- `http://100.x.y.z:8787` using the vmux host's Tailscale IP
+- `http://192.168.1.20:8787` on a trusted LAN
+- `https://vmux.example.com` through a reverse proxy with valid HTTPS/WSS
+
+Do not enter `/api/config`, `/api/state`, or another trailing path. On the phone,
+`localhost` and `127.0.0.1` point back to the phone rather than the tmux host.
+
+If the app reports that Local Network access is denied, open **Settings → Apps →
+vmux → Local Network** (or **Settings → Privacy & Security → Local Network** on
+versions that show it there), enable access, return to vmux, and tap **Retry**.
+If the switch has not appeared, retry the connection and accept the iOS Local
+Network prompt. This permission must be tested on a physical device; Simulator
+does not reproduce Local Network privacy behavior.
+
+For Tailscale, confirm that both devices are signed in and online, tailnet policy
+allows the connection, and the hostname or `100.x.y.z` address resolves from the
+phone. For a direct LAN connection, use a trusted network, put both devices on a
+reachable Wi-Fi/LAN segment, avoid guest-network client isolation, and check the
+host firewall. In either case, vmux must bind a reachable interface such as
+`0.0.0.0` or the host's specific private address rather than `127.0.0.1`.
+
+The iOS app validates both `/api/config` and `/api/state`. A `404`, an HTML page,
+non-vmux JSON, or another unexpected response usually means the address points
+to the wrong port, includes an extra path, or has incorrect reverse-proxy
+routing. A `5xx` response or an incompatible vmux payload requires checking the
+server output and updating vmux before retrying. Do not weaken HTTPS certificate
+validation to work around a TLS error.
+
 ## A reverse-proxied page loads but actions or state fail
 
 The proxy must:
@@ -131,6 +168,24 @@ The proxy must:
 
 Do not expose the upstream 8787 port publicly. Redact the `/ws` query string
 from logs because it contains the token.
+
+## Reporting a connection problem safely
+
+In the iOS app, expand **Technical Details** in the recovery card and copy the
+sanitized summary. A useful report includes only:
+
+- host and port (replace a private hostname if necessary)
+- failing endpoint
+- stable issue category
+- HTTP status or `URLError` code
+- app and server versions, when known
+- timestamp and whether the route was Tailscale, trusted LAN, or valid HTTPS
+
+Review the text before sharing it. Never include the bearer token, an
+`Authorization` header, a query string (especially `/ws?token=...`), or a
+response body. Rotate the server token immediately if it was exposed. Describe
+what the app displayed and which recovery checks you completed instead of
+attaching an unredacted network capture.
 
 ## YAML changes have no effect
 
