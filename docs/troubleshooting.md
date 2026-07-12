@@ -156,6 +156,20 @@ routing. A `5xx` response or an incompatible vmux payload requires checking the
 server output and updating vmux before retrying. Do not weaken HTTPS certificate
 validation to work around a TLS error.
 
+### The app reports an incompatible or unverified version
+
+Check **Settings → Connection** for the iOS version, backend version, protocol
+version, and compatibility result. If the app requests a server update, update
+vmux on the tmux host and tap **Retry Now**. If the server requires a newer iOS
+version or protocol, update the app from the App Store before retrying. These
+known mismatches block connection but do not delete the saved address or token.
+
+A **Compatibility unverified** warning means the server predates the additive
+`_info.compatibility` metadata. The app may connect after its normal
+`/api/config` and `/api/state` validation succeeds, but updating the backend to
+a release that advertises compatibility is recommended. Do not treat an absent
+compatibility object as permission to ignore a failed schema handshake.
+
 ## A reverse-proxied page loads but actions or state fail
 
 The proxy must:

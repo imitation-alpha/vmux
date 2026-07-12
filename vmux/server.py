@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__, tmux
+from .compatibility import compatibility_info
 from .config import Config, save_overlay
 from .poller import Hub
 from .usage import PERIODS, UsageCollector
@@ -177,6 +178,7 @@ def create_app(cfg: Config) -> FastAPI:
             "port": cfg.port,
             "token_set": bool(cfg.token),
             "version": app.version,
+            "compatibility": compatibility_info(),
             "targets": [hub.states[pid].target for pid in hub.order if pid in hub.states],
             "allowed_keys": sorted(tmux.ALLOWED_KEYS),
             "push": hub.push.info(),

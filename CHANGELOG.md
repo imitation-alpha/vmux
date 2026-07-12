@@ -27,6 +27,8 @@ This section is the release candidate for v0.1.0. It will become
   backends.
 - Configuration overlays so live UI edits do not rewrite the hand-authored
   YAML file.
+- Read-only client compatibility metadata in `/api/config`, including protocol
+  version 1 and the minimum supported iOS marketing version.
 - A complete MkDocs Material documentation site, contributor policies, issue
   forms, reproducible dependency lockfile, package smoke tests, and hardened CI,
   Pages, security-scanning, dependency-review, and release workflows.

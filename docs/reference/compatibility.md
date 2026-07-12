@@ -43,7 +43,41 @@ Feature clients should:
 - ignore additive unknown fields
 - tolerate an unknown enum with a safe fallback
 - read the server version from `GET /api/config` → `_info.version`
+- read the compatibility policy from `GET /api/config` →
+  `_info.compatibility`
 - reconnect and replace state rather than applying assumed incremental patches
+
+## Client/server protocol
+
+Current servers advertise this read-only policy in `GET /api/config`:
+
+~~~json
+{
+  "_info": {
+    "version": "0.1.0",
+    "compatibility": {
+      "protocol_version": 1,
+      "minimum_ios_version": "1.0.0"
+    }
+  }
+}
+~~~
+
+`protocol_version` changes only when a breaking REST or WebSocket contract
+change requires clients to make different assumptions. Additive fields do not
+by themselves increment it. `minimum_ios_version` uses the iOS marketing
+version and does not include the App Store build number.
+
+The initial verified pair is:
+
+| iOS app | Backend | Protocol | Result |
+| --- | --- | --- | --- |
+| 1.0.0 build 26 or newer compatible build | 0.1.0 or newer compatible release | 1 | Verified |
+| Any existing client | Server without compatibility metadata | Unknown | Complete the normal handshake; report unverified compatibility |
+
+Clients must block a known protocol mismatch or a server requirement above the
+installed iOS version. Missing metadata is a legacy condition, not proof of a
+mismatch. The full wire shape is documented in the [client API](client-api.md).
 
 ## Supported versions
 

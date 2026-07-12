@@ -73,6 +73,10 @@ Returns the live-editable fields plus:
     "port": 8787,
     "token_set": false,
     "version": "0.1.0",
+    "compatibility": {
+      "protocol_version": 1,
+      "minimum_ios_version": "1.0.0"
+    },
     "targets": [],
     "allowed_keys": [],
     "push": {},
@@ -81,8 +85,11 @@ Returns the live-editable fields plus:
 }
 ~~~
 
-`targets` contains currently represented tmux targets. Push and usage info
-report capability/availability without exposing credentials.
+`version` is the backend software version. `compatibility.protocol_version`
+identifies the REST/WebSocket contract, while `minimum_ios_version` is the
+oldest iOS marketing version supported by this server. `targets` contains
+currently represented tmux targets. Push and usage info report
+capability/availability without exposing credentials.
 
 ### `PATCH /api/config`
 
@@ -90,6 +97,11 @@ Accepts a partial object from the
 [live-editable schema](https://imitation-alpha.github.io/vmux/configuration/#live-editable-schema). Values are
 validated, applied immediately, and persisted to `vmux-settings.json`. Bad
 values return `400`; persistence failure returns `500`.
+
+`_info`, `version`, and `compatibility` are server-owned and read-only. A
+`PATCH` body cannot override them. Older vmux servers may omit `compatibility`;
+clients can complete their normal schema handshake and label that connection
+as unverified instead of assuming incompatibility.
 
 ### `POST /api/star`
 
