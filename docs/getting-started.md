@@ -78,6 +78,54 @@ Open the vmux URL in a supported browser, then choose the browser's **Add to Hom
 Screen** or **Install app** action. The PWA and all of its runtime libraries are
 served by vmux itself.
 
+### Tailscale HTTPS for iPhone and iPad
+
+!!! important "Using Tailscale? Use the HTTPS address"
+
+    Remote PWA features such as installation, service workers, and notifications
+    require a secure browser context. Do not open vmux through its Tailscale IP or
+    a plain `http://` URL. Use [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+    to give vmux a private `https://<machine>.<tailnet>.ts.net` address.
+
+Install Tailscale on the vmux host and the iPhone or iPad, sign both devices in
+to the same tailnet, and ensure Tailscale is connected on the mobile device.
+Then generate a vmux token and keep the vmux listener on localhost:
+
+~~~bash
+VMUX_TOKEN="$(openssl rand -hex 32)"
+printf 'vmux token: %s\n' "$VMUX_TOKEN"
+vmux --host 127.0.0.1 --port 8787 --token "$VMUX_TOKEN"
+~~~
+
+In a second terminal on the vmux host, publish that loopback listener privately
+to the tailnet over HTTPS:
+
+~~~bash
+tailscale serve --bg http://127.0.0.1:8787
+tailscale serve status
+~~~
+
+The first command may print a consent URL for enabling MagicDNS and HTTPS
+certificates. Follow that URL; tailnet administrator permission may be required.
+Tailscale then prints an address similar to:
+
+~~~text
+https://my-mac.example-tailnet.ts.net/
+~~~
+
+On the iPhone or iPad:
+
+1. Open the exact full `.ts.net` address in Safari. Do not append `:8787` or a
+   path such as `/vmux`, and do not substitute a Tailscale IP or short hostname.
+2. Paste the vmux token into the access screen. Do not add the token to the URL,
+   where it could enter browser history or logs.
+3. After vmux connects, choose **Share → Add to Home Screen**.
+
+Use `tailscale serve`, not `tailscale funnel`: Serve remains private to devices
+allowed by the tailnet policy, while Funnel publishes the endpoint to the public
+internet. Stop the HTTPS route with `tailscale serve off`. See
+[Remote access](remote-access.md) for the full security model and other routes.
+
 Browser notifications and sounds are local, in-page attention aids. They depend
 on browser permission and the PWA being active; they are not a substitute for
 background native push.
