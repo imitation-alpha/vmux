@@ -378,10 +378,14 @@ def test_quota_alert_fired_through_push():
     asyncio.run(c.refresh_quota())          # Claude Weekly drops 95% -> 15%
     assert len(sent) == 1
     title, body, thread, extra = sent[0]
-    assert title == "Claude quota low"
-    assert body.startswith("Weekly: 15% left")
-    assert thread == "quota:Claude"
-    assert extra["type"] == "quota" and extra["remaining_percent"] == 15.0
+    assert title == "vmux"
+    assert body == "Usage needs your attention."
+    assert thread == "vmux-usage"
+    assert extra == {"type": "quota"}
+
+    encoded = json.dumps(sent[0])
+    for private_detail in ("Claude", "Weekly", "15", "95", "reset"):
+        assert private_detail not in encoded
 
 
 def test_refresh_lock_coalesces():

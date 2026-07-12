@@ -42,7 +42,7 @@ a token, print it once so you can paste it, and bind a reachable interface:
 
 ~~~bash
 VMUX_TOKEN="$(openssl rand -hex 32)"
-printf '%s\n' "$VMUX_TOKEN"
+printf 'vmux token: %s\n' "$VMUX_TOKEN"
 vmux --host 0.0.0.0 --token "$VMUX_TOKEN"
 ~~~
 
@@ -90,7 +90,7 @@ On a trusted private network:
 
 ~~~bash
 VMUX_TOKEN="$(openssl rand -hex 32)"
-printf '%s\n' "$VMUX_TOKEN"
+printf 'vmux token: %s\n' "$VMUX_TOKEN"
 vmux --host 0.0.0.0 --token "$VMUX_TOKEN"
 ~~~
 

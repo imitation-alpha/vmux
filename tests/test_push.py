@@ -1,6 +1,7 @@
 """Tests for the optional APNs push layer: transition detection, cooldown,
 device registry persistence, and the no-op guarantees when unconfigured."""
 
+import json
 import os
 import sys
 
@@ -155,11 +156,11 @@ def test_payload_shape(tmp_path):
     cfg.push_store_path = str(tmp_path / "push.json")
     mgr = PushManager(cfg)
     p = mgr._payload(pane("%1", STATUS_NEEDS_INPUT, "Allow Bash?"))
-    assert p["aps"]["alert"] == {"title": "agent", "body": "Allow Bash?"}
-    assert p["aps"]["thread-id"] == "w:1.1"
-    assert p["vmux"]["id"] == "%1"
+    assert p["aps"]["alert"] == {"title": "vmux", "body": "A pane needs your input."}
+    assert p["aps"]["thread-id"] == "vmux"
+    assert p["vmux"] == {"id": "%1"}
     e = mgr._payload(pane("%2", STATUS_ERROR))
-    assert e["aps"]["alert"]["body"] == "Error detected"
+    assert e["aps"]["alert"] == {"title": "vmux", "body": "A pane reported an error."}
 
 
 def test_provider_jwt_shape(tmp_path):
@@ -213,16 +214,49 @@ def test_classify_yes_always_no_is_confirm3():
     assert classify_category(m) == "vmux.confirm3"
 
 
-def test_classify_ambiguous_three_is_numbered_menu():
-    assert classify_category(menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))) == "vmux.menu"
+@pytest.mark.parametrize("middle", [
+    "Yes, always",
+    "Yes, remember this choice",
+    "Yes, do not ask again",
+    "Yes, don’t ask again",
+    "Yes, never ask again",
+])
+def test_classify_confirm3_accepts_persistent_affirmative_wording(middle):
+    m = menu(("1", "Yes"), ("2", middle), ("3", "No"))
+    assert classify_category(m) == "vmux.confirm3"
 
 
-def test_classify_many_options_is_numbered_menu():
+@pytest.mark.parametrize("middle", [
+    "Yes",
+    "Yes, this time",
+    "Yes, then open the file",
+    "Maybe",
+])
+def test_classify_confirm3_rejects_nonpersistent_middle_option(middle):
+    m = menu(("1", "Yes"), ("2", middle), ("3", "No"))
+    assert classify_category(m) == "vmux.generic"
+
+
+def test_classify_ambiguous_three_is_generic():
+    assert classify_category(menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))) == "vmux.generic"
+
+
+def test_classify_many_options_is_generic():
     m = menu(("1", "Yes"), ("2", "No"), ("3", "Maybe"), ("4", "Later"))
-    assert classify_category(m) == "vmux.menu"
+    assert classify_category(m) == "vmux.generic"
 
 
-# -- _payload: category + actionable menu ride the push --------------------- #
+def test_classify_three_requires_yes_in_the_middle():
+    m = menu(("1", "Yes"), ("2", "Edit first"), ("3", "No"))
+    assert classify_category(m) == "vmux.generic"
+
+
+def test_classify_requires_complete_yes_no_words():
+    m = menu(("1", "Yesterday's plan"), ("2", "Notify the team"))
+    assert classify_category(m) == "vmux.generic"
+
+
+# -- _payload: only privacy-safe confirmation keys ride the push ------------ #
 
 def _mgr(tmp_path):
     cfg = Config(apns_key_path="k", apns_key_id="K", apns_team_id="T", apns_topic="b")
@@ -230,31 +264,57 @@ def _mgr(tmp_path):
     return PushManager(cfg)
 
 
-def test_payload_confirm3_carries_menu_without_legend(tmp_path):
+def test_payload_confirm3_carries_only_index_and_key(tmp_path):
     m = menu(("1", "Yes"), ("2", "Yes, and don't ask again"), ("3", "No, tell Claude"))
     p = _mgr(tmp_path)._payload(PaneState(
         id="%1", target="w:1.1", name="agent",
         status=STATUS_NEEDS_INPUT, question="Allow edit?", menu=m))
     assert p["aps"]["category"] == "vmux.confirm3"
-    assert p["aps"]["alert"]["body"] == "Allow edit?"        # friendly titles -> no legend
+    assert p["aps"]["alert"] == {"title": "vmux", "body": "A pane needs your input."}
     assert p["aps"]["relevance-score"] == 1.0
     assert p["vmux"]["menu"] == [
-        {"i": 0, "key": "1", "label": "Yes"},
-        {"i": 1, "key": "2", "label": "Yes, and don't ask again"},
-        {"i": 2, "key": "3", "label": "No, tell Claude"},
+        {"i": 0, "key": "1"},
+        {"i": 1, "key": "2"},
+        {"i": 2, "key": "3"},
     ]
+    assert set(p["vmux"]) == {"id", "menu"}
 
 
-def test_payload_numbered_menu_adds_legend(tmp_path):
+def test_payload_arbitrary_menu_is_generic_and_omits_options(tmp_path):
     m = menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))
     p = _mgr(tmp_path)._payload(PaneState(
         id="%1", target="w:1.1", name="agent",
         status=STATUS_NEEDS_INPUT, question="Pick one", menu=m))
-    assert p["aps"]["category"] == "vmux.menu"
-    assert p["aps"]["alert"]["body"] == "Pick one\n1) Apple  2) Banana  3) Cherry"
+    assert p["aps"]["category"] == "vmux.generic"
+    assert p["aps"]["alert"]["body"] == "A pane needs your input."
+    assert p["vmux"] == {"id": "%1"}
 
 
 def test_payload_generic_when_no_menu(tmp_path):
     p = _mgr(tmp_path)._payload(pane("%1", STATUS_NEEDS_INPUT, "Continue?"))
     assert p["aps"]["category"] == "vmux.generic"
-    assert p["vmux"]["menu"] == []
+    assert p["vmux"] == {"id": "%1"}
+
+
+def test_payload_redacts_all_pane_content(tmp_path):
+    p = _mgr(tmp_path)._payload(PaneState(
+        id="%secret-id",
+        target="confidential-client:payments.1",
+        name="Unannounced acquisition agent",
+        status=STATUS_NEEDS_INPUT,
+        question="Deploy Project Nightfall with the production password?",
+        menu=menu(("approve", "Reveal merger plan"), ("deny", "Keep acquisition secret")),
+    ))
+
+    encoded = json.dumps(p)
+    assert p["vmux"] == {"id": "%secret-id"}
+    for private_text in (
+        "confidential-client",
+        "payments",
+        "Unannounced acquisition",
+        "Project Nightfall",
+        "production password",
+        "Reveal merger plan",
+        "Keep acquisition secret",
+    ):
+        assert private_text not in encoded

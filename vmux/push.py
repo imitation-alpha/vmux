@@ -144,22 +144,31 @@ def collect_alerts(
 
 def _is_yes(label: str) -> bool:
     s = (label or "").strip().lower()
-    return s == "y" or s.startswith("yes")
+    return bool(re.match(r"^(?:y|yes)\b", s))
 
 
 def _is_no(label: str) -> bool:
     s = (label or "").strip().lower()
-    return s == "n" or s.startswith("no") or s.startswith("cancel")
+    return bool(re.match(r"^(?:n|no|nope|cancel)\b", s))
+
+
+def _is_persistent_yes(label: str) -> bool:
+    """Whether a label unambiguously means an affirmative remembered choice."""
+    if not _is_yes(label):
+        return False
+    s = (label or "").strip().lower().replace("\N{RIGHT SINGLE QUOTATION MARK}", "'")
+    return bool(re.search(r"\b(?:always|remember)\b|\b(?:do not|don't|never) ask\b", s))
 
 
 def classify_category(menu) -> str:
     """Pick the APNs notification category for a parsed menu.
 
     iOS fixes notification-action *titles* when the app registers categories, so
-    the server can only *choose* a category per push. We map the common Claude
-    Code shapes to friendly confirm categories ("Yes"/"No"…) and fall back to a
-    numbered menu (the push body carries a legend) for anything ambiguous. Pure
-    and unit-testable, in the spirit of `collect_alerts`.
+    the server can only *choose* a category per push. We map only common,
+    unambiguous confirmation shapes to friendly actions ("Yes"/"No"…). Any
+    arbitrary menu falls back to the generic open/reply category so its question
+    and option labels never have to cross APNs. Pure and unit-testable, in the
+    spirit of `collect_alerts`.
     """
     opts = list(menu or [])
     n = len(opts)
@@ -168,9 +177,9 @@ def classify_category(menu) -> str:
     labels = [o.label for o in opts]
     if n == 2 and _is_yes(labels[0]) and _is_no(labels[1]):
         return "vmux.confirm2"
-    if n == 3 and _is_yes(labels[0]) and _is_no(labels[2]):
+    if n == 3 and _is_yes(labels[0]) and _is_persistent_yes(labels[1]) and _is_no(labels[2]):
         return "vmux.confirm3"
-    return "vmux.menu"
+    return "vmux.generic"
 
 
 class PushManager:
@@ -276,37 +285,37 @@ class PushManager:
         return self._jwt
 
     def _payload(self, pane: PaneState) -> dict:
+        """Build a privacy-minimized pane alert.
+
+        Pane names, tmux targets, questions, and menu labels may contain source
+        code or other confidential project information, so none of them cross
+        APNs. The app fetches the current pane after the notification is opened.
+        Common confirmations retain only the opaque option keys needed by the
+        registered Yes/No actions; arbitrary menus use the generic category.
+        """
         if pane.status == STATUS_ERROR:
-            body = "Error detected"
+            body = "A pane reported an error."
         else:
-            body = (pane.question or "").strip() or "Needs your input"
+            body = "A pane needs your input."
         category = classify_category(pane.menu)
-        # Numbered menus get opaque "1/2/3" buttons, so spell the options out in
-        # the body; confirm2/confirm3 use friendly titles and need no legend.
-        if category == "vmux.menu" and pane.menu:
-            legend = "  ".join(
-                "%d) %s" % (i + 1, (o.label or "").strip()) for i, o in enumerate(pane.menu[:6])
-            )
-            body = (body + "\n" + legend) if body else legend
+        custom = {"id": pane.id}
+        if category in ("vmux.confirm2", "vmux.confirm3"):
+            # Action ids vmux.opt.<i> map through this minimal list to the key
+            # accepted by /api/select. Labels remain exclusively on the server.
+            custom["menu"] = [
+                {"i": i, "key": option.key}
+                for i, option in enumerate(pane.menu)
+            ]
         return {
             "aps": {
-                "alert": {"title": pane.name or pane.target, "body": body[:500]},
+                "alert": {"title": "vmux", "body": body},
                 "sound": "default",
-                "thread-id": pane.target,
+                "thread-id": "vmux",
                 "interruption-level": "time-sensitive",
                 "relevance-score": 1.0 if pane.status == STATUS_NEEDS_INPUT else 0.5,
                 "category": category,
             },
-            "vmux": {
-                "id": pane.id,
-                "target": pane.target,
-                "status": pane.status,
-                # action ids vmux.opt.<i> index into this list -> key -> /api/select
-                "menu": [
-                    {"i": i, "key": o.key, "label": (o.label or "")[:40]}
-                    for i, o in enumerate(pane.menu)
-                ],
-            },
+            "vmux": custom,
         }
 
     async def _send_payloads(self, payloads: List[dict]) -> None:

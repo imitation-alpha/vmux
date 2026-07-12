@@ -436,17 +436,14 @@ class UsageCollector:
                 prev, new, self._alerted, time.time(),
                 threshold=self.cfg.usage_alert_threshold,
             )
-            for a in alerts:
-                pct = a["remaining_percent"]
-                body = "%s: %d%% left" % (a["label"], round(pct))
-                when = fmt_reset(a.get("resets_at"), a.get("resets_at_raw"))
-                if when:
-                    body += " (%s)" % when
+            for _alert in alerts:
+                # Provider names, quota labels, percentages, and reset times can
+                # reveal account and usage details. Keep APNs generic and let
+                # the authenticated app fetch current usage after it opens.
                 self.push.fire_message(
-                    "%s quota low" % a["provider"], body,
-                    thread="quota:%s" % a["provider"],
-                    extra={"type": "quota", "provider": a["provider"],
-                           "label": a["label"], "remaining_percent": pct},
+                    "vmux", "Usage needs your attention.",
+                    thread="vmux-usage",
+                    extra={"type": "quota"},
                 )
         except Exception as exc:   # alerts must never break the refresh path
             print("[vmux] usage alert error:", exc)
