@@ -112,18 +112,56 @@ jobs:
           assert len(wheels) == 1, wheels
           assert len(sdists) == 1, sdists
 
+          source_web = {
+              path.as_posix()
+              for path in pathlib.Path("vmux/web").rglob("*")
+              if path.is_file()
+          }
+          source_agents = {
+              path.as_posix()
+              for path in pathlib.Path("vmux/agents").rglob("*.py")
+              if path.is_file()
+          }
+          required_agents = {
+              "vmux/agents/__init__.py",
+              "vmux/agents/controllers.py",
+              "vmux/agents/models.py",
+              "vmux/agents/observers.py",
+              "vmux/agents/protocols.py",
+              "vmux/agents/service.py",
+              "vmux/agents/store.py",
+          }
+          required_web = {
+              "vmux/web/index.html",
+              "vmux/web/styles.css",
+              "vmux/web/manifest.webmanifest",
+              "vmux/web/sw.js",
+              "vmux/web/icon.svg",
+              "vmux/web/icon-180.png",
+              "vmux/web/icon-192.png",
+              "vmux/web/icon-512.png",
+              "vmux/web/icon-maskable-512.png",
+              "vmux/web/icons/lucide.svg",
+              "vmux/web/icons/LUCIDE_LICENSE.txt",
+              "vmux/web/js/agent-state.js",
+              "vmux/web/js/agent-ui.js",
+              "vmux/web/js/app.js",
+              "vmux/web/js/core.js",
+              "vmux/web/js/settings.js",
+              "vmux/web/js/state.js",
+              "vmux/web/js/ui.js",
+              "vmux/web/js/usage.js",
+              "vmux/web/vendor/htm.umd.js",
+              "vmux/web/vendor/react-dom.production.min.js",
+              "vmux/web/vendor/react.production.min.js",
+          }
+          assert not (required_agents - source_agents), sorted(required_agents - source_agents)
+          assert not (required_web - source_web), sorted(required_web - source_web)
+
           with zipfile.ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
-              required = {
-                  "vmux/web/index.html",
-                  "vmux/web/icon.svg",
-                  "vmux/web/manifest.webmanifest",
-                  "vmux/web/sw.js",
-                  "vmux/web/vendor/htm.umd.js",
-                  "vmux/web/vendor/react-dom.production.min.js",
-                  "vmux/web/vendor/react.production.min.js",
-              }
-              assert not (required - names), sorted(required - names)
+              assert not (source_agents - names), sorted(source_agents - names)
+              assert not (source_web - names), sorted(source_web - names)
               metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
               metadata = archive.read(metadata_name).decode()
               assert "Name: vmux-agent\n" in metadata
@@ -141,6 +179,12 @@ jobs:
                   "vmux/web/vendor/react.production.min.js",
               ):
                   assert any(name.endswith("/" + suffix) for name in names), suffix
+              for web_asset in source_web:
+                  assert any(name.endswith("/" + web_asset) for name in names), web_asset
+              for agent_module in source_agents:
+                  assert any(name.endswith("/" + agent_module) for name in names), agent_module
+              artifact_names = [name for name in names if "/tests/web/artifacts/" in f"/{name}"]
+              assert not artifact_names, artifact_names
               assert any(name.endswith("/PKG-INFO") for name in names)
 
           print("OK:", wheels[0], "and", sdists[0])
@@ -159,12 +203,43 @@ jobs:
           from pathlib import Path
 
           import vmux
+          import vmux.agents
+          from vmux.config import Config
+          from vmux.server import create_app
 
           web = Path(vmux.__file__).parent / "web"
+          agents = Path(vmux.agents.__file__).parent
           assert vmux.__version__ == version("vmux-agent")
-          assert (web / "index.html").is_file()
-          assert (web / "vendor" / "react.production.min.js").is_file()
-          print("OK: installed", version("vmux-agent"), "with static assets")
+          app = create_app(Config(agent_store_path=str(Path.cwd() / "agent-smoke.sqlite3")))
+          routes = {getattr(route, "path", "") for route in app.routes}
+          assert "/api/agents" in routes
+          assert "/ws/agents" in routes
+          for relative in (
+              "__init__.py",
+              "models.py",
+              "observers.py",
+              "service.py",
+              "store.py",
+          ):
+              assert (agents / relative).is_file(), relative
+          for relative in (
+              "index.html",
+              "styles.css",
+              "manifest.webmanifest",
+              "sw.js",
+              "icon-180.png",
+              "icon-192.png",
+              "icon-512.png",
+              "icon-maskable-512.png",
+              "icons/lucide.svg",
+              "icons/LUCIDE_LICENSE.txt",
+              "js/agent-state.js",
+              "js/agent-ui.js",
+              "js/app.js",
+              "vendor/react.production.min.js",
+          ):
+              assert (web / relative).is_file(), relative
+          print("OK: installed", version("vmux-agent"), "with agent context and static assets")
           PY
           )
       - uses: actions/upload-artifact@v7
@@ -173,10 +248,45 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  browser:
+    name: browser (Chromium + WebKit, Python 3.13)
+    # Visual baselines are platform-specific. Keep this pinned to the same
+    # macOS/arm64 generation used to review and update the screenshots.
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: browser-py3.13
+      - name: Install browser-test dependencies
+        run: uv sync --locked --group dev --group web-test
+      - name: Install pinned Playwright browsers
+        run: uv run playwright install chromium webkit
+      - name: Run Chromium and WebKit functional tests
+        env:
+          CI: "1"
+          VMUX_WEB_BROWSERS: chromium,webkit
+        run: uv run pytest -q tests/web/test_functional.py
+      - name: Compare pinned-Chromium visual baselines
+        env:
+          CI: "1"
+        run: uv run pytest -q tests/web/test_visual.py
+      - name: Upload browser failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-artifacts
+          path: tests/web/artifacts/
+          if-no-files-found: warn
+
   quality-gate:
     name: quality-gate
     if: ${{ always() }}
-    needs: [lockfile, tests, macos, lint, docs, package]
+    needs: [lockfile, tests, macos, lint, docs, package, browser]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job to pass
@@ -187,7 +297,8 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
         run: |
-          for result in "$LOCKFILE_RESULT" "$TESTS_RESULT" "$MACOS_RESULT" "$LINT_RESULT" "$DOCS_RESULT" "$PACKAGE_RESULT"; do
+          for result in "$LOCKFILE_RESULT" "$TESTS_RESULT" "$MACOS_RESULT" "$LINT_RESULT" "$DOCS_RESULT" "$PACKAGE_RESULT" "$BROWSER_RESULT"; do
             test "$result" = "success"
           done

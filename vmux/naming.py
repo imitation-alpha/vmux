@@ -21,7 +21,12 @@ from .config import Config
 from .detectors import is_spinner
 
 SHELL_RE = re.compile(r"^-?(bash|zsh|fish|sh|ksh)$")
-AGENT_RE = re.compile(r"^([0-9]+\.[0-9]|claude(\.exe)?|codex|agy|antigravity|opencode|oc)$")
+# Process basenames treated as coding agents for smart naming (not pane kind).
+# grok matches versioned builds: grok, grok-0.2.93-mac, grok-macos-aarc.
+AGENT_RE = re.compile(
+    r"^([0-9]+\.[0-9]|claude(\.exe)?|claude-.*|codex|agy|antigravity|"
+    r"opencode|oc|grok|grok-.*)$"
+)
 EDITOR_RE = re.compile(r"^(n?vim|vi|git|less|man|htop|btop)$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]")
 

@@ -10,10 +10,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vmux.config import Config
-from vmux.detectors import classify_kind, detect, parse_claude_menu, parse_question_menu
+from vmux.detectors import (
+    classify_kind,
+    detect,
+    parse_claude_menu,
+    parse_codex_questionnaire,
+    parse_question_menu,
+)
 from vmux.models import (
+    KIND_ANTIGRAVITY,
     KIND_CLAUDE,
+    KIND_CODEX,
     KIND_GENERIC,
+    KIND_GROK,
+    KIND_OPENCODE,
     KIND_SHELL,
     STATUS_ERROR,
     STATUS_IDLE,
@@ -88,6 +98,40 @@ def test_classify_shell():
 
 def test_classify_generic():
     assert classify_kind("node", "webpack", "Compiling modules 45%") == KIND_GENERIC
+
+
+def test_classify_grok_idle():
+    assert classify_kind(
+        "grok-macos-aarc", "App Performance Review - grok", "hello"
+    ) == KIND_GROK
+
+
+def test_classify_grok_spinner_not_claude():
+    # Braille spinner titles used to force claude-code; basename must win.
+    assert classify_kind(
+        "grok-0.2.93-mac", "⠋ working on something - grok", "hello"
+    ) == KIND_GROK
+
+
+def test_classify_opencode():
+    assert classify_kind("opencode", "session", "prompt>") == KIND_OPENCODE
+    assert classify_kind("oc", "session", "prompt>") == KIND_OPENCODE
+
+
+def test_classify_antigravity_spinner_not_claude():
+    assert classify_kind("agy", "⠋ renaming pane", "hello") == KIND_ANTIGRAVITY
+    assert classify_kind(
+        "antigravity", "working", "hello"
+    ) == KIND_ANTIGRAVITY
+
+
+def test_classify_claude_basename():
+    assert classify_kind("claude.exe", "task", "random") == KIND_CLAUDE
+    assert classify_kind("claude", "task", "random") == KIND_CLAUDE
+
+
+def test_classify_codex_by_command():
+    assert classify_kind("codex", "session", "hello") == KIND_CODEX
 
 
 def test_claude_menu_parsed():
@@ -178,6 +222,39 @@ Allow this command?
   3) No, tell Codex what to do
 """
 
+# Codex 0.144.1 request_user_input overlay with two questions. Descriptions
+# share an aligned column, one wraps independently, and the footer itself wraps.
+CODEX_QUESTIONNAIRE_TWO = """\
+  Question 1/2 (2 unanswered)
+  Which implementation boundary should we use for the first
+  release?
+
+  › 1. Schema first             Start with the durable wire contract.
+    2. API first                Begin at the endpoint and adapt storage.
+    3. None of the above        Optionally, add details in
+                                notes (tab).
+
+  tab to add notes | enter to submit answer
+  ←/→ to navigate questions | esc to interrupt
+"""
+
+# Grounded in Codex's long-option snapshot: both the label and description can
+# wrap in their own columns without becoming extra menu items.
+CODEX_QUESTIONNAIRE_LONG = """\
+  Question 1/1 (1 unanswered)
+  Choose one option.
+
+  › 1. Job: running/completed/failed/expired; Run/Experiment: succeeded/failed/    Keep async job statuses for
+       unknown (Recommended when triaging long-running background work and status  progress tracking and include
+       transitions)                                                                enough context for debugging
+                                                                                   retries, stale workers, and
+                                                                                   unexpected expiration paths.
+    2. Add a short status model                                                    Simpler labels with less detail for
+                                                                                   quick rollouts.
+
+  tab to add notes | enter to submit answer | esc to interrupt
+"""
+
 # An *optional* survey must not nag as needs_input.
 CLAUDE_OPTIONAL_SURVEY = """\
 ※ recap: published 19 reels.
@@ -200,12 +277,91 @@ def test_claude_working_from_spinner_line():
     assert res.status == STATUS_WORKING
 
 
-def test_codex_routed_to_generic_by_cmd():
-    assert classify_kind("codex", "alpha", "some text") == KIND_GENERIC
+def test_codex_routed_to_first_class_kind_by_cmd():
+    assert classify_kind("codex", "alpha", "some text") == KIND_CODEX
+
+
+def test_codex_questionnaire_extracts_current_question_and_aligned_options():
+    question, options = parse_codex_questionnaire(CODEX_QUESTIONNAIRE_TWO.splitlines())
+    assert question == "Which implementation boundary should we use for the first release?"
+    assert [option.key for option in options] == ["1", "2", "3"]
+    assert [option.label for option in options] == [
+        "Schema first",
+        "API first",
+        "None of the above",
+    ]
+    assert [option.description for option in options] == [
+        "Start with the durable wire contract.",
+        "Begin at the endpoint and adapt storage.",
+        "Optionally, add details in notes (tab).",
+    ]
+    assert [option.selected for option in options] == [True, False, False]
+    assert [option.freeform for option in options] == [False, False, True]
+    serialized = options[0].to_dict()
+    assert serialized["description"] == "Start with the durable wire contract."
+    assert "enter to submit" not in question
+    assert all("navigate questions" not in option.description for option in options)
+
+
+def test_codex_questionnaire_joins_wrapped_label_and_description_rows():
+    question, options = parse_codex_questionnaire(CODEX_QUESTIONNAIRE_LONG.splitlines())
+    assert question == "Choose one option."
+    assert options[0].label == (
+        "Job: running/completed/failed/expired; Run/Experiment: succeeded/failed/unknown "
+        "(Recommended when triaging long-running background work and status transitions)"
+    )
+    assert options[0].description == (
+        "Keep async job statuses for progress tracking and include enough context for debugging "
+        "retries, stale workers, and unexpected expiration paths."
+    )
+    assert options[1].label == "Add a short status model"
+    assert options[1].description == "Simpler labels with less detail for quick rollouts."
+
+
+def test_codex_questionnaire_signature_is_required_and_command_wins():
+    no_footer = "\n".join(CODEX_QUESTIONNAIRE_TWO.splitlines()[:-2])
+    assert parse_codex_questionnaire(no_footer.splitlines()) == (None, [])
+    ordinary = "Question 1/2 (2 unanswered)\nChoose one.\n1. A\n2. B"
+    assert parse_codex_questionnaire(ordinary.splitlines()) == (None, [])
+    navigation_only = CODEX_QUESTIONNAIRE_TWO.replace(
+        "  tab to add notes | enter to submit answer\n", ""
+    )
+    assert parse_codex_questionnaire(navigation_only.splitlines())[0] is not None
+    assert classify_kind("node", "Codex", CODEX_QUESTIONNAIRE_TWO) == KIND_CODEX
+    assert classify_kind("claude", "Claude", CODEX_QUESTIONNAIRE_TWO) == KIND_CLAUDE
+
+
+def test_codex_questionnaire_detected_as_structured_input():
+    result = detect(CODEX_QUESTIONNAIRE_TWO, KIND_CODEX, True, CFG, title="Codex")
+    assert result.status == STATUS_NEEDS_INPUT
+    assert result.question == "Which implementation boundary should we use for the first release?"
+    assert result.menu_list()[2].freeform is True
+
+
+def test_codex_questionnaire_fields_use_structured_observer_bounds():
+    question = "Q" * 2_500
+    label = "L" * 300
+    description = "D" * 700
+    text = "\n".join([
+        "Question 1/1 (1 unanswered)",
+        question,
+        "",
+        "› 1. " + label + "  " + description,
+        "  2. " + label + "  " + description,
+        "",
+        "enter to submit answer | esc to interrupt",
+    ])
+    parsed_question, options = parse_codex_questionnaire(text.splitlines())
+    assert len(parsed_question) == 2_000 and parsed_question.endswith("…")
+    assert all(len(option.label) == 240 and option.label.endswith("…") for option in options)
+    assert all(
+        len(option.description) == 500 and option.description.endswith("…")
+        for option in options
+    )
 
 
 def test_codex_cursorless_menu_detected():
-    res = detect(CODEX_APPROVAL, KIND_GENERIC, True, CFG, title="")
+    res = detect(CODEX_APPROVAL, KIND_CODEX, True, CFG, title="")
     assert res.status == STATUS_NEEDS_INPUT
     assert [o.key for o in res.menu_list()] == ["1", "2", "3"]
     q, opts = parse_question_menu(CODEX_APPROVAL.splitlines())
@@ -313,7 +469,8 @@ def test_freeform_never_creates_a_menu():
 def test_menuoption_exposes_freeform():
     d = MenuOption(key="1", label="Yes").to_dict()
     assert d["freeform"] is False
-    assert set(d) == {"key", "label", "selected", "freeform"}
+    assert d["description"] == ""
+    assert set(d) == {"key", "label", "description", "selected", "freeform"}
 
 
 # --- npm single-default confirm "(y)" --------------------------------------- #

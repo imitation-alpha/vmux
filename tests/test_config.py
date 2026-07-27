@@ -134,6 +134,18 @@ def test_booleans_and_overrides():
     assert c.overrides["a:1.1"].kind == "generic"
 
 
+def test_agent_kind_overrides():
+    c = config.Config()
+    c.apply_patch({"overrides": [
+        {"target": "g:1.1", "kind": "grok"},
+        {"target": "o:1.1", "kind": "opencode"},
+        {"target": "a:1.2", "kind": "antigravity"},
+    ]})
+    assert c.overrides["g:1.1"].kind == "grok"
+    assert c.overrides["o:1.1"].kind == "opencode"
+    assert c.overrides["a:1.2"].kind == "antigravity"
+
+
 def test_override_star_roundtrips():
     c = config.Config()
     c.apply_patch({"overrides": [{"target": "a:1.1", "star": True}]})
@@ -171,6 +183,12 @@ def test_yaml_pane_star_and_legacy_pin(tmp_path):
 def test_bad_kind_rejected():
     with pytest.raises(ValueError):
         config.Config().apply_patch({"overrides": [{"target": "a:1.1", "kind": "nope"}]})
+
+
+def test_codex_kind_override_is_accepted():
+    cfg = config.Config()
+    cfg.apply_patch({"overrides": [{"target": "a:1.1", "kind": "codex"}]})
+    assert cfg.overrides["a:1.1"].kind == "codex"
 
 
 def test_bad_regex_rejected():

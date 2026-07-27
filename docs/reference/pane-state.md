@@ -18,6 +18,7 @@ state frames.
     {
       "key": "1",
       "label": "Yes",
+      "description": "Apply the proposed edit.",
       "selected": true,
       "freeform": false
     }
@@ -39,7 +40,7 @@ state frames.
 | `id` | string | Live tmux pane id such as `%12`. Configured offline placeholders begin `cfg:`. |
 | `target` | string | Durable display/config target, normally `session:window.pane`. |
 | `name` | string | Resolved display name after manual override/naming mode. |
-| `kind` | enum | `claude-code`, `generic`, or `shell`. |
+| `kind` | enum | `claude-code`, `codex`, `grok`, `opencode`, `antigravity`, `generic`, or `shell`. |
 | `status` | enum | `needs_input`, `error`, `working`, `idle`, or `offline`. |
 | `title` | string | Raw tmux pane title. |
 | `question` | string or null | Bounded prompt text when a dialog was recognized. |
@@ -61,6 +62,7 @@ state frames.
 | --- | --- | --- |
 | `key` | string | Value `POST /api/select` sends for this choice. |
 | `label` | string | Human-readable button label. |
+| `description` | string | Bounded supporting text. The server serializes `""` when unavailable. |
 | `selected` | boolean | The TUI currently highlights this/default option. |
 | `freeform` | boolean | The choice is expected to open or invite a free-text reply. |
 

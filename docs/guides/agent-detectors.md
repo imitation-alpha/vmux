@@ -7,11 +7,21 @@ and selecting a falsely parsed menu could send the wrong input.
 
 - `claude-code` uses Claude Code markers, title/spinner signals, and its
   selection-box format.
-- `generic` covers Codex and other non-shell processes.
+- `codex` matches direct Codex process names and the strong structured
+  questionnaire signature used by node-hosted Codex. Its questionnaire parser
+  extracts the visible question plus aligned option labels and descriptions.
+- `grok` matches process basenames `grok` and `grok-*` (versioned Grok CLI
+  builds). Status/menu use the generic path.
+- `opencode` matches `opencode` and `oc`. Status/menu use the generic path.
+- `antigravity` matches `agy` and `antigravity`. Status/menu use the generic
+  path.
+- `generic` covers other non-shell processes.
 - `shell` uses the generic path when shells are included.
 
-Codex is currently classified as generic. Dedicated Codex and Gemini parsers are
-not part of v0.1.0.
+Known agent basenames are classified before text heuristics, so an explicit
+runtime identity wins. The complete Codex questionnaire signature is checked
+before Claude's shared `esc to interrupt` marker, preventing node-hosted Codex
+questionnaires from being mislabeled as Claude Code.
 
 ## Status priority
 
@@ -22,10 +32,14 @@ The detector resolves states in this order:
 3. `working`
 4. `idle`
 
-Claude Code selection boxes become menu options. Generic panes also recognize
-conservative, prompt-led numbered menus and common confirmations such as
-`(y/n)` or “Press enter.” For a generic pane, newly changed output is a working
-hint; unchanged output settles to idle unless another signal is present.
+Claude Code selection boxes become menu options. Codex `request_user_input`
+screens require both `Question n/n (… unanswered)` and a known submission or
+navigation footer. Only the visible question is exposed; wrapped label and
+description columns are joined, and `None of the above` is marked as freeform.
+Generic panes also recognize conservative, prompt-led numbered menus and common
+confirmations such as `(y/n)` or “Press enter.” For a generic pane, newly changed
+output is a working hint; unchanged output settles to idle unless another
+signal is present.
 
 ## Tune generic prompts
 

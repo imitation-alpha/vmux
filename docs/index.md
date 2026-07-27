@@ -35,6 +35,14 @@ keys, saved snippets, or one broadcast message to several panes.
 </div>
 
 <div class="vmux-card" markdown>
+### Resume the reasoning state
+
+Supported Codex and Claude Code sessions expose structured goals, progress,
+blockers, verified decisions, visible chat, and “what changed” without making
+you reconstruct the session from terminal scrollback.
+</div>
+
+<div class="vmux-card" markdown>
 ### Keep control local
 
 The FastAPI backend, WebSocket, and PWA run on your machine. React and htm are
@@ -64,15 +72,16 @@ Open <http://127.0.0.1:8787>. A working tmux agent appears automatically; use
 
 ## Current client and platform status
 
-The installable PWA is the public client included here. A separate native iOS
-companion is under development, is not publicly available, and is outside this
-MIT repository. vmux is used daily on macOS; Linux should work but needs more
-field verification, and WSL remains unverified.
+The installable PWA is the public client included here. The native companion
+under `ios/` is also under development and is not publicly available. vmux is
+used daily on macOS; Linux should work but needs more field verification, and
+WSL remains unverified.
 
 ## Continue
 
 - [Run vmux for the first time](getting-started.md)
 - [Choose Tailscale, SSH, LAN, or HTTPS](remote-access.md)
 - [Understand configuration and live overlays](configuration.md)
+- [Resume agents from structured context](guides/agent-context.md)
 - [Integrate a client against the API](reference/client-api.md)
 - [Contribute a focused improvement](contributing.md)

@@ -56,12 +56,24 @@ discovery:
   auto: true          # discover all panes automatically
   include_shells: false   # set true to also show plain idle shells
 
+# Structured Agent Context for Codex and Claude Code. Observers read the
+# runtimes' local JSONL logs and persist only normalized visible context,
+# messages, decisions, and timeline deltas beside the settings overlay
+# (`~/.vmux/vmux-agents.sqlite3` without an explicit config path).
+# Hidden reasoning, raw tool I/O, commands, and terminal scrollback are not
+# copied into this database. These settings are YAML-only and require restart.
+# agents:
+#   enabled: true
+#   retention_days: 30       # 1–3650; history/resolved decisions (not active context/pending)
+#   codex_home: ~/.codex
+#   claude_home: ~/.claude
+
 # Optional per-pane overrides / starred panes. A target listed here is always
 # shown; starred panes stay near the top and remain visible if they go offline.
 panes:
   # - target: "work:1.1"        # session:window.pane (see `tmux list-panes -a`)
   #   name: "API refactor"
-  #   kind: claude-code         # claude-code | generic | shell
+  #   kind: claude-code         # claude-code | codex | grok | opencode | antigravity | generic | shell
   #   star: true
 
 # Optional APNs push for registered mobile clients.

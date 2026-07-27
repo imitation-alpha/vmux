@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import threading
+from datetime import datetime
 from typing import Dict, List, Optional
 
 # Fields we pull for every pane. Order matters: parsed positionally below.
@@ -35,6 +37,9 @@ ALLOWED_KEYS = {
 
 _PANE_ID_RE = re.compile(r"^%\d+$")
 _TARGET_RE = re.compile(r"^[\w.\-]+:\d+\.\d+$")
+_PROCESS_START_CACHE: Dict[tuple[str, str], float] = {}
+_PROCESS_START_LOCK = threading.RLock()
+_PROCESS_START_QUERY_LOCK = threading.Lock()
 
 
 class TmuxError(RuntimeError):
@@ -89,7 +94,67 @@ def list_panes() -> List[Dict[str, str]]:
              "title": parts[3], "window": parts[4], "path": parts[5],
              "pid": parts[6], "window_id": parts[7]}
         )
+    live_keys = {(pane["id"], pane["pid"]) for pane in panes if pane["pid"].isdigit()}
+    with _PROCESS_START_LOCK:
+        for key in list(_PROCESS_START_CACHE):
+            if key not in live_keys:
+                _PROCESS_START_CACHE.pop(key, None)
+    with _PROCESS_START_QUERY_LOCK:
+        with _PROCESS_START_LOCK:
+            missing = [pane["pid"] for pane in panes
+                       if pane["pid"].isdigit()
+                       and (pane["id"], pane["pid"]) not in _PROCESS_START_CACHE]
+        starts = _process_starts(missing) if missing else {}
+        with _PROCESS_START_LOCK:
+            for pane in panes:
+                key = (pane["id"], pane["pid"])
+                if pane["pid"] in starts:
+                    _PROCESS_START_CACHE.setdefault(key, starts[pane["pid"]])
+    for pane in panes:
+        key = (pane["id"], pane["pid"])
+        with _PROCESS_START_LOCK:
+            started = _PROCESS_START_CACHE.get(key)
+        if started:
+            pane["created"] = str(started)
     return panes
+
+
+def _process_started(pid: str) -> Optional[float]:
+    """Best-effort POSIX process start time for a pane incarnation.
+
+    tmux has no portable pane-created format field.  `ps` is invoked with an
+    argument list and a numeric PID only; failure means the binding remains
+    read-only.
+    """
+    return _process_starts([pid]).get(pid)
+
+
+def _process_starts(pids: List[str]) -> Dict[str, float]:
+    """Resolve process start times in bounded batches (one `ps` per 128 PIDs)."""
+    safe = list(dict.fromkeys(pid for pid in pids if pid.isdigit()))
+    starts: Dict[str, float] = {}
+    for index in range(0, len(safe), 128):
+        chunk = safe[index:index + 128]
+        try:
+            result = subprocess.run(
+                ["ps", "-o", "pid=,lstart=", "-p", ",".join(chunk)],
+                capture_output=True, text=True, timeout=2.0,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2 or parts[0] not in chunk:
+                continue
+            try:
+                starts[parts[0]] = datetime.strptime(
+                    " ".join(parts[1].split()), "%a %b %d %H:%M:%S %Y"
+                ).astimezone().timestamp()
+            except ValueError:
+                continue
+    return starts
 
 
 def capture(pane_id: str, scrollback: int = 0) -> Optional[str]:
@@ -148,4 +213,4 @@ def send_chars(pane_id: str, chars: str) -> None:
         raise TmuxError("bad pane id")
     if not chars or len(chars) > 8 or not chars.isprintable():
         raise TmuxError("bad chars")
-    _run(["send-keys", "-t", pane_id, chars])
+    _run(["send-keys", "-t", pane_id, "--", chars])

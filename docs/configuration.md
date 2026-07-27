@@ -39,8 +39,43 @@ Related local state is stored in the same directory:
 
 - `vmux-push.json` for registered APNs device tokens
 - `vmux-names.json` for smart-name cache entries
+- `vmux-agents.sqlite3` (plus SQLite WAL files while running) for normalized
+  Agent Context, messages, decisions, snapshots, and visit baselines
+- `server-instance-id` for the non-secret stable id used to validate native
+  notification routes
 
 Protect these files and never commit them.
+
+Browser-only preferences are separate from the server overlay. Each browser
+profile stores its theme, alert choices, default destination, navigator
+view/sort, terminal wrapping, shortcut buttons, snippets, and bearer token in
+local storage. These values do not modify YAML and do not roam through vmux.
+Pane snapshots and terminal output are not browser-persisted.
+
+## PWA Settings
+
+Settings are grouped into:
+
+- **Appearance & Alerts**
+- **Input Shortcuts & Snippets**
+- **Server & Discovery**
+- **Agent Overrides & Detectors**
+- **Usage**
+- **Sessions**
+- **Connection & About**
+
+Compact layouts drill into one category at a time; medium and wide layouts use
+category navigation beside the selected section. Browser-local switches and
+selectors save immediately. Server switches and selectors show pending state
+and roll back if the server rejects them. Numeric values, agent names/kinds,
+shortcut/snippet lists, and detector patterns use drafts with an explicit
+**Save** action so overlapping full-config updates cannot overwrite one another.
+
+New browser profiles use system appearance, ambient motion off, notifications
+off, Queue as the default destination, list navigation below 1200 pixels, and
+tree navigation at 1200 pixels and above. Version-2 preference migration keeps
+recognized existing choices and maps legacy `needs`/`working` destinations to
+`queue`/`active`.
 
 ## Core fields
 
@@ -55,6 +90,8 @@ Protect these files and never commit them.
 | `tmux.disable_auto_rename` | `true` | No | Disables tmux's global `automatic-rename` option at startup. |
 | `discovery.auto` | `true` | Yes | Include panes found from the live tmux server. |
 | `discovery.include_shells` | `false` | Yes | Include ordinary idle shell panes. |
+| `agents.enabled` | `true` | No | Observe supported runtime logs and expose the structured agent workspace. |
+| `agents.retention_days` | `30` | No | Retain historical agent snapshots, visible messages, and resolved decisions. |
 
 Disabling automatic rename is a tmux-wide change. Set
 `tmux.disable_auto_rename: false` if another tmux workflow owns window names.
@@ -99,9 +136,10 @@ panes:
     star: true
 ~~~
 
-Allowed kinds are `claude-code`, `generic`, and `shell`. A configured target
-stays visible as `offline` when its pane disappears. Manual names and stars can
-also be edited live. See [Pane discovery](guides/pane-discovery.md).
+Allowed kinds are `claude-code`, `codex`, `grok`, `opencode`, `antigravity`,
+`generic`, and `shell`. A configured target stays visible as `offline` when its pane
+disappears. Manual names and stars can also be edited live. See
+[Pane discovery](guides/pane-discovery.md).
 
 ## Detector patterns
 
@@ -136,6 +174,32 @@ timeout. Details and testing advice are in [Agent detectors](guides/agent-detect
 into an argument list and is never passed to a shell. See
 [Usage tracking](guides/usage-tracking.md).
 
+The four live-editable fields appear under **Settings → Usage**. Enabling the
+collector saves immediately; quota/report intervals and the warning threshold
+are drafted and saved together. The section also reports whether the configured
+collector is installed. The Stats destination represents disabled,
+not-installed, timeout, error, stale, empty, loading, and refresh states without
+disabling pane monitoring.
+
+## Agent Context
+
+All `agents` fields are YAML-only and take effect after restart:
+
+~~~yaml
+agents:
+  enabled: true
+  retention_days: 30
+  codex_home: ~/.codex
+  claude_home: ~/.claude
+~~~
+
+Home paths are expanded but should point only at runtime data owned by the same
+user as vmux. `retention_days` accepts 1–3650 days and applies to historical
+snapshots, visible messages, and resolved decisions; current context and pending
+decisions are retained while active. Disabling observation does not delete the
+existing database. See [Agent context and decision inbox](guides/agent-context.md)
+for retention, deletion, parser compatibility, and safe-control behavior.
+
 ## Push
 
 All `push` fields are YAML-only:
@@ -152,8 +216,8 @@ push:
 ~~~
 
 `environment` is `sandbox` or `production`. Key material never appears in the
-Settings API. There is no publicly available native client; this subsystem is
-for compatible companion-client implementations. Read
+Settings API. The native client under `ios/` remains under development and is
+not publicly available. Read
 [Push notifications](guides/push-notifications.md) before enabling it.
 
 ## Smart naming
@@ -193,4 +257,5 @@ object. `PATCH /api/config` accepts a partial object containing:
 - `usage_alert_threshold`
 
 The bearer token, bind, tmux auto-rename choice, push credentials,
-`usage.command`, and AI backend settings cannot be changed through this API.
+`usage.command`, Agent Context settings, and AI backend settings cannot be
+changed through this API.

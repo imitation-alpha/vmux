@@ -47,6 +47,11 @@ Feature clients should:
   `_info.compatibility`
 - reconnect and replace state rather than applying assumed incremental patches
 
+The bundled PWA additionally normalizes unknown status/kind values to neutral
+presentation and structurally reuses unchanged pane objects between full
+snapshots. These are client implementation choices; they do not change the wire
+contract.
+
 ## Client/server protocol
 
 Current servers advertise this read-only policy in `GET /api/config`:
@@ -66,18 +71,42 @@ Current servers advertise this read-only policy in `GET /api/config`:
 `protocol_version` changes only when a breaking REST or WebSocket contract
 change requires clients to make different assumptions. Additive fields do not
 by themselves increment it. `minimum_ios_version` uses the iOS marketing
-version and does not include the App Store build number.
+version and does not include the App Store build number. It is informational to
+the web client and is never treated as `minimum_web_version`.
 
-The initial verified pair is:
+The `codex` pane kind and `MenuOption.description` are additive protocol 1
+values. Clients that do not recognize the kind already fall back to an unknown
+or generic presentation, and clients may ignore the description while still
+submitting the opaque option `key` unchanged.
 
-| iOS app | Backend | Protocol | Result |
+`POST /api/images` is an additive authenticated REST endpoint in protocol 1.
+It does not change `PaneState`, either WebSocket frame family, or any existing
+text-action body. Existing clients never call the endpoint and continue to
+work unchanged. A client that offers image upload must treat `404` from an
+older compatible server as feature unavailability, keep the draft, and leave
+ordinary text submission available.
+
+The bundled web client expects protocol 1 and a compatible server version of
+0.1.0 or newer. Missing server version or compatibility metadata is a legacy,
+**Unverified** condition: the PWA may continue after `/api/config` and
+`/api/state` validate normally. A malformed compatibility object, malformed
+known server version, known protocol mismatch, or malformed state payload is
+**Incompatible** and blocks actions with update guidance.
+
+The initial compatibility matrix is:
+
+| Client | Backend | Protocol | Result |
 | --- | --- | --- | --- |
-| 1.0.0 build 26 or newer compatible build | 0.1.0 or newer compatible release | 1 | Verified |
-| Any existing client | Server without compatibility metadata | Unknown | Complete the normal handshake; report unverified compatibility |
+| iOS 1.0.0 build 26 or newer compatible build | 0.1.0 or newer compatible release | 1 | Verified |
+| Any existing client | Server without compatibility metadata | Unknown | Complete the normal handshake; report Unverified |
+| Bundled 0.1.0 web client | 0.1.0 or newer compatible release | 1 | Verified |
+| Bundled web client | Server without version/compatibility metadata | Unknown | Validate config/state; continue as Unverified if both are sound |
+| Bundled web client | Malformed metadata or known mismatch | Mismatched/invalid | Block actions as Incompatible |
 
-Clients must block a known protocol mismatch or a server requirement above the
-installed iOS version. Missing metadata is a legacy condition, not proof of a
-mismatch. The full wire shape is documented in the [client API](client-api.md).
+Clients must block a known protocol mismatch. Native clients must also enforce
+app-specific minimum-version policy; the PWA does not apply the iOS minimum.
+Missing metadata is a legacy condition, not proof of a mismatch. The full wire
+shape is documented in the [client API](client-api.md).
 
 ## Supported versions
 

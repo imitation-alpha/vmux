@@ -17,8 +17,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from .models import (
+    KIND_ANTIGRAVITY,
     KIND_CLAUDE,
+    KIND_CODEX,
     KIND_GENERIC,
+    KIND_GROK,
+    KIND_OPENCODE,
     KIND_SHELL,
     STATUS_ERROR,
     STATUS_IDLE,
@@ -64,6 +68,32 @@ _OPTION_RE = re.compile(
 )
 
 _SELECT_CURSORS = "❯»▶➤›▸→>*"
+
+# Codex 0.144.x request_user_input overlay. The progress header and one of the
+# submission/navigation footer tips form a deliberately strong signature: the
+# shared "esc to interrupt" footer alone is not enough because Claude uses it
+# too. Option rows are rendered as an aligned label/description table.
+_CODEX_QUESTION_HEADER_RE = re.compile(
+    r"^\s*Question\s+(?P<current>[1-9]\d*)/(?P<total>[1-9]\d*)\s+"
+    r"\((?P<unanswered>\d+)\s+unanswered\)\s*$",
+    re.IGNORECASE,
+)
+_CODEX_OPTION_RE = re.compile(
+    r"^\s*(?P<cur>›)?\s*(?P<num>[1-9]\d*)\.\s+(?P<body>\S.*)$"
+)
+_CODEX_FOOTER_RE = re.compile(
+    r"(?:\benter\s+to\s+submit\s+(?:answer|all)\b|"
+    r"←/→\s+to\s+navigate\s+questions\b|"
+    r"\bctrl\s*\+\s*p\s*/\s*ctrl\s*\+\s*n\s+change\s+question\b)",
+    re.IGNORECASE,
+)
+_CODEX_OPTION_VIEWPORT_RE = re.compile(r"^\s*option\s+\d+/\d+\b", re.IGNORECASE)
+
+# Keep terminal extraction within the same field limits as the structured
+# Codex observer.
+_CODEX_QUESTION_MAX_CHARS = 2_000
+_CODEX_LABEL_MAX_CHARS = 240
+_CODEX_DESCRIPTION_MAX_CHARS = 500
 
 # Claude's live "working" line: a verb with an ellipsis and a running counter,
 # e.g. "Photosynthesizing… (59s · ↓ 3.4k tokens)". The ellipsis + "(<n>s" is the
@@ -210,6 +240,142 @@ def _question_above(lines: List[str], cleaned: List[str], start_idx: int) -> Opt
     return text
 
 
+def _bounded_words(parts: List[str], limit: int) -> str:
+    """Join terminal-wrapped rows and cap them like structured observer text."""
+    value = ""
+    for part in (part.strip() for part in parts if part and part.strip()):
+        separator = "" if value.endswith(("/", "-", "‑")) else (" " if value else "")
+        value += separator + part
+    value = re.sub(r"\s+", " ", value).strip()
+    if len(value) > limit:
+        return value[: max(0, limit - 1)].rstrip() + "…"
+    return value
+
+
+def _codex_description_column(
+    lines: List[str], option_rows: List[Tuple[int, re.Match[str]]]
+) -> Optional[int]:
+    """Infer the common absolute column where Codex descriptions begin."""
+    counts = {}
+    for idx, match in option_rows:
+        raw = lines[idx].rstrip()
+        body_start = match.start("body")
+        for gap in re.finditer(r"\s{2,}", raw[body_start:]):
+            column = body_start + gap.end()
+            if column < len(raw) and raw[column:].strip():
+                counts[column] = counts.get(column, 0) + 1
+    if not counts:
+        return None
+    support = 2 if len(option_rows) > 1 else 1
+    candidates = [column for column, count in counts.items() if count >= support]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda column: (counts[column], column))
+
+
+def parse_codex_questionnaire(lines: List[str]) -> Tuple[Optional[str], List[MenuOption]]:
+    """Parse the currently visible Codex ``request_user_input`` question.
+
+    Recognition requires both the exact progress header and a known Codex
+    submission/navigation footer. Only rows between that header and footer are
+    considered. The aligned option table is split into concise labels and
+    descriptions, including independently wrapped label/description rows.
+    """
+    if not lines:
+        return None, []
+
+    # Prefer the most recent complete overlay when scrollback contains an older
+    # questionnaire as well as the currently visible one.
+    section = None
+    for header_idx in range(len(lines) - 1, -1, -1):
+        if not _CODEX_QUESTION_HEADER_RE.match(lines[header_idx]):
+            continue
+        footer_marker = next(
+            (
+                idx for idx in range(header_idx + 1, len(lines))
+                if _CODEX_FOOTER_RE.search(lines[idx])
+            ),
+            None,
+        )
+        if footer_marker is None:
+            continue
+        footer_start = footer_marker
+        for idx in range(footer_marker - 1, header_idx, -1):
+            if not lines[idx].strip():
+                footer_start = idx + 1
+                break
+        section = (header_idx, footer_start)
+        break
+    if section is None:
+        return None, []
+
+    header_idx, footer_start = section
+    question_parts: List[str] = []
+    cursor = header_idx + 1
+    while cursor < footer_start and not lines[cursor].strip():
+        cursor += 1
+    while cursor < footer_start:
+        raw = lines[cursor]
+        if not raw.strip() or _CODEX_OPTION_RE.match(raw):
+            break
+        question_parts.append(raw.strip())
+        cursor += 1
+    question = _bounded_words(question_parts, _CODEX_QUESTION_MAX_CHARS)
+    if not question:
+        return None, []
+
+    option_rows: List[Tuple[int, re.Match[str]]] = []
+    for idx in range(cursor, footer_start):
+        match = _CODEX_OPTION_RE.match(lines[idx])
+        if match:
+            option_rows.append((idx, match))
+    if not option_rows:
+        # Freeform-only request_user_input questions still need structured
+        # question text and Codex identity even though there are no buttons.
+        return question, []
+
+    description_column = _codex_description_column(lines, option_rows)
+    options: List[MenuOption] = []
+    seen = set()
+    for row_index, (line_idx, match) in enumerate(option_rows):
+        key = match.group("num")
+        if key in seen:
+            continue
+        seen.add(key)
+        next_idx = (
+            option_rows[row_index + 1][0]
+            if row_index + 1 < len(option_rows)
+            else footer_start
+        )
+        label_parts: List[str] = []
+        description_parts: List[str] = []
+        content_column = match.start("body")
+        for idx in range(line_idx, next_idx):
+            raw = lines[idx].rstrip()
+            if not raw.strip() or _CODEX_OPTION_VIEWPORT_RE.match(raw):
+                continue
+            start = content_column if idx == line_idx else min(content_column, len(raw))
+            if description_column is None:
+                label_parts.append(raw[start:])
+                continue
+            label_parts.append(raw[start:description_column])
+            if len(raw) > description_column:
+                description_parts.append(raw[description_column:])
+
+        label = _bounded_words(label_parts, _CODEX_LABEL_MAX_CHARS)
+        if not label:
+            continue
+        description = _bounded_words(description_parts, _CODEX_DESCRIPTION_MAX_CHARS)
+        options.append(MenuOption(
+            key=key,
+            label=label,
+            description=description,
+            selected=match.group("cur") == "›",
+            freeform=(label.casefold() == "none of the above" or _is_freeform(label)),
+        ))
+    return question, options
+
+
 # --------------------------------------------------------------------------- #
 # kind classification
 # --------------------------------------------------------------------------- #
@@ -224,10 +390,43 @@ def looks_like_claude(text: str, title: str) -> bool:
     return False
 
 
+def agent_kind_from_cmd(cmd: str) -> Optional[str]:
+    """Map a process basename to a first-class agent kind, if known.
+
+    Checked before Claude spinner/title heuristics so versioned non-Claude
+    binaries (e.g. grok-0.2.93-mac with a braille spinner title) are not
+    misclassified as claude-code.
+    """
+    base = (cmd or "").split("/")[-1].strip().lower()
+    if not base:
+        return None
+    # Claude Code ships as claude, claude.exe, or similar.
+    if base == "claude" or base.startswith("claude.") or base.startswith("claude-"):
+        return KIND_CLAUDE
+    # Grok CLI versioned builds: grok, grok-0.2.93-mac, grok-macos-aarc, …
+    if base == "grok" or base.startswith("grok-"):
+        return KIND_GROK
+    if base in ("opencode", "oc"):
+        return KIND_OPENCODE
+    if base in ("agy", "antigravity"):
+        return KIND_ANTIGRAVITY
+    if base == "codex" or base.startswith("codex.") or base.startswith("codex-"):
+        return KIND_CODEX
+    return None
+
+
 def classify_kind(cmd: str, title: str, text: str) -> str:
     base = (cmd or "").split("/")[-1]
-    if base == "codex":
-        return KIND_GENERIC               # Codex CLI -> generic path (cursor-less dialogs)
+    known = agent_kind_from_cmd(cmd)
+    if known is not None:
+        return known
+    # npm-installed Codex commonly appears to tmux as `node`. Its questionnaire
+    # footer includes Claude's "esc to interrupt", so recognize the complete
+    # questionnaire signature before applying that shared Claude heuristic.
+    question, _ = parse_codex_questionnaire(_last_lines(text, 80))
+    if question is not None:
+        return KIND_CODEX
+    # Versioned Claude processes often appear as "2.1.168" with a spinner title.
     if looks_like_claude(text, title):
         return KIND_CLAUDE
     if base in SHELL_CMDS:
@@ -429,8 +628,13 @@ def detect(text: str, kind: str, changed: bool, cfg, title: str = "") -> DetectR
             return DetectResult(STATUS_WORKING)
         return DetectResult(STATUS_IDLE)
 
-    # generic + shell (incl. Codex CLI): selection box, then cursor-less numbered
-    # dialog, then the regex prompts (y/n, "press enter", user patterns)
+    if kind == KIND_CODEX:
+        question, options = parse_codex_questionnaire(lines)
+        if question is not None:
+            return DetectResult(STATUS_NEEDS_INPUT, question, options)
+
+    # Generic agents, shells, and legacy Codex approval prompts: selection box,
+    # then cursor-less numbered dialogs, then configured prompts.
     question, options = parse_claude_menu(lines)
     if options:
         return DetectResult(STATUS_NEEDS_INPUT, question, options)

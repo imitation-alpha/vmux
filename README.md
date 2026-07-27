@@ -7,6 +7,11 @@ supported terminal dialogs into tappable choices, and sends your response back
 through tmux. The backend and installable PWA run on your machine: no hosted
 account, telemetry, or cloud control plane.
 
+The native iOS app remains separate from that self-hosted data path. Beginning
+with iOS version 1.0.1, it offers optional anonymous PostHog analytics only
+after explicit consent; the server and PWA do not participate. See the
+[privacy policy](PRIVACY.md) for the version-specific details.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/imitation-alpha/vmux/main/docs/images/panel-list-view.jpg" width="360" alt="vmux pane list showing coding agents grouped and color-coded by status">
   <img src="https://raw.githubusercontent.com/imitation-alpha/vmux/main/docs/images/panel-session-view.jpg" width="360" alt="vmux pane detail showing captured output, a response composer, and shortcut keys">
@@ -48,9 +53,16 @@ places panes needing input first. To include ordinary shell panes while testing:
 vmux --include-shells
 ~~~
 
-The PWA is the currently available client. Use your browser's **Add to Home
-Screen** action for an app-like launcher. A separate native iOS companion is in
-development, is not publicly available, and is not part of this repository.
+Use your browser's **Add to Home Screen** action to install the PWA. The native
+iOS companion is released separately for iPhone and iPad and uses its own
+version and build numbers; its source and release documentation live under
+`ios/`.
+
+The workspace adapts by width rather than input device: phones use a four-item
+Queue/Active/All/Stats dock, tablets use a 360-pixel master/detail split, and
+wide screens retain the three-column navigator, attention queue, and inspector.
+Pane detail, tree navigation, settings, and connection recovery remain keyboard
+and screen-reader accessible in every layout.
 
 ## Remote access
 
@@ -76,16 +88,30 @@ before using a non-loopback bind.
 
 ## What it does
 
-- Discovers tmux panes and classifies Claude Code, generic agents (including
-  Codex), and shells.
+- Discovers tmux panes and classifies Claude Code, Codex, Grok, OpenCode,
+  Antigravity, generic agents, and shells.
 - Ranks `needs_input`, `error`, `working`, `idle`, and `offline` states.
-- Parses Claude Code and conservative numbered dialogs; configurable regexes
-  cover common prompts from other CLIs.
-- Shows captured scrollback, extracted links, snippets, customizable allow-listed
-  shortcut keys, pane stars, and connected sessions.
+- Parses Claude Code selections, structured Codex questionnaires, and
+  conservative numbered dialogs; configurable regexes cover common prompts
+  from other CLIs.
+- Builds a separate structured workspace for supported Codex and Claude Code
+  sessions: current goal/task, progress, blockers, resumable deltas, visible
+  chat, a verified decision inbox, and a historical timeline.
+- Persists normalized agent snapshots locally for 30 days by default without
+  copying hidden reasoning, raw tool results, or terminal scrollback into the
+  agent database.
+- Shows captured scrollback in faithful no-wrap or wrapped terminal views, with
+  full-screen presentation, follow-tail recovery, extracted links, snippets,
+  customizable allow-listed shortcut keys, pane stars, and connected sessions.
 - Sends literal text, menu choices, or one broadcast message to multiple panes.
-- Supports optional smart pane names, tokscale usage views, and an APNs backend
-  for compatible companion clients.
+- Uploads pasted or selected images to private 24-hour host storage and appends
+  the shell-safe path to terminal or agent drafts without submitting them.
+- Includes an opt-in tokscale Stats dashboard with cost/token history, client and
+  model breakdowns, provider quotas, and accessible tables.
+- Shows explicit Connecting, Live, Updating via REST, Offline, Unauthorized, and
+  Incompatible states while retaining the last in-memory pane snapshot.
+- Supports optional smart pane names and an APNs backend for compatible
+  companion clients.
 - Vendors the PWA runtime assets; no third-party CDN is loaded.
 
 ## Documentation
@@ -93,6 +119,7 @@ before using a non-loopback bind.
 - [Getting started](https://imitation-alpha.github.io/vmux/getting-started/)
 - [Remote access](https://imitation-alpha.github.io/vmux/remote-access/)
 - [Configuration](https://imitation-alpha.github.io/vmux/configuration/)
+- [Agent context and Review](https://imitation-alpha.github.io/vmux/guides/agent-context/)
 - [Troubleshooting](https://imitation-alpha.github.io/vmux/troubleshooting/)
 - [Architecture and client API](https://imitation-alpha.github.io/vmux/reference/architecture/)
 
@@ -100,6 +127,10 @@ For a compact repository-local path, see
 [QUICKSTART.md](https://github.com/imitation-alpha/vmux/blob/main/QUICKSTART.md).
 
 ## Contributing and support
+
+For app and server help, see the
+[vmux Agent Console support page](https://imitation-alpha.github.io/vmux/support/)
+or email [support@imitationalpha.com](mailto:support@imitationalpha.com).
 
 Bug fixes and objective documentation corrections may be submitted directly.
 Significant features—and all networking, authentication, wire-contract, or

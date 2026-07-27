@@ -18,6 +18,10 @@ STATUS_OFFLINE = "offline"         # pane is gone                     (grey)
 
 # Pane kinds.
 KIND_CLAUDE = "claude-code"
+KIND_CODEX = "codex"
+KIND_GROK = "grok"
+KIND_OPENCODE = "opencode"
+KIND_ANTIGRAVITY = "antigravity"
 KIND_GENERIC = "generic"
 KIND_SHELL = "shell"
 
@@ -28,11 +32,18 @@ class MenuOption:
 
     key: str          # what identifies the choice ("1", "y", "enter")
     label: str        # human text shown on the button
+    description: str = ""  # bounded supporting text; empty when unavailable
     selected: bool = False  # currently highlighted in the TUI (the default)
     freeform: bool = False  # picking this drops into a free-text reply ("tell Claude what to do")
 
     def to_dict(self) -> dict:
-        return {"key": self.key, "label": self.label, "selected": self.selected, "freeform": self.freeform}
+        return {
+            "key": self.key,
+            "label": self.label,
+            "description": self.description,
+            "selected": self.selected,
+            "freeform": self.freeform,
+        }
 
 
 @dataclass
@@ -40,7 +51,7 @@ class PaneState:
     id: str                                   # tmux pane id, e.g. "%12" (stable key)
     target: str                               # session:window.pane (display + fallback)
     name: str                                 # friendly name (config override or derived)
-    kind: str = KIND_SHELL                    # claude-code | generic | shell
+    kind: str = KIND_SHELL                    # claude-code | codex | grok | opencode | antigravity | generic | shell
     status: str = STATUS_IDLE
     title: str = ""                           # tmux pane title
     question: Optional[str] = None            # the prompt text, when needs_input

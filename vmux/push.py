@@ -60,25 +60,41 @@ class DeviceRegistry:
             return
         d = os.path.dirname(self.path)
         if d:
-            os.makedirs(d, exist_ok=True)
+            created_directory = not os.path.isdir(d)
+            os.makedirs(d, mode=0o700, exist_ok=True)
+            if created_directory:
+                try:
+                    os.chmod(d, 0o700)
+                except OSError:
+                    pass
         tmp = self.path + ".tmp"
         with open(tmp, "w") as fh:
             json.dump({"devices": self.devices}, fh, indent=2)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
         os.replace(tmp, self.path)  # atomic
+        try:
+            os.chmod(self.path, 0o600)
+        except OSError:
+            pass
 
-    def add(self, token: str, name: str = "", platform: str = "ios") -> bool:
+    def add(self, token: str, name: str = "", platform: str = "ios", contextual: bool = True) -> bool:
         """Register a token (idempotent). Returns True if it was new."""
         if not valid_device_token(token):
             raise ValueError("bad device token")
         for d in self.devices:
             if d["token"] == token:
                 d["name"] = (name or d.get("name") or "")[:80]
+                d["contextual"] = bool(contextual)
                 self._save()
                 return False
         self.devices.append({
             "token": token,
             "name": (name or "")[:80],
             "platform": (platform or "ios")[:20],
+            "contextual": bool(contextual),
             "added": time.time(),
         })
         self._save()
@@ -95,11 +111,15 @@ class DeviceRegistry:
     def tokens(self) -> List[str]:
         return [d["token"] for d in self.devices]
 
+    def registrations(self) -> List[dict]:
+        return [dict(device) for device in self.devices]
+
     def public_list(self) -> List[dict]:
         """Device list safe to show in the settings UI (token truncated)."""
         return [
             {"token": d["token"][:8] + "…", "name": d.get("name", ""),
-             "platform": d.get("platform", ""), "added": d.get("added", 0)}
+             "platform": d.get("platform", ""), "contextual": bool(d.get("contextual", False)),
+             "added": d.get("added", 0)}
             for d in self.devices
         ]
 
@@ -110,6 +130,7 @@ def collect_alerts(
     last_alert: Dict[str, float],
     now: float,
     *,
+    alert_on_needs_input: bool = True,
     alert_on_error: bool = False,
     cooldown: float = 30.0,
 ) -> List[PaneState]:
@@ -120,7 +141,7 @@ def collect_alerts(
     was already waiting. `last_alert` is updated in place with `now` for each
     alerted pane; entries for vanished panes are dropped.
     """
-    wanted = {STATUS_NEEDS_INPUT}
+    wanted = {STATUS_NEEDS_INPUT} if alert_on_needs_input else set()
     if alert_on_error:
         wanted.add(STATUS_ERROR)
 
@@ -226,7 +247,14 @@ class PushManager:
         }
 
     # -- transition tracking (called from the poll loop) -------------------- #
-    def collect(self, prev: Dict[str, PaneState], new: Dict[str, PaneState]) -> List[PaneState]:
+    def collect(
+        self,
+        prev: Dict[str, PaneState],
+        new: Dict[str, PaneState],
+        *,
+        alert_on_needs_input: bool = True,
+        alert_on_error: Optional[bool] = None,
+    ) -> List[PaneState]:
         if not (self.configured and self.available):
             if self.configured and not self.available and not self._warned:
                 print("[vmux] push: configured but deps missing — pip install 'vmux-agent[push]'")
@@ -234,7 +262,12 @@ class PushManager:
             return []
         return collect_alerts(
             prev, new, self._last_alert, time.time(),
-            alert_on_error=self.cfg.push_on_error,
+            alert_on_needs_input=alert_on_needs_input,
+            alert_on_error=(
+                self.cfg.push_on_error
+                if alert_on_error is None
+                else bool(alert_on_error)
+            ),
             cooldown=self.cfg.push_cooldown,
         )
 
@@ -268,6 +301,88 @@ class PushManager:
             asyncio.get_running_loop().create_task(self._send_payloads([payload]))
         except RuntimeError:
             pass
+
+    def fire_agent_decision(self, decision: dict) -> None:
+        """Send a generic decision alert to every registered device.
+
+        The stored ``contextual`` registration preference is retained for
+        compatibility with existing clients, but does not affect notification
+        content. Payload routing uses opaque vmux ids. Titles, descriptions,
+        prompts, paths, runtime ids, transcript text, options, commands, and
+        tool output are never included.
+        """
+        if not self.can_send:
+            return
+        generic, _, _ = self._agent_decision_payloads(decision)
+        pairs = [
+            (device["token"], generic)
+            for device in self.registry.registrations()
+        ]
+        try:
+            asyncio.get_running_loop().create_task(self._send_token_payloads(pairs))
+        except RuntimeError:
+            pass
+
+    def fire_review_digest(self) -> None:
+        """Schedule one generic Review alert for every registered device.
+
+        Review contents stay on the server.  The notification carries only the
+        event type and server instance needed for a client to route and validate
+        the subsequent fetch.
+        """
+        if not self.can_send:
+            return
+        try:
+            asyncio.get_running_loop().create_task(
+                self._send_payloads([self._review_digest_payload()])
+            )
+        except RuntimeError:
+            pass
+
+    def _review_digest_payload(self) -> dict:
+        """Build the privacy-minimized, server-wide Review notification."""
+        return {
+            "aps": {
+                "alert": {"title": "vmux", "body": "Your agent review is ready."},
+                "sound": "default",
+                "thread-id": "vmux-agents",
+                "interruption-level": "active",
+                "category": "vmux.agent-review",
+            },
+            "vmux": {
+                "type": "review_due",
+                "server_instance_id": self.cfg.server_instance_id,
+            },
+        }
+
+    def _agent_decision_payloads(self, decision: dict):
+        """Build generic variants while preserving the former tuple contract.
+
+        Older callers and tests consumed ``(generic, contextual, sensitive)``.
+        The contextual variant is now an identical copy. The compatibility-only
+        sensitive flag retains its former local classification semantics, but
+        it cannot change notification content.
+        """
+        text = "%s %s" % (decision.get("title", ""), decision.get("description", ""))
+        sensitive = bool(re.search(
+            r"\b(password|passphrase|secret|token|credential|private key|api key|ssn)\b",
+            text,
+            re.IGNORECASE,
+        ))
+        generic = {
+            "aps": {
+                "alert": {"title": "vmux", "body": "An agent needs your decision."},
+                "sound": "default", "thread-id": "vmux-agents",
+                "interruption-level": "time-sensitive", "category": "vmux.agent-decision",
+            },
+            "vmux": {
+                "type": "decision", "server_instance_id": self.cfg.server_instance_id,
+                "agent_id": decision.get("agent_id"),
+                "decision_id": decision.get("id"), "revision": decision.get("revision"),
+            },
+        }
+        contextual = json.loads(json.dumps(generic))
+        return generic, contextual, sensitive
 
     # -- APNs plumbing ------------------------------------------------------ #
     def _provider_jwt(self) -> str:
@@ -319,6 +434,10 @@ class PushManager:
         }
 
     async def _send_payloads(self, payloads: List[dict]) -> None:
+        pairs = [(token, payload) for payload in payloads for token in self.registry.tokens()]
+        await self._send_token_payloads(pairs)
+
+    async def _send_token_payloads(self, pairs) -> None:
         try:
             import httpx
             if self._client is None:
@@ -333,22 +452,21 @@ class PushManager:
                 "apns-push-type": "alert",
                 "apns-priority": "10",
             }
-            for payload in payloads:
-                for token in self.registry.tokens():
-                    try:
-                        r = await self._client.post("/3/device/" + token, json=payload, headers=headers)
-                        if r.status_code in (400, 410):
-                            reason = ""
-                            try:
-                                reason = r.json().get("reason", "")
-                            except ValueError:
-                                pass
-                            if reason in ("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"):
-                                self.registry.remove(token)
-                                print("[vmux] push: dropped dead device token (%s)" % reason)
-                        elif r.status_code != 200:
-                            print("[vmux] push: APNs %s: %s" % (r.status_code, r.text[:200]))
-                    except Exception as exc:
-                        print("[vmux] push: send failed: %s" % exc)
+            for token, payload in pairs:
+                try:
+                    r = await self._client.post("/3/device/" + token, json=payload, headers=headers)
+                    if r.status_code in (400, 410):
+                        reason = ""
+                        try:
+                            reason = r.json().get("reason", "")
+                        except ValueError:
+                            pass
+                        if reason in ("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"):
+                            self.registry.remove(token)
+                            print("[vmux] push: dropped dead device token (%s)" % reason)
+                    elif r.status_code != 200:
+                        print("[vmux] push: APNs %s: %s" % (r.status_code, r.text[:200]))
+                except Exception as exc:
+                    print("[vmux] push: send failed: %s" % exc)
         except Exception as exc:  # never let push trouble reach the poll loop
             print("[vmux] push error:", exc)

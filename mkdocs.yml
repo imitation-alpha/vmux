@@ -80,11 +80,13 @@ nav:
       - guides/index.md
       - Pane discovery: guides/pane-discovery.md
       - Agent detectors: guides/agent-detectors.md
+      - Agent context and decisions: guides/agent-context.md
       - Smart naming: guides/smart-naming.md
       - Snippets and shortcuts: guides/snippets-shortcuts.md
       - Usage tracking: guides/usage-tracking.md
       - Push notifications: guides/push-notifications.md
   - Troubleshooting: troubleshooting.md
+  - Support: support.md
   - Reference:
       - reference/index.md
       - Architecture: reference/architecture.md

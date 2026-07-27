@@ -81,12 +81,34 @@ without updating the client. Clearing site data also removes the token stored by
 the PWA; the iOS app clears its saved token after a confirmed authentication
 failure so you can enter the new value.
 
+If a setup link contains `?token=`, the PWA stores that value once and
+immediately removes only the token parameter from the visible URL and browser
+history. Other query parameters and the fragment remain intact. **Settings →
+Connection & About → Sign out** clears the saved credential and purges legacy
+credential-bearing cache entries before returning to the token screen.
+
 Do not include a real token in logs or an issue.
 
 ## Live updates reconnect repeatedly
 
-The PWA prefers `/ws`. On disconnect it probes `/api/state` to distinguish an
-authentication failure from a network failure, then retries the WebSocket.
+The PWA bootstraps through `/api/config` and `/api/state`, then prefers `/ws` for
+live snapshots. The connection badge distinguishes:
+
+| State | Meaning |
+| --- | --- |
+| Connecting | Initial bootstrap or a failure still within the 10-second offline grace period. |
+| Live | Full state snapshots are arriving over WebSocket. |
+| Updating via REST | The socket is unavailable or silent, but authenticated state refreshes still succeed. |
+| Offline | Neither transport has succeeded for 10 seconds; the last snapshot is read-only. |
+| Unauthorized | REST returned `401` or the socket closed with `1008`; enter the correct token. |
+| Incompatible | Compatibility metadata or a state payload is malformed, or protocol 1 is not supported; actions are blocked. |
+
+A socket that sends no state is closed after
+`max(3 seconds, poll_interval × 2 + 1 second)`. While the socket is unhealthy,
+REST fallback runs every 2 seconds. WebSocket retry begins at 0.5 seconds,
+doubles to an 8-second cap, and adds up to 0.3 seconds of jitter. Use the
+connection badge or **Settings → Connection & About → Retry now** to restart the
+bootstrap immediately.
 
 Check:
 
@@ -98,7 +120,25 @@ Check:
 
 A wrong WebSocket token closes the connection with code `1008`. A session
 disconnected from the PWA's connected-sessions screen closes with code `4001`
-and should reconnect as a new session.
+and remains Offline until **Retry now** starts a new session.
+
+## The shell opens offline or an update seems stuck
+
+The service worker stores only the unauthenticated application shell. An offline
+relaunch can therefore show vmux chrome and connection recovery, but it cannot
+restore pane names, terminal output, pending actions, or a previous Stats
+snapshot. Those values are memory-only. Reconnect before sending anything.
+
+When a new worker has installed, vmux shows an **Update ready** banner. Choose
+**Reload** to activate it in a controlled step. If the banner repeatedly
+returns, close other vmux tabs/windows, reload once, and check that a reverse
+proxy is not serving stale `/sw.js`, `/js/*`, or `/styles.css` responses. As a
+last resort, clear this origin's site data; doing so also removes the saved
+token and browser preferences.
+
+The worker never caches `/api/*`, `/ws`, requests with an `Authorization`
+header, or any URL containing a query string. A missing JavaScript, stylesheet,
+or icon receives a normal network error rather than the cached HTML shell.
 
 ## Tailscale or LAN connection times out
 
@@ -156,16 +196,20 @@ routing. A `5xx` response or an incompatible vmux payload requires checking the
 server output and updating vmux before retrying. Do not weaken HTTPS certificate
 validation to work around a TLS error.
 
-### The app reports an incompatible or unverified version
+### The PWA or app reports an incompatible or unverified version
 
-Check **Settings → Connection** for the iOS version, backend version, protocol
-version, and compatibility result. If the app requests a server update, update
-vmux on the tmux host and tap **Retry Now**. If the server requires a newer iOS
-version or protocol, update the app from the App Store before retrying. These
-known mismatches block connection but do not delete the saved address or token.
+In the PWA, check **Settings → Connection & About** for the web client, backend,
+protocol, and compatibility result. It expects protocol 1 and a compatible
+server at version 0.1.0 or newer. A malformed compatibility object, malformed
+version, known protocol mismatch, or malformed state payload blocks pane
+actions. Update vmux on the tmux host and choose **Retry now**.
+
+`minimum_ios_version` describes native iOS clients only. The web client displays
+or ignores it as informational metadata and never uses it to reject a server.
+For a native client, follow that client's update guidance as well.
 
 A **Compatibility unverified** warning means the server predates the additive
-`_info.compatibility` metadata. The app may connect after its normal
+`_info.compatibility` metadata. The client may connect after its normal
 `/api/config` and `/api/state` validation succeeds, but updating the backend to
 a release that advertises compatibility is recommended. Do not treat an absent
 compatibility object as permission to ignore a failed schema handshake.
@@ -174,7 +218,8 @@ compatibility object as permission to ignore a failed schema handshake.
 
 The proxy must:
 
-- forward all paths, including `/api/*`, `/vendor/*`, and `/ws`
+- forward all paths, including `/api/*`, `/js/*`, `/vendor/*`, icons,
+  `/styles.css`, `/manifest.webmanifest`, `/sw.js`, and `/ws`
 - support WebSocket Upgrade and Connection semantics
 - preserve `Authorization`
 - serve valid HTTPS so the browser uses WSS
@@ -185,14 +230,15 @@ from logs because it contains the token.
 
 ## Reporting a connection problem safely
 
-In the iOS app, expand **Technical Details** in the recovery card and copy the
-sanitized summary. A useful report includes only:
+Open the connection badge or **Settings → Connection & About** in the PWA; a
+native client may expose the same information in its recovery card. Copy only
+the sanitized technical details. A useful report includes:
 
 - host and port (replace a private hostname if necessary)
 - failing endpoint
 - stable issue category
-- HTTP status or `URLError` code
-- app and server versions, when known
+- HTTP status or native URL error code
+- client, server, and protocol versions, when known
 - timestamp and whether the route was Tailscale, trusted LAN, or valid HTTPS
 
 Review the text before sharing it. Never include the bearer token, an
@@ -220,6 +266,29 @@ For a persistent pane entry, configure its `session:window.pane` target. An
 offline configured card remains visible but cannot accept actions until the live
 pane returns.
 
+All menu, key, and text actions remain non-optimistic and display pending,
+success, or error feedback. Stars update optimistically and roll back if saving
+fails. If a button stays disabled, check for an identical pending action, an
+offline pane, or an Offline/Unauthorized/Incompatible connection before
+reloading.
+
+Broadcast excludes offline or otherwise non-actionable panes before sending.
+Completion reports the attempted and sent counts plus partial errors; retry only
+the failed recipients rather than repeating a successful broadcast to everyone.
+
+## Terminal wrapping or follow-tail is surprising
+
+**Faithful** is the default terminal mode: lines do not wrap and the output can
+scroll horizontally. Choose **Wrap** to wrap long lines; this preference is
+stored only in the current browser profile. Full screen uses the same plain-text
+output and controls.
+
+The terminal follows new output only while its scroll position remains at the
+bottom. If you scroll up, follow-tail pauses so selection and reading are not
+interrupted. A visible **Latest** button appears after new output arrives; choose
+it to return to the bottom and resume following. Extracted links are convenience
+tools only—captured output is never interpreted as HTML.
+
 ## Smart names are stale
 
 AI-derived names are cached in `vmux-names.json` beside the overlay. Stop vmux,
@@ -232,12 +301,67 @@ do not require the AI layer.
 command resolves in vmux's `PATH`, and tokscale is compatible. A failed refresh
 preserves the last-good payload and marks it stale instead of stopping vmux.
 
+Use **Settings → Usage** to enable collection and edit quota refresh, report
+refresh, and warning threshold values. `usage.command` remains YAML-only. The
+Stats page distinguishes disabled, not installed, timeout, error, stale, empty,
+and loading states. Its manual refresh can take longer than ordinary API calls
+because report scanning is CPU-heavy; pane monitoring remains independent.
+
+## Agent context is missing, stale, or read-only
+
+First inspect `GET /api/config` →
+`_info.capabilities.agent_context_v1`. If it is absent, use the terminal
+workspace; if `enabled` is false, check the YAML-only `agents.enabled` setting
+and restart vmux.
+
+Structured context currently requires a Codex or Claude Code pane whose
+runtime-owned session log reports the same working directory. Confirm vmux runs
+as the same OS user and can read the configured `codex_home` or `claude_home`.
+`extraction_health` reports parser/read failures without disabling pane
+monitoring. A runtime update can require an observer compatibility update; do
+not work around that by exposing or editing its logs.
+
+`probable`, `ambiguous`, or `unavailable` associations are intentionally
+read-only. Choose a matching candidate pane to bind it manually, or keep using
+the terminal fallback. A `409` from chat or a decision means the binding,
+revision, pane incarnation, idle prompt, or decision fingerprint changed.
+Refresh the session and review current state; do not automatically replay the
+mutation.
+
+The local history database sits beside `vmux-settings.json`. Deleting a
+session's history is distinct from disabling future observation. See
+[Agent context and decision inbox](guides/agent-context.md) for the exact data
+boundary and retention behavior.
+
+## Supported browsers and Safari release checks
+
+vmux targets modern browsers with native ES modules, service workers, SVG, and
+the CSS features used by the adaptive shell:
+
+| Browser | Support target | Install notes |
+| --- | --- | --- |
+| Safari on iPhone and iPad | Current and immediately previous major iOS/iPadOS releases | Installed Home Screen PWA is a release-gated path. |
+| Safari on macOS | Current and immediately previous major macOS/Safari releases | Browser use is supported; installed web-app availability follows the OS. |
+| Chrome or Edge on desktop | Current and immediately previous stable major releases | Browser use and the browser-provided install flow are supported. |
+| Chrome on Android | Current and immediately previous stable major releases | Compact installed PWA is supported. |
+| Firefox on desktop | Current and immediately previous stable major releases | Browser use is supported; installation is not a vmux release gate. |
+| Embedded/in-app browsers and older engines | Unsupported | Open the URL in a supported system browser. |
+
+Before release, manual checks are required in installed Safari PWAs on a
+physical iPhone and iPad. Verify safe-area chrome in portrait and landscape,
+software-keyboard dismissal, focus restoration and VoiceOver traversal, 200%
+zoom/reflow, system/light/dark appearance, reduced motion, terminal text
+selection and horizontal scrolling, standalone/offline launch recovery, and the
+Update ready activation/reload path. These checks complement source and package
+tests; they are not replaced by Simulator alone.
+
 ## Push is unavailable
 
-There is no public native client today. For compatible-client development,
-inspect `_info.push` and follow [Push notifications](guides/push-notifications.md).
-The most common errors are missing optional dependencies, an unreadable `.p8`
-file, a team/topic mismatch, or the wrong APNs environment.
+The native client under `ios/` is not publicly distributed today. For a signed
+development build or another compatible client, inspect `_info.push` and follow
+[Push notifications](guides/push-notifications.md). The most common errors are
+missing optional dependencies, an unreadable `.p8` file, a team/topic mismatch,
+or the wrong APNs environment.
 
 ## Service-manager checklist
 

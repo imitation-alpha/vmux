@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -42,7 +43,15 @@ DEFAULT_ERROR_PATTERNS = [
 
 # Limits for UI-supplied detector patterns (the editor holds the token, so this
 # guards against fat-finger mistakes, not malice).
-PANE_KINDS = {"claude-code", "generic", "shell"}
+PANE_KINDS = {
+    "claude-code",
+    "codex",
+    "grok",
+    "opencode",
+    "antigravity",
+    "generic",
+    "shell",
+}
 NAMING_MODES = {
     "pane",
     "window_pane",
@@ -148,6 +157,15 @@ class Config:
     auto_naming_antigravity_model: str = ""
     auto_naming_antigravity_flags: List[str] = field(default_factory=list)
     auto_naming_cache_path: Optional[str] = field(default=None, repr=False)
+
+    # Structured Agent Context is YAML-only for v1.  It reads runtime-owned
+    # session logs but stores only normalized context/messages/decisions.
+    agent_context_enabled: bool = True
+    agent_retention_days: int = 30
+    agent_store_path: Optional[str] = field(default=None, repr=False)
+    agent_codex_home: str = field(default_factory=lambda: os.path.expanduser("~/.codex"), repr=False)
+    agent_claude_home: str = field(default_factory=lambda: os.path.expanduser("~/.claude"), repr=False)
+    server_instance_id: str = field(default_factory=lambda: str(uuid.uuid4()), repr=False)
 
     # compiled, filled in __post_init__
     generic_re: List["re.Pattern"] = field(default_factory=list, repr=False)
@@ -303,6 +321,28 @@ def _load_overlay(path: str) -> Optional[dict]:
         return None
 
 
+def _server_instance_id(path: str) -> str:
+    """Load or create the non-secret stable id used to validate deep links."""
+    try:
+        if os.path.exists(path):
+            with open(path, "r") as fh:
+                value = fh.read().strip()
+            return str(uuid.UUID(value))
+    except (OSError, ValueError):
+        pass
+    value = str(uuid.uuid4())
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(value + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return value
+
+
 def _string_list(value, default: List[str], *, split_shell: bool = False) -> List[str]:
     if value is None:
         return list(default)
@@ -365,6 +405,7 @@ def load(path: Optional[str]) -> Config:
     push = data.get("push", {}) or {}
     usage = data.get("usage", {}) or {}
     auto_naming = data.get("auto_naming", {}) or {}
+    agents = data.get("agents", {}) or {}
 
     apns_env = str(push.get("environment", "sandbox") or "sandbox")
     if apns_env not in ("sandbox", "production"):
@@ -446,11 +487,19 @@ def load(path: Optional[str]) -> Config:
             [],
             split_shell=True,
         ),
+        agent_context_enabled=bool(agents.get("enabled", True)),
+        agent_retention_days=min(3650, max(1, int(agents.get("retention_days", 30)))),
+        agent_codex_home=os.path.expanduser(str(agents.get("codex_home", "~/.codex") or "~/.codex")),
+        agent_claude_home=os.path.expanduser(str(agents.get("claude_home", "~/.claude") or "~/.claude")),
     )
     # layer UI-managed settings (if any) over the YAML — overlay wins
     cfg.overlay_path = _overlay_path_for(path)
     cfg.push_store_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-push.json")
     cfg.auto_naming_cache_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-names.json")
+    cfg.agent_store_path = os.path.join(os.path.dirname(cfg.overlay_path), "vmux-agents.sqlite3")
+    cfg.server_instance_id = _server_instance_id(
+        os.path.join(os.path.dirname(cfg.overlay_path), "server-instance-id")
+    )
     overlay = _load_overlay(cfg.overlay_path)
     if overlay:
         try:

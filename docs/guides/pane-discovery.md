@@ -61,7 +61,7 @@ receive actions until the pane returns.
 An override can set any combination of:
 
 - `name`: display name, capped at 80 characters when edited through the API
-- `kind`: `claude-code`, `generic`, or `shell`
+- `kind`: `claude-code`, `codex`, `grok`, `opencode`, `antigravity`, `generic`, or `shell`
 - `star`: keep near the top and visible while offline
 
 The Settings UI edits the full override list in the JSON overlay. Because that

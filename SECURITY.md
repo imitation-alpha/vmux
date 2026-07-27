@@ -8,10 +8,13 @@ able to run commands with the privileges of the vmux user. There is no
 per-client or per-pane authorization layer: treat the bearer token like a
 password with command-execution authority.
 
-The core project has no hosted service, account system, or telemetry. Optional
-push notifications communicate with Apple Push Notification service when
-enabled; optional usage collection invokes the separately installed tokscale
-tool. Review those integrations before enabling them.
+The self-hosted server and PWA have no hosted service, account system, or
+developer telemetry. Beginning with native iOS version 1.0.1, the separate app
+can send anonymous product analytics to PostHog only after explicit consent;
+Demo Mode never participates. Optional push notifications communicate with
+Apple Push Notification service when enabled, and optional usage collection
+invokes the separately installed tokscale tool. Review those integrations and
+the [privacy policy](PRIVACY.md) before enabling them.
 
 ## Supported deployment models
 
@@ -52,6 +55,20 @@ terminal history, screenshots, and reverse-proxy/access logs. Configure proxies
 to omit or redact query strings, never share a token-bearing URL, and treat any
 logged token as compromised.
 
+The PWA stores an incoming setup token once and immediately removes only the
+`token` parameter with `history.replaceState`. That limits later disclosure but
+cannot undo browser-extension or upstream access logs created by the initial
+request. Signing out removes the browser credential and asks the service worker
+to purge legacy credential-bearing cache entries.
+
+Temporary image uploads may contain screenshots, source, credentials, or
+personal data. They remain on the vmux host under `~/.vmux/uploads` for up to 24
+hours and their absolute paths are returned only to authenticated REST clients.
+Expiry is best-effort file deletion, not secure erasure from backups or storage
+snapshots. Uploading only edits the client draft; explicitly submitting that
+draft allows the target terminal process or agent to read the file and possibly
+send it elsewhere under that tool's own policy.
+
 ## Security invariants
 
 The implementation is designed so that:
@@ -65,6 +82,41 @@ The implementation is designed so that:
   than loaded from a third-party CDN.
 - Tokens are not returned by API responses or written back through the settings
   overlay.
+- Image upload authentication precedes body processing. Declared PNG, JPEG,
+  WebP, or GIF types must match file signatures; per-file and total storage are
+  bounded at 20 MiB and 200 MiB.
+- Upload storage uses opaque names, `0700`/`0600` directory/file modes, atomic
+  finalization, 24-hour cleanup, and removal of rejected or interrupted partial
+  files. It is outside the static web mount and browser cache.
+- The service worker caches only an explicit public shell allowlist. API,
+  WebSocket, query-bearing, and authorized requests are never cached, and pane
+  snapshots, terminal output, usage responses, and pending actions remain
+  memory-only.
+- Captured terminal output is rendered as plain text rather than injected HTML,
+  and pane attention notifications contain generic copy rather than pane names
+  or prompts. Agent decision notifications also use generic copy for every
+  device; decision titles, descriptions, prompts, and options remain on the
+  vmux server.
+- Structured agent control is fail-closed: chat requires a confirmed current
+  idle pane and matching binding revision; decision replies additionally
+  require a verified structured request, decision revision, current pane
+  incarnation, and matching prompt fingerprint.
+- Review is explicit and fail-closed: reads never acknowledge work, snapshot
+  acknowledgements are monotonic, and staged Plan choices are metadata-only,
+  refetched, and submitted one at a time through the guarded decision endpoint.
+- Scheduled Review notifications use generic copy and an opaque server id only.
+  Terminal-review API entries omit pane names, targets, prompts, paths, menus,
+  previews, and terminal capture.
+- Runtime observers are read-only and normalize an allowlist of visible events.
+  Hidden reasoning, arbitrary tool arguments/results, terminal scrollback, log
+  paths, and unverified decisions are not exposed by agent APIs.
+
+Agent Context is enabled by default and retains normalized history locally for
+30 days by default in a permission-restricted SQLite database. Anyone who can
+run as the vmux OS user may already be able to read the underlying runtime logs
+and database. Anyone holding the vmux bearer token can read normalized state and
+invoke any currently reported safe-control capability; there is no per-agent
+authorization boundary.
 
 See [the architecture reference](docs/ARCHITECTURE.md) for the complete public
 contract and safety boundaries.

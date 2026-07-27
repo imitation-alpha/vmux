@@ -41,12 +41,14 @@ def test_disable_automatic_rename_sets_global_window_option(monkeypatch):
 
 def test_list_panes_parses_smart_naming_metadata(monkeypatch):
     calls = []
+    tmux._PROCESS_START_CACHE.clear()
 
     def fake_run(args, **kw):
         calls.append(args)
         return "%1\twork:2.3\tcodex\tFix auth\tapi\t/tmp/project\t1234\t@7\n"
 
     monkeypatch.setattr(tmux, "_run", fake_run)
+    monkeypatch.setattr(tmux, "_process_starts", lambda pids: {})
 
     panes = tmux.list_panes()
 
@@ -63,3 +65,41 @@ def test_list_panes_parses_smart_naming_metadata(monkeypatch):
     assert "#{pane_current_path}" in calls[0][-1]
     assert "#{pane_pid}" in calls[0][-1]
     assert "#{window_id}" in calls[0][-1]
+
+
+def test_list_panes_uses_cached_process_start_as_incarnation(monkeypatch):
+    tmux._PROCESS_START_CACHE.clear()
+    monkeypatch.setattr(
+        tmux, "_run",
+        lambda args, **kw: "%9\twork:1.0\tcodex\tAgent\twork\t/tmp/project\t4321\t@1\n",
+    )
+    calls = []
+    monkeypatch.setattr(
+        tmux, "_process_starts",
+        lambda pids: calls.append(list(pids)) or {pid: 123456.0 for pid in pids},
+    )
+    first = tmux.list_panes()
+    second = tmux.list_panes()
+    assert first[0]["created"] == "123456.0"
+    assert second[0]["created"] == "123456.0"
+    assert calls == [["4321"]]
+
+
+def test_process_start_failure_leaves_binding_timestamp_absent(monkeypatch):
+    tmux._PROCESS_START_CACHE.clear()
+    monkeypatch.setattr(
+        tmux, "_run",
+        lambda args, **kw: "%9\twork:1.0\tcodex\tAgent\twork\t/tmp/project\t4321\t@1\n",
+    )
+    monkeypatch.setattr(tmux, "_process_starts", lambda pids: {})
+    assert "created" not in tmux.list_panes()[0]
+
+
+def test_process_start_parser(monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = "4321 Thu Jul 16 09:30:00 2026\n"
+
+    monkeypatch.setattr(tmux.subprocess, "run", lambda *args, **kwargs: Result())
+    assert isinstance(tmux._process_started("4321"), float)
+    assert tmux._process_started("not-a-pid") is None

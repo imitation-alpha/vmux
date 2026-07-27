@@ -14,10 +14,14 @@ import time
 from typing import Dict, List, Optional
 
 from . import tmux
+from .agents.models import PaneObservation, fingerprint_terminal
+from .agents.observers import runtime_from_command
+from .agents.service import AgentService
 from .config import Config
 from .detectors import classify_kind, detect, is_spinner
 from .models import (
     KIND_CLAUDE,
+    KIND_CODEX,
     STATUS_OFFLINE,
     PaneState,
 )
@@ -82,6 +86,7 @@ class Hub:
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
         self.push = PushManager(cfg)
+        self.agents = AgentService(cfg, push=self.push, kick=self.kick)
         # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
         self._wake: Optional[asyncio.Event] = None
@@ -116,6 +121,7 @@ class Hub:
         now = time.time()
         new_states: Dict[str, PaneState] = {}
         new_order: List[str] = []
+        agent_observations: List[PaneObservation] = []
 
         for pane, text in zip(panes, captures):
             pid = pane["id"]
@@ -126,9 +132,6 @@ class Hub:
             kind = (override.kind if override and override.kind
                     else classify_kind(pane["cmd"], pane["title"], text))
 
-            if not self._included(pane, kind):
-                continue
-
             digest = _hash(text)
             prev = self._meta.get(pid)
             changed = prev is None or prev["hash"] != digest
@@ -136,6 +139,38 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
+            runtime = runtime_from_command(pane["cmd"])
+            if runtime is None:
+                runtime = {
+                    KIND_CLAUDE: "claude",
+                    KIND_CODEX: "codex",
+                }.get(kind)
+            if runtime in ("codex", "claude"):
+                try:
+                    pane_created = float(pane.get("created") or 0)
+                except (TypeError, ValueError):
+                    pane_created = 0.0
+                agent_observations.append(PaneObservation(
+                    pane_id=pid,
+                    target=target,
+                    command=pane["cmd"],
+                    title=pane["title"],
+                    cwd=pane.get("path", ""),
+                    pid=str(pane.get("pid", "")),
+                    pane_created=pane_created,
+                    runtime=runtime,
+                    status=res.status,
+                    question=res.question,
+                    menu=tuple(item.to_dict() for item in res.menu_list()),
+                    prompt_fingerprint=fingerprint_terminal(text),
+                    observed_at=now,
+                ))
+
+            # Agent observation is independent of whether the terminal pane is
+            # included in the pane workspace/navigation.
+            if not self._included(pane, kind):
+                continue
+
             override_name = override.name if override else None
             smart_name = None
             if self.cfg.naming_mode == "smart" and not override_name:
@@ -182,12 +217,29 @@ class Hub:
             )
             new_order.append(pid)
 
-        alerts = self.push.collect(self.states, new_states)
+        review_policy = self.agents.review_notification_policy()
+        alerts = self.push.collect(
+            self.states,
+            new_states,
+            alert_on_needs_input=not review_policy["batching_enabled"],
+            alert_on_error=review_policy["urgent_pane_errors"],
+        )
         self.states = new_states
         self.order = new_order
+        schedule_now = time.time()
+        if self.agents.review_schedule_is_due(now=schedule_now):
+            # A due queue must include semantic events visible in this same
+            # pane capture. Serial processing also prevents an older queued
+            # batch from being applied after the due-window snapshot.
+            await self.agents.process_now(agent_observations)
+        else:
+            self.agents.submit(agent_observations)
         # drop interaction timestamps for panes that no longer exist
         self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
         self.push.fire(alerts)   # async, best-effort; never blocks the poll
+        # Use the same clock sample as the due check above. If the boundary is
+        # crossed during this tick, the next tick ingests first and then claims.
+        self._process_review_schedule(now=schedule_now)
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
@@ -195,6 +247,41 @@ class Hub:
             "type": "state",
             "panes": [self.states[pid].to_dict() for pid in self.order if pid in self.states],
         }
+
+    def review_payload(self, *, now: Optional[float] = None) -> dict:
+        """Combine durable agent review state with safe live pane references."""
+        panes = [self.states[pid] for pid in self.order if pid in self.states]
+        return self.agents.review_payload(panes, now=now)
+
+    def _process_review_schedule(self, *, now: Optional[float] = None) -> None:
+        """Claim due review windows and fan out one generic invalidation/digest."""
+        if not self.agents.enabled:
+            return
+        settings = self.agents.get_review_settings()
+        next_due_at = settings.get("next_due_at")
+        schedule_now = float(now if now is not None else time.time())
+        if (
+            not settings.get("enabled")
+            or next_due_at is None
+            or schedule_now < float(next_due_at)
+        ):
+            return
+        payload = self.review_payload(now=schedule_now)
+        if not payload["due"]["is_due"]:
+            return
+        claimed = self.agents.claim_review_due(
+            has_work=payload["due"]["has_work"],
+            now=payload["generated_at"],
+        )
+        if not claimed["claimed"] or not claimed["has_work"]:
+            return
+        self.push.fire_review_digest()
+        self.agents.publish(
+            "review_due",
+            "",
+            0,
+            resources=["review"],
+        )
 
     async def broadcast(self) -> None:
         if not self.clients:
@@ -252,6 +339,17 @@ class Hub:
         kind = st.kind if st else "generic"
         if kind == KIND_CLAUDE:
             tmux.send_chars(real, key)            # digit press selects the option
+        elif kind == KIND_CODEX:
+            option = next((item for item in (st.menu if st else []) if item.key == key), None)
+            if key == "enter":
+                tmux.send_key(real, "Enter")
+            elif option is not None and option.freeform:
+                # Stage "None of the above" without submitting so the web
+                # composer can collect notes for the selected Codex answer.
+                tmux.send_chars(real, key)
+            else:
+                tmux.send_chars(real, key)
+                tmux.send_key(real, "Enter")
         elif key == "enter":
             tmux.send_key(real, "Enter")
         else:
@@ -266,12 +364,23 @@ class Hub:
     async def run(self) -> None:
         if self._wake is None:
             self._wake = asyncio.Event()
+        try:
+            await self.agents.start()
+        except Exception as exc:
+            self.agents.disable("startup failed: %s" % type(exc).__name__)
+            print("[vmux] agent context disabled:", exc)
         while not self._stop:
             try:
                 await self.poll_once()
                 await self.broadcast()
             except Exception as exc:  # never let one bad tick kill the loop
                 print("[vmux] poll error:", exc)
+                # A transient tmux capture failure must not starve already
+                # persisted Review work. Atomic claims still prevent repeats.
+                try:
+                    self._process_review_schedule()
+                except Exception as review_exc:
+                    print("[vmux] review schedule error:", review_exc)
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=self.cfg.poll_interval)
             except asyncio.TimeoutError:
@@ -281,5 +390,6 @@ class Hub:
     def stop(self) -> None:
         self._stop = True
         self.namer.stop()
+        self.agents.stop()
         if self._wake is not None:
             self._wake.set()

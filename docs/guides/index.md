@@ -6,6 +6,9 @@ After the first local run, these guides cover vmux's optional behavior:
   stable overrides.
 - [Agent detectors](agent-detectors.md): understand status classification and
   tune safe prompt/error patterns.
+- [Agent context and Review](agent-context.md): resume supported Codex
+  and Claude Code sessions from structured progress, deltas, decisions, and
+  chat.
 - [Smart naming](smart-naming.md): choose a display-name strategy and understand
   the optional AI privacy boundary.
 - [Snippets and shortcuts](snippets-shortcuts.md): customize browser-local reply

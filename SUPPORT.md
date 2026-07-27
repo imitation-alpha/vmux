@@ -1,12 +1,16 @@
 # Support
 
-vmux support is provided publicly through GitHub Issues on a community,
-best-effort basis. It is not a commercial support channel and has no response or
-resolution SLA.
+The canonical support page for vmux Agent Console is
+<https://imitation-alpha.github.io/vmux/support/>. Email
+[support@imitationalpha.com](mailto:support@imitationalpha.com) for direct
+support. Support is provided on a best-effort basis, without a response-time or
+resolution-time SLA.
 
 ## Where to ask
 
-Use the repository's [issue chooser](https://github.com/imitation-alpha/vmux/issues/new/choose):
+For non-sensitive reports, the repository's
+[issue chooser](https://github.com/imitation-alpha/vmux/issues/new/choose) is an
+optional public channel:
 
 - **Bug report** when vmux behaves incorrectly and you can describe how to
   reproduce it.

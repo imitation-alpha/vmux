@@ -26,6 +26,8 @@ site/
 
 # Local agent-session state.
 /.hermes/
+/vmux-agents.sqlite3*
+/server-instance-id
 
 # Local Apple/Xcode/App Store credentials and generated artifacts.
 *.p8

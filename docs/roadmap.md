@@ -28,7 +28,8 @@ projects:
 - documentation and troubleshooting gaps found by first users
 - small UI accessibility, mobile, and regression-test improvements
 - better local ranking of which agent needs attention most
-- carefully scoped cross-agent workflows
+- additional structured runtime observers after stable, documented log formats
+- cross-session search and carefully scoped cross-agent dependency views
 
 Work becomes contributor-ready only after an accepted issue defines the problem,
 scope, and acceptance criteria.
@@ -39,5 +40,5 @@ vmux is local-first plumbing between tmux and user-controlled clients. The
 roadmap does not include WebRTC/PeerJS, a signaling service, hosted relays, a
 cloud control plane, accounts, telemetry, or automatic public exposure.
 
-The native iOS companion remains a separate, non-public project and is not a
-v0.1.0 release deliverable for this repository.
+The native iOS companion under `ios/` remains non-public and is not a v0.1.0
+release deliverable.
