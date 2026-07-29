@@ -24,6 +24,7 @@ from vmux.push import DeviceRegistry, PushManager
 
 def config(tmp_path):
     return Config(
+        experimental_agent_workspace_enabled=True,
         agent_store_path=str(tmp_path / "state" / "agents.sqlite3"),
         agent_codex_home=str(tmp_path / "codex"),
         agent_claude_home=str(tmp_path / "claude"),
@@ -547,6 +548,7 @@ def test_agent_observation_ignores_pane_workspace_filter(
     cfg = config(tmp_path)
     cfg.auto_discover = False
     hub = Hub(cfg)
+    hub.agents._runtime_active = True
     pane = {
         "id": "%3", "target": "work:1.3", "cmd": command, "title": "Codex",
         "window": "work", "path": str(tmp_path / "project"), "pid": "333",

@@ -18,25 +18,22 @@ after explicit consent; the server and PWA do not participate. See the
 </p>
 
 > [!IMPORTANT]
-> vmux is a pre-release beta. macOS is used daily; Linux should work but needs
+> vmux is an early 0.x release. macOS is used daily; Linux should work but needs
 > broader verification, and WSL support is not yet verified.
 
 ## Requirements
 
 - Python 3.10–3.14
 - tmux
-- [pipx](https://pipx.pypa.io/) for an isolated source install
+- [pipx](https://pipx.pypa.io/) for an isolated install
 
-The planned PyPI distribution name is `vmux-agent`, but it is **not published
-yet**. Until v0.1.0 is released, install the current source:
+Install the `vmux-agent` distribution from PyPI:
 
 ~~~bash
-pipx install git+https://github.com/imitation-alpha/vmux.git
+pipx install vmux-agent
 ~~~
 
-After publication, the command will become `pipx install vmux-agent`. The
-distribution is named `vmux-agent`; the CLI command and Python import are both
-`vmux`.
+The CLI command and Python import are both `vmux`.
 
 ## 60-second local quickstart
 
@@ -94,16 +91,20 @@ before using a non-loopback bind.
 - Parses Claude Code selections, structured Codex questionnaires, and
   conservative numbered dialogs; configurable regexes cover common prompts
   from other CLIs.
-- Builds a separate structured workspace for supported Codex and Claude Code
-  sessions: current goal/task, progress, blockers, resumable deltas, visible
-  chat, a verified decision inbox, and a historical timeline.
-- Persists normalized agent snapshots locally for 30 days by default without
+- Optionally enables one experimental structured workspace for supported Codex
+  and Claude Code sessions: current goal/task, progress, blockers, resumable
+  deltas, visible chat, Review, and a historical timeline. It is off by default
+  and enabled server-wide in **Settings → Experimental**.
+- When enabled, persists normalized agent snapshots locally for 30 days by default without
   copying hidden reasoning, raw tool results, or terminal scrollback into the
   agent database.
 - Shows captured scrollback in faithful no-wrap or wrapped terminal views, with
   full-screen presentation, follow-tail recovery, extracted links, snippets,
   customizable allow-listed shortcut keys, pane stars, and connected sessions.
 - Sends literal text, menu choices, or one broadcast message to multiple panes.
+- Creates detached tmux sessions, windows, and split panes inside explicitly
+  configured server-side roots, with server-controlled Shell, Codex, Claude,
+  Antigravity, Grok Build, and OpenCode runtime presets.
 - Uploads pasted or selected images to private 24-hour host storage and appends
   the shell-safe path to terminal or agent drafts without submitting them.
 - Includes an opt-in tokscale Stats dashboard with cost/token history, client and

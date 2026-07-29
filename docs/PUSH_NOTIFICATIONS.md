@@ -40,8 +40,7 @@ uv sync --locked --extra push
 uv run vmux --config config.yaml
 ~~~
 
-After the PyPI release, the published extra will be installable as
-`vmux-agent[push]`. Do not use that PyPI command until the release exists.
+The published extra is installable as `vmux-agent[push]`.
 
 ## APNs requirements
 

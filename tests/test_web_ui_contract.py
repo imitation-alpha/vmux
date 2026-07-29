@@ -40,6 +40,7 @@ def test_module_boundaries_keep_transport_ui_usage_and_settings_separate():
     assert 'from "./settings.js"' in app
     assert 'from "./ui.js"' in app
     assert 'from "./usage.js"' in app
+    assert 'from "./creation.js"' in app
     assert "vmuxStore.start()" in app
     assert 'from "./agent-ui.js"' in app
     for module in (
@@ -52,9 +53,39 @@ def test_module_boundaries_keep_transport_ui_usage_and_settings_separate():
         "ui.js",
         "usage.js",
         "settings.js",
+        "creation.js",
         "app.js",
     ):
         assert (WEB / "js" / module).is_file()
+
+
+def test_tmux_creation_is_capability_gated_server_controlled_and_locally_private():
+    creation = source("js/creation.js")
+    app = source("js/app.js")
+    ui = source("js/ui.js")
+    agent_ui = source("js/agent-ui.js")
+    worker = source("sw.js")
+
+    assert 'export const CREATION_CAPABILITY = "tmux_create_v1"' in creation
+    assert 'export const CREATION_RUNTIME_KEY = "vmux_creation_runtime"' in creation
+    assert '"agy", "grok"' in creation
+    assert 'agy: "Antigravity"' in creation
+    assert 'grok: "Grok Build"' in creation
+    for endpoint in ('api("/tmux/creation")', 'api(`/tmux/directories?path=', 'api("/tmux/create", body)'):
+        assert endpoint in creation
+    assert "localStorage?.setItem(CREATION_RUNTIME_KEY, value)" in creation
+    assert "body.name = nameTouched ? name.trim() : null" in creation
+    assert "body.parent_session = parentSession" in creation
+    assert "body.parent_pane_id = parentPaneID" in creation
+    assert "body.size_percent = Number(sizePercent)" in creation
+    assert 'min="10" max="90"' in creation
+    assert 'timeout: 450000' in source("js/usage.js")
+    assert "Date.now() + 10000" in app
+    assert "vmuxStore.refreshState()" in app
+    assert "createCapability.supported" in app
+    assert "New window" in ui and "Split pane" in ui
+    assert "Create tmux target" in ui and "Create tmux target" in agent_ui
+    assert '"/js/creation.js"' in worker
 
 
 def test_agent_workspace_is_capability_gated_separate_and_hash_routed():
@@ -64,6 +95,7 @@ def test_agent_workspace_is_capability_gated_separate_and_hash_routed():
     assert 'export const AGENT_CAPABILITY = "agent_context_v1"' in state
     assert 'const capabilities = isObject(info.capabilities)' in state
     assert 'url.pathname = "/ws/agents"' in state
+    assert "config?.experimental_agent_workspace_enabled !== true" in state
     assert 'from "./agent-state.js"' in ui
     assert 'from "./agent-ui.js"' not in source("js/state.js")
     for destination in ("agents", "decisions", "panes", "timeline", "stats"):
@@ -73,6 +105,23 @@ def test_agent_workspace_is_capability_gated_separate_and_hash_routed():
     assert '"/js/review-drafts.js"' in worker
     assert '"/js/agent-ui.js"' in worker
     assert 'isLiveEndpoint(url.pathname)' in worker
+
+
+def test_experimental_settings_switch_is_server_persisted_and_explains_retention():
+    settings = source("js/settings.js")
+    agent_ui = source("js/agent-ui.js")
+    state = source("js/state.js")
+
+    assert '["experimental", "shield-question", "Experimental"]' in settings
+    assert 'label="Enable Agent Workspace"' in settings
+    assert 'const key = "experimental_agent_workspace_enabled"' in settings
+    assert "patch({ [key]: value }, key, false)" in settings
+    assert "local Codex and Claude runtime logs" in settings
+    assert "without deleting existing structured history" in settings
+    assert "globalThis.history.replaceState" in agent_ui
+    assert 'new globalThis.Event("hashchange")' in agent_ui
+    assert 'message.type === "config_changed"' in state
+    assert 'request("/config"' in function_body(state, "refreshConfig", "scheduleRest")
 
 
 def test_review_contract_is_capability_gated_explicit_and_conflict_safe():

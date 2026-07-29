@@ -6,12 +6,16 @@ as a fallback, while the agent workspace is built from runtime-owned session
 logs and a small local SQLite database beside the settings overlay (by default,
 `~/.vmux/vmux-agents.sqlite3`).
 
-The feature is enabled by default. A normal local configuration needs no new
-fields:
+The complete experimental workspace is off by default. Enable it under
+**Settings → Experimental → Enable Agent Workspace** in the PWA. That
+server-persisted switch takes effect without restarting and controls Agent
+Context, Review, Timeline, structured decisions/chat, runtime-log observation,
+review scheduling, agent WebSockets, and agent database writes as one bundle.
+
+YAML only configures retention and observer locations after the switch is on:
 
 ~~~yaml
 agents:
-  enabled: true
   retention_days: 30
 ~~~
 
@@ -24,7 +28,8 @@ agents:
   claude_home: ~/.claude
 ~~~
 
-These fields are YAML-only. Restart vmux after changing them.
+These fields are YAML-only. Restart vmux after changing them. A legacy
+`agents.enabled` value no longer activates the workspace.
 
 ## What vmux stores
 
@@ -55,8 +60,9 @@ DELETE /api/agents/{id}/history
 to remove its retained timeline, messages, decisions, and visit baseline. The
 Review baseline is removed at the same time. The current session
 identity/context remains, and continued observation can create
-new history. Disabling the subsystem stops observation but does not silently
-delete the existing local database.
+new history. Turning the workspace off stops observation and makes all
+structured APIs unavailable, but does not silently delete the existing local
+database. Re-enabling restores access without migration.
 
 ## Resume and “what changed”
 

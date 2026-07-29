@@ -1,5 +1,6 @@
 """Compatibility metadata is additive, stable, and read-only over HTTP."""
 
+import asyncio
 from importlib.metadata import version
 
 import pytest
@@ -47,11 +48,11 @@ def test_patch_config_cannot_override_read_only_compatibility(app):
         "minimum_ios_version": "999.0.0",
     }
 
-    body = endpoint(app, "/api/config", "PATCH")({
+    body = asyncio.run(endpoint(app, "/api/config", "PATCH")({
         "poll_interval": 1.25,
         "compatibility": forged,
         "_info": {"version": "forged", "compatibility": forged},
-    })
+    }))
 
     assert body["poll_interval"] == 1.25
     assert body["_info"]["version"] == version("vmux-agent")

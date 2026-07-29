@@ -22,6 +22,98 @@ def wait_for_connection(page, label: str = "Live") -> None:
     ).wait_for(state="visible", timeout=15_000)
 
 
+def test_tmux_creation_supports_all_target_types_and_opens_the_new_pane(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    page = page_factory(browser_runtime, viewport=(390, 844), touch=True)
+
+    def reopen() -> None:
+        fixture_server.reset()
+        fixture_server.scenario("creation")
+        open_app(page, fixture_server)
+        wait_for_connection(page)
+        page.get_by_role("button", name="Create tmux target").click()
+        page.get_by_role("dialog", name=re.compile("Create tmux target")).wait_for()
+
+    def created_body() -> dict:
+        rows = [
+            row for row in fixture_server.action_requests()
+            if row["endpoint"] == "/api/tmux/create"
+        ]
+        assert len(rows) == 1
+        page.get_by_role("dialog", name="vmux", exact=True).get_by_role(
+            "heading", name="vmux", exact=True, level=1,
+        ).wait_for(timeout=15_000)
+        return rows[0]["body"]
+
+    reopen()
+    dialog = page.get_by_role("dialog", name=re.compile("Create tmux target"))
+    assert dialog.get_by_role("button", name="Claude").is_disabled()
+    assert dialog.get_by_text("not installed", exact=True).count() >= 1
+    dialog.get_by_role("button", name="Create session").click()
+    assert created_body() == {
+        "type": "session",
+        "cwd": "/fixture/products/vmux",
+        "runtime": "shell",
+        "name": None,
+    }
+
+    reopen()
+    dialog = page.get_by_role("dialog", name=re.compile("Create tmux target"))
+    dialog.get_by_role("group", name="Creation type").get_by_role("button", name="Window").click()
+    dialog.locator(".creation-shortcuts").get_by_role("button", name="Products").click()
+    dialog.get_by_label("Creation directory").fill("/fixture/products/website")
+    dialog.get_by_role("button", name="Browse").click()
+    dialog.get_by_role("button", name="Create window").click()
+    assert created_body() == {
+        "type": "window",
+        "cwd": "/fixture/products/website",
+        "runtime": "shell",
+        "name": None,
+        "parent_session": "launch",
+    }
+
+    reopen()
+    dialog = page.get_by_role("dialog", name=re.compile("Create tmux target"))
+    dialog.get_by_role("group", name="Creation type").get_by_role("button", name="Pane").click()
+    dialog.get_by_role("group", name="Split direction").get_by_role("button", name="Stacked").click()
+    slider = dialog.get_by_role("slider", name="New pane size")
+    slider.fill("65")
+    dialog.get_by_role("button", name="Create pane").click()
+    assert created_body() == {
+        "type": "pane",
+        "cwd": "/fixture/products/vmux",
+        "runtime": "shell",
+        "parent_pane_id": "%1",
+        "split": "stacked",
+        "size_percent": 65,
+    }
+
+    reopen()
+    dialog = page.get_by_role("dialog", name=re.compile("Create tmux target"))
+    dialog.get_by_role("button", name=re.compile(r"^Antigravity")).click()
+    dialog.get_by_role("button", name="Create session").click()
+    assert created_body() == {
+        "type": "session",
+        "cwd": "/fixture/products/vmux",
+        "runtime": "agy",
+        "name": None,
+    }
+
+    reopen()
+    dialog = page.get_by_role("dialog", name=re.compile("Create tmux target"))
+    dialog.get_by_role("button", name=re.compile(r"^Grok Build")).click()
+    dialog.get_by_role("button", name="Create session").click()
+    assert created_body() == {
+        "type": "session",
+        "cwd": "/fixture/products/vmux",
+        "runtime": "grok",
+        "name": None,
+    }
+
+
 def test_width_breakpoints_ignore_pointer_type_and_reflow_at_320(
     browser_runtime: BrowserRuntime,
     fixture_server: FixtureServer,
@@ -695,6 +787,7 @@ def test_review_store_preserves_uncertain_draft_and_clears_server_scope(
             throw new Error(`unexpected request: ${method || "GET"} ${path}`);
           };
           const reviewConfig = {
+            experimental_agent_workspace_enabled: true,
             _info: {
               server_instance_id: "review-scope-a",
               capabilities: {
@@ -713,6 +806,7 @@ def test_review_store_preserves_uncertain_draft_and_clears_server_scope(
             replyPosts,
           };
           await store.configure({
+            experimental_agent_workspace_enabled: true,
             _info: {
               server_instance_id: "review-scope-b",
               capabilities: { agent_context_v1: { enabled: true } },
@@ -851,6 +945,29 @@ def test_stats_settings_and_partial_broadcast_use_real_fixture_endpoints(
 
     page.get_by_role("button", name="Settings").click()
     settings = page.get_by_role("dialog", name=re.compile("Settings"))
+    settings.get_by_role("button", name="Experimental", exact=True).click()
+    workspace_switch = settings.get_by_role(
+        "checkbox", name="Enable Agent Workspace", exact=True
+    )
+    assert not workspace_switch.is_checked()
+    workspace_switch.click()
+    page.get_by_role("navigation", name="Workspace").get_by_role(
+        "button", name="Agents", exact=True
+    ).wait_for()
+    page.wait_for_function("node => node.checked", arg=workspace_switch.element_handle())
+    assert workspace_switch.is_checked()
+    workspace_switch.click()
+    page.locator(".medium-shell").wait_for()
+    page.wait_for_function("node => !node.checked", arg=workspace_switch.element_handle())
+    assert not workspace_switch.is_checked()
+    workspace_patches = [
+        request["body"]["experimental_agent_workspace_enabled"]
+        for request in fixture_server.action_requests()
+        if request["endpoint"] == "/api/config"
+        and "experimental_agent_workspace_enabled" in request["body"]
+    ]
+    assert workspace_patches == [True, False]
+
     settings.get_by_role("button", name="Usage", exact=True).click()
     for label in ["Enable usage tracking", "Quota refresh", "Report refresh", "Warning threshold"]:
         assert settings.get_by_text(label, exact=True).count() >= 1

@@ -17,7 +17,7 @@ from . import tmux
 from .agents.models import PaneObservation, fingerprint_terminal
 from .agents.observers import runtime_from_command
 from .agents.service import AgentService
-from .config import Config
+from .config import Config, save_overlay
 from .detectors import classify_kind, detect, is_spinner
 from .models import (
     KIND_CLAUDE,
@@ -85,20 +85,29 @@ class Hub:
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
+        # Shells created through vmux stay visible even when general shell
+        # discovery is disabled, so clients can open the successful result.
+        self.created_panes = set()
         self.push = PushManager(cfg)
         self.agents = AgentService(cfg, push=self.push, kick=self.kick)
         # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
         self._wake: Optional[asyncio.Event] = None
         self._stop = False
+        self._agent_startup_complete = False
         self.namer = SmartNamer(cfg, on_update=self.kick)
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
         self.interactions[pane_id] = time.time()
 
+    def mark_created(self, pane_id: str) -> None:
+        self.created_panes.add(pane_id)
+
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
+        if pane.get("id") in self.created_panes:
+            return True
         target = pane["target"]
         if target in self.cfg.overrides:
             return True
@@ -111,6 +120,7 @@ class Hub:
     # -- one polling pass --------------------------------------------------- #
     async def poll_once(self) -> None:
         panes = await asyncio.to_thread(tmux.list_panes)
+        self.created_panes.intersection_update(pane["id"] for pane in panes)
         present_targets = {p["target"] for p in panes}
 
         # capture all panes concurrently (with configured scrollback depth)
@@ -139,13 +149,18 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
-            runtime = runtime_from_command(pane["cmd"])
-            if runtime is None:
-                runtime = {
-                    KIND_CLAUDE: "claude",
-                    KIND_CODEX: "codex",
-                }.get(kind)
-            if runtime in ("codex", "claude"):
+            # Runtime-log observation is part of the opt-in experimental
+            # workspace. Do not even construct observations while it is off.
+            if self.agents.runtime_active:
+                runtime = runtime_from_command(pane["cmd"])
+                if runtime is None:
+                    runtime = {
+                        KIND_CLAUDE: "claude",
+                        KIND_CODEX: "codex",
+                    }.get(kind)
+            else:
+                runtime = None
+            if self.agents.runtime_active and runtime in ("codex", "claude"):
                 try:
                     pane_created = float(pane.get("created") or 0)
                 except (TypeError, ValueError):
@@ -227,19 +242,22 @@ class Hub:
         self.states = new_states
         self.order = new_order
         schedule_now = time.time()
-        if self.agents.review_schedule_is_due(now=schedule_now):
-            # A due queue must include semantic events visible in this same
-            # pane capture. Serial processing also prevents an older queued
-            # batch from being applied after the due-window snapshot.
-            await self.agents.process_now(agent_observations)
-        else:
-            self.agents.submit(agent_observations)
+        if self.agents.runtime_active:
+            if self.agents.review_schedule_is_due(now=schedule_now):
+                # A due queue must include semantic events visible in this same
+                # pane capture. Serial processing also prevents an older queued
+                # batch from being applied after the due-window snapshot.
+                await self.agents.process_now(agent_observations)
+            else:
+                self.agents.submit(agent_observations)
         # drop interaction timestamps for panes that no longer exist
         self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
+        self.created_panes.intersection_update(new_states)
         self.push.fire(alerts)   # async, best-effort; never blocks the poll
         # Use the same clock sample as the due check above. If the boundary is
         # crossed during this tick, the next tick ingests first and then claims.
-        self._process_review_schedule(now=schedule_now)
+        if self.agents.runtime_active:
+            self._process_review_schedule(now=schedule_now)
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
@@ -255,7 +273,7 @@ class Hub:
 
     def _process_review_schedule(self, *, now: Optional[float] = None) -> None:
         """Claim due review windows and fan out one generic invalidation/digest."""
-        if not self.agents.enabled:
+        if not self.agents.runtime_active:
             return
         settings = self.agents.get_review_settings()
         next_due_at = settings.get("next_due_at")
@@ -295,6 +313,30 @@ class Hub:
                 dead.append(sid)
         for sid in dead:
             self.clients.pop(sid, None)
+
+    async def broadcast_config_changed(self) -> None:
+        """Tell every connected PWA to refetch server-managed settings."""
+        dead = []
+        for sid, client in list(self.clients.items()):
+            try:
+                await client["ws"].send_json({"type": "config_changed"})
+            except Exception:
+                dead.append(sid)
+        for sid in dead:
+            self.clients.pop(sid, None)
+
+    async def transition_agent_workspace(self, enabled: bool) -> None:
+        """Start or stop the experimental runtime within this server process."""
+        if enabled:
+            await self.agents.start()
+            if not self.agents.runtime_active:
+                raise RuntimeError(
+                    self.agents.info().get("degraded_reason")
+                    or "agent workspace did not become available"
+                )
+        else:
+            await self.agents.stop_runtime()
+        self.kick()
 
     # -- client/session tracking ------------------------------------------ #
     def add_client(self, sid, ws, ip, ua, ts):
@@ -361,14 +403,26 @@ class Hub:
             self._wake.set()
 
     # -- main loop ---------------------------------------------------------- #
-    async def run(self) -> None:
-        if self._wake is None:
-            self._wake = asyncio.Event()
+    async def start_agent_runtime(self) -> None:
+        """Finish the initial agent transition before clients receive config."""
+        if self._agent_startup_complete:
+            return
         try:
             await self.agents.start()
         except Exception as exc:
+            self.cfg.experimental_agent_workspace_enabled = False
             self.agents.disable("startup failed: %s" % type(exc).__name__)
+            try:
+                await asyncio.to_thread(save_overlay, self.cfg)
+            except OSError as persist_exc:
+                print("[vmux] could not persist agent workspace startup rollback:", persist_exc)
             print("[vmux] agent context disabled:", exc)
+        self._agent_startup_complete = True
+
+    async def run(self) -> None:
+        if self._wake is None:
+            self._wake = asyncio.Event()
+        await self.start_agent_runtime()
         while not self._stop:
             try:
                 await self.poll_once()

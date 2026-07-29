@@ -13,6 +13,8 @@ import pytest
 
 from vmux.config import Config
 from vmux.usage import (
+    ANTIGRAVITY_SYNC_TIMEOUT,
+    MAX_STDOUT,
     UsageCollector,
     build_daily_summary,
     collect_quota_alerts,
@@ -149,6 +151,19 @@ def test_graph_fixture_contract_and_aggregation():
         assert b["by_client"] == sorted(b["by_client"], key=lambda r: -r["cost"])
         assert b["clients"] == sorted(b["clients"])
     assert buckets[0]["bucket"] == "2026-06-09"
+
+
+def test_tokscale_v4_antigravity_graph_normalizes_with_v3_contract():
+    buckets = normalize_graph(fixture("graph_v4_antigravity.json"))
+    assert len(buckets) == 1
+    bucket = buckets[0]
+    assert set(bucket) == BUCKET_KEYS
+    assert set(bucket["totals"]) == TOTAL_KEYS
+    assert bucket["clients"] == ["antigravity"]
+    assert bucket["models"] == ["gemini-synthetic"]
+    assert bucket["by_client"] == [{
+        "client": "antigravity", "cost": 0.25, "total": 150, "messages": 2,
+    }]
 
 
 def test_graph_garbage():
@@ -328,6 +343,72 @@ def test_collector_success_then_failure_keeps_last_good():
     p2 = c.usage_payload()
     assert p2["available"] is True and p2["stale"] is True
     assert [q["provider"] for q in p2["quotas"]] == ["Claude", "Codex", "Copilot"]
+
+
+@pytest.mark.parametrize("sync_error", [
+    None,
+    RuntimeError("language server unavailable"),
+    TimeoutError("tokscale antigravity timed out after 30s"),
+    FileNotFoundError("tokscale not found"),
+], ids=["success", "language-server-unavailable", "timeout", "not-installed"])
+def test_report_refresh_syncs_antigravity_first_and_failure_is_nonfatal(sync_error):
+    c = _collector()
+    calls = []
+
+    async def fake_exec(args, timeout, *, parse_json=True):
+        calls.append((args, timeout, parse_json))
+        if args == ["antigravity", "sync"]:
+            if sync_error is not None:
+                raise sync_error
+            return None
+        if args[0] == "graph":
+            return fixture("graph_v4_antigravity.json")
+        return {"entries": []}
+
+    c._exec = fake_exec
+    asyncio.run(c.refresh_reports(include_monthly=True))
+
+    assert calls[0] == (["antigravity", "sync"], ANTIGRAVITY_SYNC_TIMEOUT, False)
+    assert [call[0][0] for call in calls[1:]] == ["hourly", "graph", "monthly"]
+    assert c.history_payload("daily")["buckets"][0]["clients"] == ["antigravity"]
+
+
+def test_antigravity_sync_uses_exact_argv_and_bounded_output(monkeypatch):
+    c = _collector(usage_command="tokscale --home /fixture/home")
+    seen = []
+
+    class Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"sync complete", b""
+
+    async def spawn(*argv, **kwargs):
+        seen.append((argv, kwargs))
+        return Proc()
+
+    monkeypatch.setattr("vmux.usage.shutil.which", lambda command: "/opt/bin/tokscale")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    asyncio.run(c._sync_antigravity())
+
+    assert seen[0][0] == (
+        "/opt/bin/tokscale", "--home", "/fixture/home", "antigravity", "sync",
+    )
+    assert seen[0][1]["stdout"] == asyncio.subprocess.PIPE
+    assert seen[0][1]["stderr"] == asyncio.subprocess.PIPE
+
+    class OversizedProc(Proc):
+        async def communicate(self):
+            return b"", b"x" * (MAX_STDOUT + 1)
+
+    async def oversized_spawn(*argv, **kwargs):
+        return OversizedProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", oversized_spawn)
+    with pytest.raises(RuntimeError, match="output too large"):
+        asyncio.run(c._exec(
+            ["antigravity", "sync"], ANTIGRAVITY_SYNC_TIMEOUT, parse_json=False,
+        ))
 
 
 def test_collector_error_before_any_data():

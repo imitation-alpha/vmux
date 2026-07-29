@@ -4,7 +4,7 @@
 const CACHE_PREFIX = "vmux-";
 // Bump this whenever a shell asset changes so a waiting worker never mutates
 // the cache still owned by the active worker.
-const CACHE_NAME = "vmux-shell-v29";
+const CACHE_NAME = "vmux-shell-v31";
 const SHELL_KEY = "/index.html";
 const NETWORK_TIMEOUT_MS = 3000;
 
@@ -29,6 +29,7 @@ const SHELL_ASSETS = Object.freeze([
   "/js/image-upload.js",
   "/js/agent-state.js",
   "/js/review-drafts.js",
+  "/js/creation.js",
   "/js/agent-ui.js",
   "/js/ui.js",
   "/js/usage.js",

@@ -75,6 +75,9 @@ function timelineTitle(source) {
 }
 
 export function agentContextCapability(config) {
+  if (config?.experimental_agent_workspace_enabled !== true) {
+    return { enabled: false, mode: "disabled" };
+  }
   const info = isObject(config?._info) ? config._info : {};
   const capabilities = isObject(info.capabilities) ? info.capabilities : {};
   const raw = capabilities[AGENT_CAPABILITY] ?? capabilities.agent_context;
@@ -85,6 +88,9 @@ export function agentContextCapability(config) {
 }
 
 export function agentReviewCapability(config) {
+  if (config?.experimental_agent_workspace_enabled !== true) {
+    return { enabled: false, mode: "disabled" };
+  }
   const info = isObject(config?._info) ? config._info : {};
   const capabilities = isObject(info.capabilities) ? info.capabilities : {};
   const raw = capabilities[REVIEW_CAPABILITY];

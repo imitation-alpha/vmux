@@ -1,11 +1,10 @@
 # Roadmap and changelog
 
-vmux is preparing v0.1.0. There is no published PyPI package, v0.1.0 tag, or
-GitHub Release yet.
+vmux v0.1.0 is the first public backend and PWA release.
 
-## v0.1.0 launch gate
+## v0.1.0 launch
 
-The first release is gated on:
+The first release established:
 
 - truthful source/PyPI and platform messaging
 - reproducible Python 3.10–3.14 development and package checks
@@ -15,8 +14,9 @@ The first release is gated on:
 - package-content and clean-install smoke tests
 - a verified PyPI Trusted Publishing path
 
-The [Unreleased changelog](https://github.com/imitation-alpha/vmux/blob/main/CHANGELOG.md#unreleased)
-remains the source of truth until the release commit assigns a date.
+See the [v0.1.0 changelog](https://github.com/imitation-alpha/vmux/blob/main/CHANGELOG.md#010---2026-07-29)
+for the shipped feature and security surface. New work is tracked under
+[Unreleased](https://github.com/imitation-alpha/vmux/blob/main/CHANGELOG.md#unreleased).
 
 ## Candidate follow-up work
 

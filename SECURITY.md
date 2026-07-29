@@ -75,7 +75,8 @@ The implementation is designed so that:
 
 - Authentication comparisons are constant-time on REST and WebSocket paths.
 - A non-loopback bind with an empty token fails at startup.
-- tmux subprocesses use argument lists rather than a shell, pane identifiers are
+- tmux and tokscale subprocesses, including Antigravity synchronization, use
+  argument lists rather than a shell, pane identifiers are
   validated, named keys are allow-listed, and literal text is sent literally.
 - User-configured regular expressions have execution timeouts.
 - Browser runtime assets are vendored and served from the same origin rather
@@ -111,8 +112,11 @@ The implementation is designed so that:
   Hidden reasoning, arbitrary tool arguments/results, terminal scrollback, log
   paths, and unverified decisions are not exposed by agent APIs.
 
-Agent Context is enabled by default and retains normalized history locally for
-30 days by default in a permission-restricted SQLite database. Anyone who can
+The experimental Agent Workspace is disabled by default. When enabled from the
+PWA it retains normalized history locally for 30 days by default in a
+permission-restricted SQLite database. Turning it off stops observation,
+structured access, review scheduling, agent sockets, and database writes but
+does not delete retained history. Anyone who can
 run as the vmux OS user may already be able to read the underlying runtime logs
 and database. Anyone holding the vmux bearer token can read normalized state and
 invoke any currently reported safe-control capability; there is no per-agent

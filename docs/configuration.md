@@ -59,6 +59,7 @@ Settings are grouped into:
 - **Appearance & Alerts**
 - **Input Shortcuts & Snippets**
 - **Server & Discovery**
+- **Experimental**
 - **Agent Overrides & Detectors**
 - **Usage**
 - **Sessions**
@@ -90,7 +91,6 @@ recognized existing choices and maps legacy `needs`/`working` destinations to
 | `tmux.disable_auto_rename` | `true` | No | Disables tmux's global `automatic-rename` option at startup. |
 | `discovery.auto` | `true` | Yes | Include panes found from the live tmux server. |
 | `discovery.include_shells` | `false` | Yes | Include ordinary idle shell panes. |
-| `agents.enabled` | `true` | No | Observe supported runtime logs and expose the structured agent workspace. |
 | `agents.retention_days` | `30` | No | Retain historical agent snapshots, visible messages, and resolved decisions. |
 
 Disabling automatic rename is a tmux-wide change. Set
@@ -116,7 +116,8 @@ server:
   token: "replace-with-a-long-random-token"
 ~~~
 
-YAML values do not perform shell or environment-variable expansion. Restrict
+YAML values generally do not perform shell or environment-variable expansion;
+the creation roots documented below are the exception and expand `~`. Restrict
 the file's permissions, keep it outside version control, and follow
 [Remote access](remote-access.md) before changing the bind.
 
@@ -140,6 +141,47 @@ Allowed kinds are `claude-code`, `codex`, `grok`, `opencode`, `antigravity`,
 `generic`, and `shell`. A configured target stays visible as `offline` when its pane
 disappears. Manual names and stars can also be edited live. See
 [Pane discovery](guides/pane-discovery.md).
+
+## Tmux creation
+
+Creation is opt-in and YAML-only. It remains unavailable unless `enabled` is
+true and at least one root exists, is a directory, and is readable/searchable
+by the vmux process:
+
+~~~yaml
+creation:
+  enabled: true
+  roots:
+    - label: Products
+      path: ~/dev/repos/products
+  runtimes:
+    codex: [codex]
+    claude: [claude]
+    agy: [agy]
+    grok: [grok]
+    opencode: [opencode]
+~~~
+
+Root paths expand `~` and are resolved canonically at startup. Invalid roots
+are excluded; if none remain, creation is disabled with a setup reason. Every
+typed, recent, or browsed working directory is canonicalized again for each
+request and must stay inside a configured root. A symlink that escapes a root
+is therefore neither browsable nor usable for creation.
+
+`shell` is implicit and launches tmux's default shell. The `agy` wire/config ID
+is retained and displayed as **Antigravity**; `grok` is displayed as **Grok
+Build**. The other keys are the
+only runtime IDs clients may submit. Each value is a server-owned argument
+array: the first item is the executable and later items are fixed arguments.
+Clients cannot submit a command, arbitrary arguments, environment variables,
+or a runtime ID outside this allowlist. Presets whose executable is missing are
+advertised as unavailable rather than attempted.
+
+The same bearer token that authorizes pane input authorizes filesystem browsing
+within these roots and process creation as the vmux OS user. Keep roots narrow,
+do not point them at a home directory or filesystem root, and protect the token.
+Creation settings are intentionally absent from `PATCH /api/config` and require
+a server restart after YAML changes.
 
 ## Detector patterns
 
@@ -181,13 +223,18 @@ collector is installed. The Stats destination represents disabled,
 not-installed, timeout, error, stale, empty, loading, and refresh states without
 disabling pane monitoring.
 
-## Agent Context
+## Experimental Agent Workspace
 
-All `agents` fields are YAML-only and take effect after restart:
+Agent Context, Review, Timeline, structured decisions/chat, observation, and
+their local database writes are one server-wide experimental bundle. It is off
+by default and is enabled only with **Settings → Experimental → Enable Agent
+Workspace**. The switch is persisted in `vmux-settings.json` and starts or stops
+the runtime without restarting vmux. An `agents.enabled` YAML value is ignored.
+
+The remaining `agents` fields are YAML-only and take effect after restart:
 
 ~~~yaml
 agents:
-  enabled: true
   retention_days: 30
   codex_home: ~/.codex
   claude_home: ~/.claude
@@ -196,8 +243,9 @@ agents:
 Home paths are expanded but should point only at runtime data owned by the same
 user as vmux. `retention_days` accepts 1–3650 days and applies to historical
 snapshots, visible messages, and resolved decisions; current context and pending
-decisions are retained while active. Disabling observation does not delete the
-existing database. See [Agent context and decision inbox](guides/agent-context.md)
+decisions are retained while active. Turning the workspace off does not delete
+the existing database; re-enabling restores access to retained history. See
+[Agent context and decision inbox](guides/agent-context.md)
 for retention, deletion, parser compatibility, and safe-control behavior.
 
 ## Push
@@ -255,7 +303,8 @@ object. `PATCH /api/config` accepts a partial object containing:
 - `usage_quota_refresh`
 - `usage_report_refresh`
 - `usage_alert_threshold`
+- `experimental_agent_workspace_enabled`
 
 The bearer token, bind, tmux auto-rename choice, push credentials,
-`usage.command`, Agent Context settings, and AI backend settings cannot be
+`usage.command`, Agent Context retention/runtime paths, and AI backend settings cannot be
 changed through this API.

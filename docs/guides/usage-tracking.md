@@ -30,13 +30,17 @@ argument list and never invokes a shell.
 ## What vmux runs
 
 - `tokscale usage --json` for quotas
+- `tokscale antigravity sync` before each report refresh
 - hourly, graph/daily, and monthly JSON reports for usage history
 
-Quota calls have a 30-second timeout. Report scans can be CPU-heavy, run
+Quota calls and the Antigravity sync have independent 30-second timeouts. A
+sync failure, timeout, or unavailable Antigravity language server is non-fatal:
+report scans continue with Tokscale's cached Antigravity data and every other
+provider. Report scans can be CPU-heavy, run
 sequentially, and have a 120-second timeout. The default report refresh is five
 minutes.
 
-vmux's parsers target tokscale 3.x. Another major version logs a compatibility
+vmux's parsers target tokscale 3.x and 4.x. Another major version logs a compatibility
 warning and may produce incomplete views.
 
 ## API behavior

@@ -1297,6 +1297,21 @@ export function createVmuxStore({
     return task;
   }
 
+  async function refreshConfig() {
+    try {
+      const config = await request("/config", { timeoutMs: 10000, suppressAuthHandling: true });
+      if (!running || !isObject(config)) return false;
+      configLoaded = true;
+      publish({ config });
+      setCompatibility(evaluateCompatibility(config));
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.category === "unauthorized") becomeUnauthorized(error);
+      else noteFailure(error, { endpoint: "/api/config" });
+      return false;
+    }
+  }
+
   function scheduleRest(delay = REST_INTERVAL_MS) {
     if (!running || authBlocked || sessionEnded) return;
     clearTimer("rest");
@@ -1384,6 +1399,10 @@ export function createVmuxStore({
       if (message.type === "hello") {
         const sid = textValue(message.sid);
         if (sid) publish({ sid });
+        return;
+      }
+      if (message.type === "config_changed") {
+        void refreshConfig();
         return;
       }
       if (message.type !== "state") return;
@@ -1527,6 +1546,14 @@ export function createVmuxStore({
     return snapshot;
   }
 
+  async function refreshState() {
+    const state = await request("/state", { timeoutMs: 10000 });
+    const panes = adoptState(state);
+    stateBootstrapped = true;
+    recordStateSuccess("rest");
+    return panes;
+  }
+
   function recordAction(state, { announce = true } = {}) {
     const key = actionRecordKey(state.paneId, state.actionKey);
     const previous = snapshot.latestActionByPane[state.paneId];
@@ -1567,6 +1594,8 @@ export function createVmuxStore({
     start,
     stop,
     retry,
+    refreshState,
+    refreshConfig,
     request,
     getPane: (paneId) => snapshot.paneMap.get(paneId) || null,
     technicalDetails: (endpoint) => technicalDetails(snapshot.connection, snapshot.config, { endpoint }),

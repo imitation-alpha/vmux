@@ -15,12 +15,11 @@ broader verification; WSL is not yet verified.
 
 ## Install
 
-The distribution will be named `vmux-agent`, while the command and Python import
-remain `vmux`. The PyPI project is not published yet. Until the v0.1.0 release,
-install directly from the repository:
+The distribution is named `vmux-agent`, while the command and Python import
+remain `vmux`. Install it from PyPI:
 
 ~~~bash
-pipx install git+https://github.com/imitation-alpha/vmux.git
+pipx install vmux-agent
 ~~~
 
 To work from a checkout instead:
@@ -31,9 +30,6 @@ cd vmux
 uv sync --locked --group dev --group docs
 uv run vmux
 ~~~
-
-After v0.1.0 is published and independently smoke-tested, the normal install
-command will be `pipx install vmux-agent`.
 
 ## First run
 

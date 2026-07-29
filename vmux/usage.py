@@ -25,6 +25,7 @@ from .config import Config
 # tokscale's report scan is CPU-heavy (parallel Rust over every session log),
 # so report commands get a generous cap; `usage` just hits provider APIs.
 QUOTA_TIMEOUT = 30.0
+ANTIGRAVITY_SYNC_TIMEOUT = 30.0
 REPORT_TIMEOUT = 120.0
 MAX_STDOUT = 16 * 1024 * 1024
 
@@ -352,7 +353,7 @@ class UsageCollector:
         return shutil.which(argv[0]) if argv else None
 
     # -- subprocess (arg list, never shell — same invariant as tmux.py) ------ #
-    async def _exec(self, extra_args: List[str], timeout: float):
+    async def _exec(self, extra_args: List[str], timeout: float, *, parse_json: bool = True):
         argv = self.argv()
         exe = shutil.which(argv[0]) if argv else None
         if exe is None:
@@ -369,12 +370,12 @@ class UsageCollector:
             proc.kill()
             raise TimeoutError("tokscale %s timed out after %.0fs"
                                % (extra_args[0] if extra_args else "", timeout))
+        if len(out) > MAX_STDOUT or len(err) > MAX_STDOUT:
+            raise RuntimeError("tokscale output too large (%d bytes)" % max(len(out), len(err)))
         if proc.returncode != 0:
             msg = (err or b"").decode("utf-8", "replace").strip()
             raise RuntimeError("tokscale exited %d: %s" % (proc.returncode, msg[:300]))
-        if len(out) > MAX_STDOUT:
-            raise RuntimeError("tokscale output too large (%d bytes)" % len(out))
-        return json.loads(out)
+        return json.loads(out) if parse_json else None
 
     # -- refreshes ------------------------------------------------------------ #
     async def _refresh_slot(self, name: str, args: List[str], timeout: float,
@@ -400,9 +401,9 @@ class UsageCollector:
             return
         try:
             ver = str((raw.get("meta") or {}).get("version", ""))
-            if ver and ver.split(".")[0] != "3":
+            if ver and ver.split(".")[0] not in ("3", "4"):
                 print("[vmux] usage: tokscale %s detected; parsers were written "
-                      "against 3.x — output may degrade" % ver)
+                      "against 3.x/4.x — output may degrade" % ver)
                 self._warned_version = True
         except Exception:
             pass
@@ -414,8 +415,26 @@ class UsageCollector:
                                     QUOTA_TIMEOUT, normalize_quota):
             self._fire_alerts(prev, self.slots["quota"]["data"] or [])
 
+    async def _sync_antigravity(self) -> None:
+        """Best-effort import from a running Antigravity language server.
+
+        Tokscale keeps the last successful import in its own cache. A missing
+        language server, timeout, or command failure must not prevent the
+        independent report scanners from serving that cache and every other
+        provider.
+        """
+        try:
+            await self._exec(
+                ["antigravity", "sync"],
+                ANTIGRAVITY_SYNC_TIMEOUT,
+                parse_json=False,
+            )
+        except Exception:
+            pass
+
     async def refresh_reports(self, *, include_monthly: bool) -> None:
         # Sequential on purpose: each scan is an ~18s CPU burst; never stack them.
+        await self._sync_antigravity()
         await self._refresh_slot("hourly", ["hourly", "--json", "--today", "--no-spinner"],
                                  REPORT_TIMEOUT, normalize_hourly)
         today = date.today()

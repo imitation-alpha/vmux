@@ -84,7 +84,7 @@ export function UsageProvider({ threshold = 20, children }) {
     try {
       // A full refresh may hit one 30-second quota timeout plus three
       // sequential 120-second report timeouts on the server.
-      const next = await api("/usage/refresh", { scope: "all" }, "POST", { timeout: 405000 });
+      const next = await api("/usage/refresh", { scope: "all" }, "POST", { timeout: 450000 });
       setSnapshot(next);
       setStatus(classify(next));
       setHistories({});

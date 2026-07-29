@@ -50,13 +50,21 @@ Loopback without a token is not a complete boundary on a shared OS host.
 The backend captures pane scrollback and serves it to authenticated clients.
 That data can include source, prompts, terminal output, URLs, and secrets.
 
+When tmux creation is enabled, authenticated clients can also browse directory
+names and canonical paths inside the configured creation roots and start a
+detached server-selected runtime there. The server rejects traversal and
+canonical symlink escapes, but every authorized in-root name is intentionally
+exposed. Treat the token as authority to create processes as the vmux OS user;
+configure narrow project roots rather than a home directory or filesystem root.
+
 The Agent Context subsystem also reads local Codex and Claude Code session logs
 with the permissions of the vmux process. Those logs can contain sensitive
 messages and runtime internals. The adapters discard hidden reasoning, raw tool
 arguments/results, commands, arbitrary events, and terminal captures, then
 store normalized visible messages, explicit plans/tasks, verified decisions,
 and semantic snapshots in a local SQLite database. Historical records are kept
-for 30 days by default. Disable observation with `agents.enabled: false` and use
+for 30 days by default. The subsystem is off until enabled in **Settings →
+Experimental**; turn that switch off to stop observation and use
 the authenticated history-deletion endpoint to erase one session's retained
 timeline. Disabling does not itself delete the database.
 
@@ -84,14 +92,16 @@ data flow:
   carry only opaque routing ids and a revision; decision titles, descriptions,
   prompts, and options stay on the vmux server.
 - Usage tracking runs the configured tokscale executable and exposes its
-  normalized results to authenticated clients.
+  normalized results to authenticated clients. Report refreshes first invoke
+  its fixed `antigravity sync` subcommand; this uses the same argument-list,
+  bounded-output subprocess boundary and cannot be changed by a client.
 - Beginning with native iOS version 1.0.1, the separate app can send anonymous
   product analytics to PostHog only after explicit consent. Demo Mode, the PWA,
   and the self-hosted server never send those events. See the
   [privacy policy](https://github.com/imitation-alpha/vmux/blob/main/PRIVACY.md).
 
-Smart naming, APNs, and usage tracking are off, unavailable, or unconfigured by
-default. Local Agent Context observation is enabled by default. Review its
+Smart naming, APNs, usage tracking, and the experimental Agent Workspace are
+off, unavailable, or unconfigured by default. Review the workspace's
 [data and control model](guides/agent-context.md) before exposing vmux beyond a
 single-user host.
 
@@ -102,6 +112,8 @@ single-user host.
 - named tmux keys are allow-listed
 - pane ids are validated
 - text is sent with tmux literal mode through argument-list subprocess calls
+- creation paths are canonicalized inside startup-validated roots; runtime
+  commands are fixed server-side argument arrays and are never client supplied
 - custom regex matching has size limits and a hard timeout
 - API settings cannot modify token, APNs credential, executable usage, or AI
   backend fields
@@ -145,5 +157,5 @@ vulnerability** to submit a private report. Include a redacted reproduction,
 impact, affected version/commit, and any proposed mitigation. Never send a live
 token or private key.
 
-Security fixes support the latest release only. Before v0.1.0, fixes land on
-`main`.
+Security fixes support the latest release only. Fixes land on `main` for the
+next release.

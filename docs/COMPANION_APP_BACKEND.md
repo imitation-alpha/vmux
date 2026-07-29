@@ -134,6 +134,85 @@ This mechanism assumes vmux and the target tmux process share a host and
 filesystem namespace. A path returned by one host will not work inside a
 nested SSH session; second-hop transfer is outside this contract.
 
+## Tmux creation
+
+The creation endpoints use normal REST bearer authentication. They are present
+in protocol 1, but clients must show creation only when
+`_info.capabilities.tmux_create_v1` exists. Its `enabled` value and `reason`
+describe current server setup and tmux availability.
+
+### `GET /api/tmux/creation`
+
+Returns the effective state, canonical configured roots, up to 20 unique recent
+in-root pane directories, and the fixed runtime allowlist:
+
+~~~json
+{
+  "enabled": true,
+  "reason": null,
+  "roots": [{"label":"Products","path":"/Users/me/dev/repos/products"}],
+  "recent_directories": [
+    {"name":"vmux","path":"/Users/me/dev/repos/products/vmux","root_label":"Products"}
+  ],
+  "runtimes": [
+    {"id":"shell","label":"Shell","available":true,"reason":null},
+    {"id":"codex","label":"Codex","available":true,"reason":null},
+    {"id":"agy","label":"Antigravity","available":true,"reason":null},
+    {"id":"grok","label":"Grok Build","available":true,"reason":null}
+  ]
+}
+~~~
+
+Shell is implicit. `agy` remains the compatible ID for Antigravity, and `grok`
+selects Grok Build. Other runtime IDs map to YAML-owned argument arrays; no
+command or arguments are returned to or accepted from clients.
+
+### `GET /api/tmux/directories?path=…`
+
+`path` must be absolute or begin with `~/`. Success returns its canonical path,
+owning root, in-root parent, and at most 500 name-sorted child directories:
+
+~~~json
+{
+  "path":"/Users/me/dev/repos/products",
+  "root":{"label":"Products","path":"/Users/me/dev/repos/products"},
+  "parent":null,
+  "directories":[{"name":"vmux","path":"/Users/me/dev/repos/products/vmux"}],
+  "truncated":false
+}
+~~~
+
+Unreadable entries and symlinks whose canonical destination escapes all roots
+are omitted.
+
+### `POST /api/tmux/create`
+
+Accepted bodies are exact and type-specific:
+
+~~~json
+{"type":"session","cwd":"/path","runtime":"codex","name":null}
+{"type":"window","parent_session":"work","cwd":"/path","runtime":"shell","name":"api"}
+{"type":"pane","parent_pane_id":"%4","cwd":"/path","runtime":"claude","split":"side_by_side","size_percent":50}
+~~~
+
+Pane split direction is `side_by_side` or `stacked`; size is an integer from
+10 through 90 and defaults to 50. Session/window names are 1–64 ASCII letters,
+numbers, underscores, or hyphens. `null` asks the server to slugify the working
+directory basename and serialize conflict-free suffix selection (`name`,
+`name-2`, …). A non-null conflicting name is never silently changed.
+
+Success is `201` after the returned pane is verified live:
+
+~~~json
+{"pane_id":"%12","target":"work:1.0"}
+~~~
+
+New targets are detached and do not change an attached host client. Errors are
+sanitized: `400` invalid shape/value, `403` outside configured roots, `404`
+missing directory or vanished parent, `409` name/tmux conflict, and `503`
+disabled creation, unavailable tmux/runtime, or an immediately exited pane.
+Responses never expose subprocess arguments, environment, or stderr.
+
 ## Configuration
 
 ### `GET /api/config`
@@ -142,6 +221,7 @@ Returns the live-editable fields plus:
 
 ~~~json
 {
+  "experimental_agent_workspace_enabled": true,
   "_info": {
     "host": "127.0.0.1",
     "port": 8787,
@@ -175,6 +255,12 @@ Returns the live-editable fields plus:
         "scheduling": true,
         "min_interval_minutes": 5,
         "max_interval_minutes": 1440
+      },
+      "tmux_create_v1": {
+        "version": 1,
+        "supported": true,
+        "enabled": true,
+        "reason": null
       }
     }
   }
@@ -189,7 +275,12 @@ capability/availability without exposing credentials.
 
 `capabilities.agent_context_v1` gates the independent agent workspace, and
 `capabilities.agent_review_v1` gates the cross-client Review workflow. Clients
-must fall back to the terminal workspace when it is absent or disabled. The
+must fall back to the terminal workspace when it is absent or disabled.
+`experimental_agent_workspace_enabled` is the authoritative server-persisted
+switch; clients must not hydrate agent REST resources or open `/ws/agents`
+unless it is `true` and the corresponding capability is enabled.
+`capabilities.tmux_create_v1` independently gates all creation entry points;
+older clients ignore it and updated clients hide creation when it is absent. The
 opaque `server_instance_id` lets a native client reject a notification route
 created by a different vmux server. Capability names and string values are an
 allowlist: an unknown future value must remain read-only until the client
@@ -434,7 +525,8 @@ Missing or intentionally hidden objects return `404`; unavailable safe-control
 capabilities and stale revisions, bindings, pane incarnations, or prompts return
 `409`, with current state in `detail.current` where available. If Agent Context
 is disabled, its REST endpoints return `503` and `/ws/agents` closes with code
-`1013`. Clients should rehydrate instead of automatically replaying a conflicted
+`1013` before acceptance; active sockets close cleanly when the workspace is
+disabled. Clients should rehydrate instead of automatically replaying a conflicted
 mutation.
 
 ## Configuration updates

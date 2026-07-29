@@ -186,6 +186,92 @@ def exists(pane_id: str) -> bool:
     return False
 
 
+def session_names() -> List[str]:
+    """Return current session names, or an empty list when no server exists."""
+    try:
+        raw = _run(["list-sessions", "-F", "#{session_name}"])
+    except TmuxError:
+        return []
+    return [line for line in raw.splitlines() if line]
+
+
+def session_exists(name: str) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    try:
+        _run(["has-session", "-t", name])
+        return True
+    except TmuxError:
+        return False
+
+
+def window_names(session: str) -> List[str]:
+    """Return window names inside a session; missing sessions yield []."""
+    if not isinstance(session, str) or not session:
+        return []
+    try:
+        raw = _run(["list-windows", "-t", session, "-F", "#{window_name}"])
+    except TmuxError:
+        return []
+    return [line for line in raw.splitlines() if line]
+
+
+_CREATE_FORMAT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"
+
+
+def _created_target(raw: str) -> Dict[str, str]:
+    line = next((line for line in raw.splitlines() if line.strip()), "")
+    parts = line.split("\t", 1)
+    if len(parts) != 2 or not _PANE_ID_RE.match(parts[0]) or not parts[1]:
+        raise TmuxError("tmux returned an invalid creation result")
+    return {"pane_id": parts[0], "target": parts[1]}
+
+
+def _creation_command(command: Optional[List[str]]) -> List[str]:
+    if not command:
+        return []
+    return ["--"] + list(command)
+
+
+def create_session(name: str, cwd: str, command: Optional[List[str]] = None) -> Dict[str, str]:
+    """Create a detached named session and return its initial pane target."""
+    args = [
+        "new-session", "-d", "-P", "-F", _CREATE_FORMAT,
+        "-s", name, "-c", cwd,
+    ] + _creation_command(command)
+    return _created_target(_run(args))
+
+
+def create_window(
+    parent_session: str,
+    name: str,
+    cwd: str,
+    command: Optional[List[str]] = None,
+) -> Dict[str, str]:
+    """Create a detached window without changing an attached client."""
+    args = [
+        "new-window", "-d", "-P", "-F", _CREATE_FORMAT,
+        "-t", parent_session, "-n", name, "-c", cwd,
+    ] + _creation_command(command)
+    return _created_target(_run(args))
+
+
+def create_pane(
+    parent_pane_id: str,
+    cwd: str,
+    split: str,
+    size_percent: int,
+    command: Optional[List[str]] = None,
+) -> Dict[str, str]:
+    """Create a detached split pane and leave the current pane selected."""
+    orientation = "-h" if split == "side_by_side" else "-v"
+    args = [
+        "split-window", "-d", "-P", "-F", _CREATE_FORMAT,
+        "-t", parent_pane_id, orientation, "-p", str(size_percent), "-c", cwd,
+    ] + _creation_command(command)
+    return _created_target(_run(args))
+
+
 def send_key(pane_id: str, key: str) -> None:
     if not valid_pane_id(pane_id):
         raise TmuxError("bad pane id")
