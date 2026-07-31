@@ -1,6 +1,6 @@
 [project]
 name = "vmux-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Attention router for CLI coding-agent swarms in tmux—monitor and respond from your phone."
 readme = "README.md"
 requires-python = ">=3.10"

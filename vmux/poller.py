@@ -22,6 +22,9 @@ from .detectors import classify_kind, detect, is_spinner
 from .models import (
     KIND_CLAUDE,
     KIND_CODEX,
+    KIND_GENERIC,
+    STATUS_IDLE,
+    STATUS_WORKING,
     STATUS_OFFLINE,
     PaneState,
 )
@@ -77,12 +80,15 @@ def _hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()
 
 
+ACTIVITY_GRACE_SECONDS = 2.0
+
+
 class Hub:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.states: Dict[str, PaneState] = {}
         self.order: List[str] = []
-        self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts}
+        self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts, revision}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
         # Shells created through vmux stay visible even when general shell
@@ -96,6 +102,8 @@ class Hub:
         self._stop = False
         self._agent_startup_complete = False
         self.namer = SmartNamer(cfg, on_update=self.kick)
+        self._snapshot_revision = 0
+        self._snapshot_signature: Optional[tuple] = None
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
@@ -149,6 +157,19 @@ class Hub:
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
+            # Generic/Codex detectors use changed output as their working hint.
+            # A single quiet capture is common while tmux redraws, so do not
+            # turn a just-active pane idle until it has been quiet briefly.
+            # Attention and errors always win without delay.
+            previous_state = self.states.get(pid)
+            if (
+                kind in (KIND_GENERIC, KIND_CODEX)
+                and res.status == STATUS_IDLE
+                and previous_state is not None
+                and previous_state.status == STATUS_WORKING
+                and now - previous_state.updated < ACTIVITY_GRACE_SECONDS
+            ):
+                res.status = STATUS_WORKING
             # Runtime-log observation is part of the opt-in experimental
             # workspace. Do not even construct observations while it is off.
             if self.agents.runtime_active:
@@ -241,6 +262,7 @@ class Hub:
         )
         self.states = new_states
         self.order = new_order
+        self._update_snapshot_revision()
         schedule_now = time.time()
         if self.agents.runtime_active:
             if self.agents.review_schedule_is_due(now=schedule_now):
@@ -265,6 +287,13 @@ class Hub:
             "type": "state",
             "panes": [self.states[pid].to_dict() for pid in self.order if pid in self.states],
         }
+
+    def _update_snapshot_revision(self) -> None:
+        """Advance only for a wire-visible pane snapshot change."""
+        panes = tuple(self.states[pid].to_dict() for pid in self.order if pid in self.states)
+        if panes != self._snapshot_signature:
+            self._snapshot_signature = panes
+            self._snapshot_revision += 1
 
     def review_payload(self, *, now: Optional[float] = None) -> dict:
         """Combine durable agent review state with safe live pane references."""
@@ -304,11 +333,13 @@ class Hub:
     async def broadcast(self) -> None:
         if not self.clients:
             return
-        payload = self.snapshot()
         dead = []
         for sid, c in list(self.clients.items()):
+            if c.get("revision") == self._snapshot_revision:
+                continue
             try:
-                await c["ws"].send_json(payload)
+                await c["ws"].send_json(self.snapshot())
+                c["revision"] = self._snapshot_revision
             except Exception:
                 dead.append(sid)
         for sid in dead:
@@ -340,7 +371,15 @@ class Hub:
 
     # -- client/session tracking ------------------------------------------ #
     def add_client(self, sid, ws, ip, ua, ts):
-        self.clients[sid] = {"ws": ws, "ip": ip, "ua": ua, "ts": ts}
+        self.clients[sid] = {"ws": ws, "ip": ip, "ua": ua, "ts": ts, "revision": None}
+
+    async def send_snapshot(self, sid: str) -> None:
+        """Deliver the current state immediately to one newly connected client."""
+        client = self.clients.get(sid)
+        if client is None:
+            return
+        await client["ws"].send_json(self.snapshot())
+        client["revision"] = self._snapshot_revision
 
     def remove_client(self, sid):
         self.clients.pop(sid, None)

@@ -14,7 +14,7 @@ have to be URL-encoded):
     GET  /api/usage                      -> provider quotas + today's usage summary
     GET  /api/usage/history?period=&days=-> hourly | daily | monthly usage buckets
     POST /api/usage/refresh {scope}      -> force a tokscale re-scan, return fresh usage
-    WS   /ws[?token=]                    -> push full state every tick
+    WS   /ws[?token=]                    -> push state when it changes
 """
 
 from __future__ import annotations
@@ -629,7 +629,7 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
         hub.add_client(sid, websocket, ip, ua, time.time())
         try:
             await websocket.send_json({"type": "hello", "sid": sid})
-            await websocket.send_json(hub.snapshot())
+            await hub.send_snapshot(sid)
             while True:
                 await websocket.receive_text()  # keepalive / disconnect detection
         except WebSocketDisconnect:

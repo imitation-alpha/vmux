@@ -45,6 +45,11 @@ class FixtureServer:
         response.raise_for_status()
         return response.json()["requests"]
 
+    def set_panes(self, panes: list[dict[str, Any]]) -> None:
+        httpx = pytest.importorskip("httpx")
+        response = httpx.post(f"{self.url}/__test__/panes", json={"panes": panes}, timeout=5)
+        response.raise_for_status()
+
 
 @pytest.fixture(scope="session")
 def fixture_server() -> Iterator[FixtureServer]:

@@ -7,6 +7,14 @@ the documentation.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-31
+
+### Fixed
+
+- Live pane updates now suppress unchanged WebSocket snapshots, retain generic
+  and Codex activity through short quiet captures, and coalesce ordinary list
+  reordering for two seconds while preserving immediate attention updates.
+
 ## [0.1.0] - 2026-07-29
 
 ### Added
@@ -127,5 +135,6 @@ the documentation.
 - Starlette is constrained to 1.3.1 or newer to exclude
   GHSA-82w8-qh3p-5jfq, a denial-of-service flaw in URL-encoded form parsing.
 
-[Unreleased]: https://github.com/imitation-alpha/vmux/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/imitation-alpha/vmux/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/imitation-alpha/vmux/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/imitation-alpha/vmux/releases/tag/v0.1.0

@@ -60,6 +60,8 @@ const CONNECTION_META = {
   unauthorized: { label: "Unauthorized", icon: "lock-keyhole", tone: "error" },
   incompatible: { label: "Incompatible", icon: "triangle-alert", tone: "error" },
 };
+const ORDER_STABILITY_MS = 2000;
+const STABLE_PANE_POSITIONS = new WeakMap();
 
 // Deliberate expansion is session state, not a preference. Keeping it outside
 // TreeView means switching layouts or closing a compact tree sheet does not
@@ -99,8 +101,81 @@ function paneCompare(sort = "status") {
   return (a, b) => rank(a) - rank(b) || String(a.name || "").localeCompare(String(b.name || "")) || targetCompare(a, b);
 }
 
-function sortedPanes(panes, sort = "status") {
+function sortPanesByPreference(panes, sort = "status") {
   return [...panes].sort((a, b) => Number(Boolean(b.starred)) - Number(Boolean(a.starred)) || paneCompare(sort)(a, b));
+}
+
+function sortedPanes(panes, sort = "status") {
+  return [...panes].sort((a, b) => {
+    const left = STABLE_PANE_POSITIONS.get(a);
+    const right = STABLE_PANE_POSITIONS.get(b);
+    if (Number.isFinite(left) && Number.isFinite(right)) return left - right;
+    if (Number.isFinite(left)) return -1;
+    if (Number.isFinite(right)) return 1;
+    return Number(Boolean(b.starred)) - Number(Boolean(a.starred)) || paneCompare(sort)(a, b);
+  });
+}
+
+function sameIDs(left, right) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function hasUrgentTransition(previous, panes) {
+  return panes.some((pane) => {
+    const before = previous.get(pane.id);
+    const after = normalizedStatus(pane.status);
+    return (after === "needs_input" || after === "error") && before !== after;
+  });
+}
+
+/**
+ * Keep ordinary live sort movement in short fixed windows. Terminal rows still
+ * receive fresh pane objects each poll; only their keyed list positions wait.
+ */
+function useStablePaneOrder(panes, sort, filter) {
+  const state = useRef(null);
+  const [, redraw] = useState(0);
+  const desired = sortPanesByPreference(panes, sort);
+  const desiredIDs = desired.map((pane) => pane.id);
+  const paneMap = new Map(panes.map((pane) => [pane.id, pane]));
+  const statuses = new Map(panes.map((pane) => [pane.id, normalizedStatus(pane.status)]));
+  const now = Date.now();
+
+  if (state.current === null) {
+    state.current = { ids: desiredIDs, desiredIDs, statuses, sort, filter, until: 0 };
+  } else {
+    const current = state.current;
+    const membershipChanged = current.ids.length !== desiredIDs.length
+      || current.ids.some((id) => !paneMap.has(id));
+    const immediate = membershipChanged || current.sort !== sort || current.filter !== filter
+      || hasUrgentTransition(current.statuses, panes);
+    const desiredChanged = !sameIDs(current.desiredIDs, desiredIDs);
+    if (immediate) {
+      current.ids = desiredIDs;
+      current.until = 0;
+    } else if (current.until && now >= current.until) {
+      current.ids = desiredIDs;
+      current.until = 0;
+    } else if (desiredChanged && !current.until) {
+      current.until = now + ORDER_STABILITY_MS;
+    }
+    current.desiredIDs = desiredIDs;
+    current.statuses = statuses;
+    current.sort = sort;
+    current.filter = filter;
+  }
+
+  const current = state.current;
+  useEffect(() => {
+    if (!current.until) return undefined;
+    const delay = Math.max(0, current.until - Date.now());
+    const timer = setTimeout(() => redraw((value) => value + 1), delay);
+    return () => clearTimeout(timer);
+  }, [current.until, desiredIDs.join(",")]);
+
+  const ordered = current.ids.map((id) => paneMap.get(id)).filter(Boolean);
+  ordered.forEach((pane, index) => STABLE_PANE_POSITIONS.set(pane, index));
+  return ordered;
 }
 
 function attentionPanes(panes) {
@@ -1222,31 +1297,32 @@ export function Workspace({
   const [filter, setFilterState] = useState(() => preferredFilter(prefs.defaultFilter));
   const [selectedId, setSelectedId] = useState(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const stablePanes = useStablePaneOrder(panes, prefs.sort, filter);
 
   const priority = useMemo(() => {
-    const urgent = attentionPanes(panes);
+    const urgent = attentionPanes(stablePanes);
     const urgentIds = new Set(urgent.map((pane) => pane.id));
-    return urgent.concat(sortedPanes(panes.filter((pane) => !urgentIds.has(pane.id)), prefs.sort));
-  }, [panes, prefs.sort]);
+    return urgent.concat(sortedPanes(stablePanes.filter((pane) => !urgentIds.has(pane.id)), prefs.sort));
+  }, [stablePanes, prefs.sort]);
 
   useEffect(() => {
-    if (selectedId && panes.some((pane) => pane.id === selectedId)) return;
+    if (selectedId && stablePanes.some((pane) => pane.id === selectedId)) return;
     setSelectedId(priority[0] ? priority[0].id : null);
-  }, [panes, priority, selectedId]);
+  }, [stablePanes, priority, selectedId]);
 
   useEffect(() => {
     if (!workspaceNav) return;
     if (workspaceNav.current === "stats" && filter !== "stats") setFilterState("stats");
     if (workspaceNav.current === "panes" && filter === "stats") setFilterState("queue");
-    if (workspaceNav.paneId && panes.some((pane) => pane.id === workspaceNav.paneId)) {
+    if (workspaceNav.paneId && stablePanes.some((pane) => pane.id === workspaceNav.paneId)) {
       setSelectedId(workspaceNav.paneId);
     }
-  }, [filter, panes, workspaceNav]);
+  }, [filter, stablePanes, workspaceNav]);
   useEffect(() => {
-    if (openPaneId && panes.some((pane) => pane.id === openPaneId)) {
+    if (openPaneId && stablePanes.some((pane) => pane.id === openPaneId)) {
       setSelectedId(openPaneId);
     }
-  }, [openPaneId, panes]);
+  }, [openPaneId, stablePanes]);
 
   const setFilter = (next) => {
     const normalized = preferredFilter(next);
@@ -1254,7 +1330,7 @@ export function Workspace({
   };
   const openConnection = () => setConnectionOpen(true);
   const shellProps = {
-    panes,
+    panes: stablePanes,
     connection,
     actions,
     usage,

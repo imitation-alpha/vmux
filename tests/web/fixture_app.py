@@ -654,6 +654,15 @@ def create_fixture_app() -> FastAPI:
         with state.lock:
             return {"requests": copy.deepcopy(state.requests)}
 
+    @app.post("/__test__/panes")
+    async def set_panes(payload: dict[str, Any]) -> dict[str, bool]:
+        panes = payload.get("panes")
+        if not isinstance(panes, list):
+            raise HTTPException(status_code=400, detail="panes must be a list")
+        with state.lock:
+            state.panes = copy.deepcopy(panes)
+        return {"ok": True}
+
     @app.get("/api/config")
     async def get_config() -> dict[str, Any]:
         reject_if_unavailable()

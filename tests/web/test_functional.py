@@ -8,6 +8,7 @@ import re
 import pytest
 
 from .conftest import BrowserRuntime, FixtureServer
+from .fixture_app import fixture_panes
 
 
 def open_app(page, server: FixtureServer, path: str = "/") -> None:
@@ -20,6 +21,49 @@ def wait_for_connection(page, label: str = "Live") -> None:
         "button",
         name=re.compile(rf"^Connection: {re.escape(label)}\."),
     ).wait_for(state="visible", timeout=15_000)
+
+
+def test_live_sort_order_is_coalesced_but_urgent_attention_moves_immediately(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    panes = fixture_panes()
+    for index, pane in enumerate(panes):
+        pane["starred"] = False
+        pane["updated"] = 100 - index
+    fixture_server.set_panes(panes)
+    page = page_factory(
+        browser_runtime,
+        viewport=(1024, 768),
+        prefs={"defaultFilter": "all", "sort": "active"},
+    )
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+
+    rows = page.locator(".pane-row .pane-row-copy strong")
+    assert rows.all_text_contents()[:4] == [
+        "Release captain", "API investigator", "Docs researcher", "Test watcher",
+    ]
+
+    panes[3]["updated"] = 300
+    panes[3]["lines"].append("new terminal output")
+    fixture_server.set_panes(panes)
+    page.wait_for_timeout(750)
+    assert rows.all_text_contents()[:4] == [
+        "Release captain", "API investigator", "Docs researcher", "Test watcher",
+    ]
+
+    # The fixture emits on a 500 ms cadence; allow that delivery plus the
+    # fixed two-second order window.
+    page.wait_for_timeout(2200)
+    assert rows.all_text_contents()[0] == "Test watcher"
+
+    panes[2]["status"] = "needs_input"
+    panes[2]["updated"] = 400
+    fixture_server.set_panes(panes)
+    page.wait_for_timeout(1000)
+    assert rows.all_text_contents()[0] == "Docs researcher"
 
 
 def test_tmux_creation_supports_all_target_types_and_opens_the_new_pane(
