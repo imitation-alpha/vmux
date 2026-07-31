@@ -406,6 +406,8 @@ class UsageCollector:
                       "against 3.x/4.x — output may degrade" % ver)
                 self._warned_version = True
         except Exception:
+            # Sync is best-effort: cached Antigravity data and every report
+            # provider must remain available when its language server is down.
             pass
 
     async def refresh_quota(self) -> None:

@@ -1116,4 +1116,6 @@ class AgentService:
                     queue.get_nowait()
                     queue.put_nowait(envelope)
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    # Shutdown is already in progress, so a racing subscriber
+                    # queue needs no further delivery or recovery attempt.
                     pass
