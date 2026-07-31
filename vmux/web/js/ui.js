@@ -489,7 +489,7 @@ function AttentionCard({ pane, selected, onOpen, actions, connection }) {
   </article>`;
 }
 
-function PaneRow({ pane, selected, onOpen, actions, connection }) {
+function PaneRow({ pane, selected, onOpen, actions, connection, onCreate = null }) {
   const meta = statusMeta(pane.status);
   return html`<div class=${cx("pane-row", selected && "selected", `status-${meta.status}`)}>
     <button type="button" class="pane-row-open" onClick=${() => onOpen(pane.id)}>
@@ -500,6 +500,7 @@ function PaneRow({ pane, selected, onOpen, actions, connection }) {
       </span>
       <${StatusBadge} value=${pane.status} compact=${true} />
     </button>
+    ${onCreate ? html`<button type="button" class="icon-button tree-create" aria-label=${`Split ${pane.name || pane.target}`} title="Split pane" onClick=${() => onCreate({ type: "pane", parentPaneID: pane.id })}><${Icon} name="plus" size=${16} /></button>` : null}
     <${StarButton} pane=${pane} actions=${actions} connection=${connection} />
   </div>`;
 }
@@ -555,7 +556,7 @@ function selectedAncestorKeys(panes, selectedId) {
   return [`session:${parts.session}`, `window:${parts.session}:${parts.windowId}`];
 }
 
-function TreeView({ panes, selectedId, onOpen, actions, connection }) {
+function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = null }) {
   const tree = useMemo(() => buildTree(panes), [panes]);
   const [expanded, setExpanded] = useState(() => new Set(SESSION_TREE_EXPANDED));
 
@@ -588,23 +589,27 @@ function TreeView({ panes, selectedId, onOpen, actions, connection }) {
       const sessionKey = `session:${session.id}`;
       const sessionOpen = expanded.has(sessionKey);
       return html`<div class="tree-session" key=${session.id}>
-        <button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(session.status)}`)} aria-expanded=${sessionOpen} onClick=${() => toggle(sessionKey)}>
-          <${Icon} name=${sessionOpen ? "chevron-down" : "chevron-right"} size=${16} />
-          <${StatusBadge} value=${session.status} compact=${true} />
-          <strong>${session.id}</strong>
-          <span class="tree-count">${session.panes.length}</span>
-        </button>
+        <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(session.status)}`)} aria-expanded=${sessionOpen} onClick=${() => toggle(sessionKey)}>
+            <${Icon} name=${sessionOpen ? "chevron-down" : "chevron-right"} size=${16} />
+            <${StatusBadge} value=${session.status} compact=${true} />
+            <strong>${session.id}</strong>
+            <span class="tree-count">${session.panes.length}</span>
+          </button>
+          ${onCreate ? html`<button type="button" class="icon-button tree-create" aria-label=${`New window in ${session.id}`} title="New window" onClick=${() => onCreate({ type: "window", parentSession: session.id })}><${Icon} name="plus" size=${16} /></button>` : null}
+        </div>
         ${sessionOpen ? html`<div class="tree-children">
           ${session.windows.map((windowItem) => {
             const windowKey = `window:${session.id}:${windowItem.id}`;
             const windowOpen = expanded.has(windowKey);
             return html`<div class="tree-window" key=${windowItem.id}>
-              <button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(windowItem.status)}`)} aria-expanded=${windowOpen} onClick=${() => toggle(windowKey)}>
-                <${Icon} name=${windowOpen ? "chevron-down" : "chevron-right"} size=${16} />
-                <${StatusBadge} value=${windowItem.status} compact=${true} />
-                <span>${windowItem.name}</span>
-                <span class="tree-count">${windowItem.panes.length}</span>
-              </button>
+              <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(windowItem.status)}`)} aria-expanded=${windowOpen} onClick=${() => toggle(windowKey)}>
+                  <${Icon} name=${windowOpen ? "chevron-down" : "chevron-right"} size=${16} />
+                  <${StatusBadge} value=${windowItem.status} compact=${true} />
+                  <span>${windowItem.name}</span>
+                  <span class="tree-count">${windowItem.panes.length}</span>
+                </button>
+                ${onCreate && windowItem.panes[0] ? html`<button type="button" class="icon-button tree-create" aria-label=${`Split ${windowItem.name}`} title="Split pane" onClick=${() => onCreate({ type: "pane", parentPaneID: windowItem.panes[0].id })}><${Icon} name="plus" size=${16} /></button>` : null}
+              </div>
               ${windowOpen ? html`<div class="tree-children">
                 ${windowItem.panes.map((pane) => html`<${PaneRow}
                   key=${pane.id}
@@ -613,6 +618,7 @@ function TreeView({ panes, selectedId, onOpen, actions, connection }) {
                   onOpen=${onOpen}
                   actions=${actions}
                   connection=${connection}
+                  onCreate=${onCreate}
                 />`)}
               </div>` : null}
             </div>`;
@@ -832,8 +838,11 @@ function PaneList({ panes, mode, selectedId, onOpen, actions, connection }) {
   </div>`;
 }
 
-function AppActions({ onBroadcast, onSettings }) {
+function AppActions({ onBroadcast, onSettings, onCreate = null }) {
   return html`<div class="app-actions">
+    ${onCreate ? html`<button type="button" class="icon-button" aria-label="Create tmux target" title="Create" onClick=${() => onCreate({})}>
+      <${Icon} name="plus" />
+    </button>` : null}
     <button type="button" class="icon-button" title="Broadcast" onClick=${onBroadcast}>
       <${Icon} name="radio-tower" />
     </button>
@@ -843,12 +852,12 @@ function AppActions({ onBroadcast, onSettings }) {
   </div>`;
 }
 
-function BrandHeader({ connection, onConnection, onBroadcast, onSettings, compact = false }) {
+function BrandHeader({ connection, onConnection, onBroadcast, onSettings, onCreate = null, compact = false }) {
   return html`<header class=${cx("brand-header", compact && "compact")}>
     <div class="brand-lockup"><span>v</span><strong>mux</strong></div>
     <span class="spacer"></span>
     <${ConnectionBadge} connection=${connection} onClick=${onConnection} />
-    <${AppActions} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+    <${AppActions} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
   </header>`;
 }
 
@@ -920,7 +929,7 @@ function CommandPalette({ panes, onPick, onClose }) {
   <//>`;
 }
 
-function CompactShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onConnection, workspaceNav }) {
+function CompactShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onCreate, onConnection, workspaceNav, openPaneId }) {
   const prefs = usePrefs();
   const [treeOpen, setTreeOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -937,9 +946,14 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
     setSelectedId(workspaceNav.paneId);
     setDetailOpen(true);
   }, [panes, workspaceNav?.paneId]);
+  useEffect(() => {
+    if (!openPaneId || !panes.some((pane) => pane.id === openPaneId)) return;
+    setSelectedId(openPaneId);
+    setDetailOpen(true);
+  }, [openPaneId, panes, setSelectedId]);
 
   return html`<div class="app-shell compact-shell">
-    <${BrandHeader} compact=${true} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+    <${BrandHeader} compact=${true} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
     <main class="compact-main">
       ${filter === "stats" ? html`<${UsageView} usage=${usage} layout="compact" />` : html`<${Fragment}>
         <header class="destination-head">
@@ -967,7 +981,7 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
       ><${Icon} name=${icon} size=${20} /><span>${label}</span>${badge ? html`<b>${badge}</b>` : null}</button>`)}
     </nav>`}
     ${treeOpen ? html`<${Dialog} title="Swarm tree" subtitle=${`${panes.length} panes`} onClose=${() => setTreeOpen(false)} className="focus-sheet compact-sheet">
-      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); setDetailOpen(true); }} actions=${actions} connection=${connection} />
+      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); setDetailOpen(true); }} actions=${actions} connection=${connection} onCreate=${onCreate} />
     <//>` : null}
     ${detailOpen && selected ? html`<${Dialog} title=${selected.name || selected.target} subtitle=${`${selected.target || ""} · ${kindLabel(selected.kind)}`} onClose=${() => setDetailOpen(false)} className="focus-sheet compact-sheet">
       <${PaneDetail} pane=${selected} actions=${actions} connection=${connection} />
@@ -975,7 +989,7 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
   </div>`;
 }
 
-function MediumShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onConnection, workspaceNav }) {
+function MediumShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onCreate, onConnection, workspaceNav }) {
   const prefs = usePrefs();
   const [query, setQuery] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
@@ -986,14 +1000,14 @@ function MediumShell({ panes, connection, actions, usage, selectedId, setSelecte
   const selected = panes.find((pane) => pane.id === selectedId) || null;
 
   if (filter === "stats") return html`<div class="app-shell medium-shell stats-shell">
-    <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+    <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
     <div class="stats-navigation">${workspaceNav ? html`<${WorkspaceNav} navigation=${workspaceNav} layout="medium" />` : html`<${FilterTabs} value=${filter} onChange=${setFilter} counts=${counts} usageWarning=${usageWarnings(usage)} />`}</div>
     <main><${UsageView} usage=${usage} layout="medium" /></main>
   </div>`;
 
   return html`<div class="app-shell medium-shell">
     <aside class="master-column">
-      <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+      <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
       ${workspaceNav ? html`<${Fragment}><${WorkspaceNav} navigation=${workspaceNav} layout="medium" /><${FilterTabs} value=${filter} onChange=${setFilter} counts=${counts} includeStats=${false} /><//>`
         : html`<${FilterTabs} value=${filter} onChange=${setFilter} counts=${counts} usageWarning=${usageWarnings(usage)} />`}
       <div class="master-tools">
@@ -1005,12 +1019,12 @@ function MediumShell({ panes, connection, actions, usage, selectedId, setSelecte
     </aside>
     <main class="detail-column"><${PaneDetail} pane=${selected} actions=${actions} connection=${connection} /></main>
     ${treeOpen ? html`<${Dialog} side=${true} title="Swarm tree" subtitle=${`${panes.length} panes`} onClose=${() => setTreeOpen(false)} className="tree-drawer">
-      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); }} actions=${actions} connection=${connection} />
+      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); }} actions=${actions} connection=${connection} onCreate=${onCreate} />
     <//>` : null}
   </div>`;
 }
 
-function Navigator({ panes, connection, actions, usage, selectedId, onOpen, destination, setDestination, onBroadcast, onSettings, onConnection, workspaceNav }) {
+function Navigator({ panes, connection, actions, usage, selectedId, onOpen, destination, setDestination, onBroadcast, onSettings, onCreate, onConnection, workspaceNav }) {
   const prefs = usePrefs();
   const [query, setQuery] = useState("");
   const view = prefs.view === "list" ? "list" : "tree";
@@ -1018,7 +1032,7 @@ function Navigator({ panes, connection, actions, usage, selectedId, onOpen, dest
   const visible = useMemo(() => sortedPanes(searched, prefs.sort), [searched, prefs.sort]);
   const counts = countsFor(panes);
   return html`<aside class="wide-navigator">
-    <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} />
+    <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
     ${workspaceNav ? html`<${WorkspaceNav} navigation=${workspaceNav} layout="wide" />` : html`<nav class="wide-destinations" aria-label="Workspace">
       <button type="button" class=${destination === "queue" ? "selected" : ""} aria-current=${destination === "queue" ? "page" : null} onClick=${() => setDestination("queue")}>
         <${Icon} name="inbox" size=${18} /> Workspace
@@ -1040,13 +1054,13 @@ function Navigator({ panes, connection, actions, usage, selectedId, onOpen, dest
       <${SortSelect} value=${prefs.sort} onChange=${(sort) => setPrefs({ sort })} />
     </div>
     <nav class="navigator-scroll" aria-label="Panes">
-      ${view === "tree" ? html`<${TreeView} panes=${searched} selectedId=${selectedId} onOpen=${onOpen} actions=${actions} connection=${connection} />`
+      ${view === "tree" ? html`<${TreeView} panes=${searched} selectedId=${selectedId} onOpen=${onOpen} actions=${actions} connection=${connection} onCreate=${onCreate} />`
         : html`<${PaneList} panes=${visible} mode="all" selectedId=${selectedId} onOpen=${onOpen} actions=${actions} connection=${connection} />`}
     </nav>
   </aside>`;
 }
 
-function WideShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onConnection, workspaceNav }) {
+function WideShell({ panes, connection, actions, usage, selectedId, setSelectedId, filter, setFilter, onBroadcast, onSettings, onCreate, onConnection, workspaceNav }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const queue = useMemo(() => attentionPanes(panes), [panes]);
   const selected = panes.find((pane) => pane.id === selectedId) || null;
@@ -1100,6 +1114,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
       setDestination=${setFilter}
       onBroadcast=${onBroadcast}
       onSettings=${onSettings}
+      onCreate=${onCreate}
       onConnection=${onConnection}
       workspaceNav=${workspaceNav}
     />
@@ -1197,6 +1212,8 @@ export function Workspace({
   onRetry = null,
   onBroadcast = () => {},
   onSettings = () => {},
+  onCreate = null,
+  openPaneId = "",
   workspaceNav = null,
 }) {
   const prefs = usePrefs();
@@ -1225,6 +1242,11 @@ export function Workspace({
       setSelectedId(workspaceNav.paneId);
     }
   }, [filter, panes, workspaceNav]);
+  useEffect(() => {
+    if (openPaneId && panes.some((pane) => pane.id === openPaneId)) {
+      setSelectedId(openPaneId);
+    }
+  }, [openPaneId, panes]);
 
   const setFilter = (next) => {
     const normalized = preferredFilter(next);
@@ -1242,7 +1264,9 @@ export function Workspace({
     setFilter,
     onBroadcast,
     onSettings,
+    onCreate,
     onConnection: openConnection,
+    openPaneId,
     workspaceNav,
   };
 

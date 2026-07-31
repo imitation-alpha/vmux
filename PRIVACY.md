@@ -151,10 +151,14 @@ created by a terminal tool after you explicitly submit the path.
 If you enable usage tracking, the server runs your configured tokscale command
 and sends normalized cost, token, model/client, and provider-quota data to
 authenticated clients. The browser renders charts locally and does not send the
-usage response to a charting or analytics service.
+usage response to a charting or analytics service. Before report scans, vmux
+also asks Tokscale to synchronize usage from a locally running Antigravity
+language server; failures retain Tokscale's cached data and do not stop other
+provider scans.
 
-The server's Agent Context feature is enabled by default for supported Codex
-and Claude Code sessions. It reads their local session logs and stores a
+The server's experimental Agent Workspace is off by default. If you enable it
+in the PWA's server-persisted Experimental setting, it reads supported Codex
+and Claude Code local session logs and stores a
 normalized current context, user-visible chat messages, explicit plan/task
 updates, verified decisions, timeline snapshots, a legacy “last viewed”
 baseline, a shared Review baseline, and optional Review schedule settings in a
@@ -167,11 +171,11 @@ public API.
 
 Historical agent snapshots, messages, and resolved decisions are retained for
 30 days by default. Current context and unresolved decisions can remain while a
-session is active. You can change the retention period, disable future
-observation in server configuration, or delete one session's retained history
-from an authenticated client. Disabling observation does not automatically
-erase the existing database. The vmux project developer does not receive this
-data.
+session is active. You can change the retention period, turn off the
+Experimental setting to stop future observation and structured access, or
+delete one session's retained history from an authenticated client. Turning it
+off does not erase the existing database; re-enabling restores access. The vmux
+project developer does not receive this data.
 
 ## Optional OpenAI Voice Assistant
 

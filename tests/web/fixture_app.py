@@ -145,6 +145,7 @@ def fixture_config() -> dict[str, Any]:
         "usage_quota_refresh": 180,
         "usage_report_refresh": 300,
         "usage_alert_threshold": 20,
+        "experimental_agent_workspace_enabled": False,
         "_info": {
             "host": "127.0.0.1",
             "port": 8765,
@@ -161,6 +162,10 @@ def fixture_config() -> dict[str, Any]:
                 "quota_age": 12.0,
                 "reports_age": 18.0,
                 "last_error": "",
+            },
+            "capabilities": {
+                "agent_context_v1": {"enabled": False, "mode": "disabled"},
+                "agent_review_v1": {"enabled": False, "scheduling": False},
             },
         },
     }
@@ -580,6 +585,7 @@ class FixtureState:
             "image_failure",
             "image_too_large",
             "image_unsupported",
+            "creation",
         }
         if name not in allowed:
             raise ValueError(f"unknown fixture scenario: {name}")
@@ -661,6 +667,15 @@ def create_fixture_app() -> FastAPI:
         elif current == "unverified":
             result["_info"].pop("version", None)
             result["_info"].pop("compatibility", None)
+        elif current == "creation":
+            result["_info"]["capabilities"] = {
+                "tmux_create_v1": {
+                    "version": 1,
+                    "supported": True,
+                    "enabled": True,
+                    "reason": "",
+                }
+            }
         elif current in {
             "agent_workspace",
             "agent_safety_locked",
@@ -669,6 +684,7 @@ def create_fixture_app() -> FastAPI:
             "agent_review",
             "agent_review_plan",
         }:
+            result["experimental_agent_workspace_enabled"] = True
             result["_info"]["capabilities"] = {
                 "agent_context_v1": {"enabled": True, "mode": "log_observer"}
             }
@@ -688,12 +704,90 @@ def create_fixture_app() -> FastAPI:
             for key, value in payload.items():
                 if key != "_info":
                     state.config[key] = copy.deepcopy(value)
+            if "experimental_agent_workspace_enabled" in payload:
+                enabled = payload["experimental_agent_workspace_enabled"] is True
+                state.config["_info"]["capabilities"].update({
+                    "agent_context_v1": {
+                        "enabled": enabled,
+                        "mode": "log_observer" if enabled else "disabled",
+                    },
+                    "agent_review_v1": {
+                        "enabled": enabled,
+                        "scheduling": enabled,
+                    },
+                })
             return copy.deepcopy(state.config)
 
     @app.get("/api/state")
     async def get_state() -> dict[str, Any]:
         reject_if_unavailable()
         return state.snapshot()
+
+    @app.get("/api/tmux/creation")
+    async def get_tmux_creation() -> dict[str, Any]:
+        reject_if_unavailable()
+        enabled = scenario() == "creation"
+        return {
+            "enabled": enabled,
+            "reason": "" if enabled else "fixture creation is disabled",
+            "roots": [{"label": "Products", "path": "/fixture/products"}],
+            "recent_directories": [
+                {"name": "vmux", "path": "/fixture/products/vmux", "root_label": "Products"}
+            ],
+            "runtimes": [
+                {"id": "shell", "label": "Shell", "available": True, "reason": ""},
+                {"id": "codex", "label": "Codex", "available": True, "reason": ""},
+                {"id": "claude", "label": "Claude", "available": False, "reason": "not installed"},
+                {"id": "agy", "label": "Antigravity", "available": True, "reason": ""},
+                {"id": "grok", "label": "Grok Build", "available": True, "reason": ""},
+                {"id": "opencode", "label": "OpenCode", "available": True, "reason": ""},
+            ],
+        }
+
+    @app.get("/api/tmux/directories")
+    async def get_tmux_directories(path: str) -> dict[str, Any]:
+        reject_if_unavailable()
+        normalized = path.rstrip("/") or "/fixture/products"
+        if not normalized.startswith("/fixture/products"):
+            raise HTTPException(status_code=403, detail="directory is outside configured roots")
+        children = [] if normalized.endswith("/vmux") else [
+            {"name": "vmux", "path": "/fixture/products/vmux"},
+            {"name": "website", "path": "/fixture/products/website"},
+        ]
+        return {
+            "path": normalized,
+            "root": {"label": "Products", "path": "/fixture/products"},
+            "parent": None if normalized == "/fixture/products" else "/fixture/products",
+            "directories": children,
+            "truncated": False,
+        }
+
+    @app.post("/api/tmux/create", status_code=201)
+    async def post_tmux_create(payload: dict[str, Any]) -> dict[str, str]:
+        reject_if_unavailable()
+        state.record("/api/tmux/create", payload)
+        pane_id = "%9"
+        with state.lock:
+            state.panes.append(
+                {
+                    "id": pane_id,
+                    "target": "vmux:1.0",
+                    "name": "vmux",
+                    "kind": payload.get("runtime", "shell"),
+                    "status": "idle",
+                    "title": "Created pane",
+                    "question": None,
+                    "menu": [],
+                    "preview": ["Ready."],
+                    "lines": ["Ready."],
+                    "updated": FIXED_NOW,
+                    "interacted": FIXED_NOW,
+                    "changed": False,
+                    "window": "vmux",
+                    "starred": False,
+                }
+            )
+        return {"pane_id": pane_id, "target": "vmux:1.0"}
 
     @app.post("/api/images", status_code=201)
     async def post_image(request: Request) -> JSONResponse:

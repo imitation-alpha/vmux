@@ -8,9 +8,9 @@ attention to the top, and turns supported terminal prompts into responses you
 can tap from the built-in PWA.
 </p>
 
-<span class="vmux-status">Pre-release beta · v0.1.0 in preparation</span>
+<span class="vmux-status">Available now · v0.1.0</span>
 
-[Install from source](getting-started.md){ .md-button .md-button--primary }
+[Install vmux](getting-started.md){ .md-button .md-button--primary }
 [Choose remote access](remote-access.md){ .md-button }
 
 <div class="vmux-screenshots">
@@ -37,9 +37,10 @@ keys, saved snippets, or one broadcast message to several panes.
 <div class="vmux-card" markdown>
 ### Resume the reasoning state
 
-Supported Codex and Claude Code sessions expose structured goals, progress,
-blockers, verified decisions, visible chat, and “what changed” without making
-you reconstruct the session from terminal scrollback.
+When you opt in under **Settings → Experimental**, supported Codex and Claude
+Code sessions expose structured goals, progress, blockers, verified decisions,
+visible chat, and “what changed” without making you reconstruct the session
+from terminal scrollback.
 </div>
 
 <div class="vmux-card" markdown>
@@ -52,11 +53,10 @@ vendored; there is no hosted vmux account, telemetry service, or runtime CDN.
 
 ## Start on localhost
 
-vmux requires Python 3.10–3.14 and tmux. The PyPI project is not published yet,
-so install the current source:
+vmux requires Python 3.10–3.14 and tmux. Install from PyPI:
 
 ~~~bash
-pipx install git+https://github.com/imitation-alpha/vmux.git
+pipx install vmux-agent
 vmux
 ~~~
 

@@ -45,7 +45,7 @@ function connectionLabel(connection) {
   return labels[connection?.mode] || "Connecting";
 }
 
-function AgentHeader({ connection, onConnection, onSettings, compact = false }) {
+function AgentHeader({ connection, onConnection, onSettings, onCreate = null, compact = false }) {
   const label = connectionLabel(connection);
   return html`<header class=${cx("agent-brand-header", compact && "compact")}>
     <div class="brand-lockup"><span>v</span><strong>mux</strong></div>
@@ -54,6 +54,7 @@ function AgentHeader({ connection, onConnection, onSettings, compact = false }) 
     <button type="button" class="agent-connection" aria-label=${`Connection: ${label}. Show details`} onClick=${onConnection}>
       <span aria-hidden="true"></span>${compact ? null : label}
     </button>
+    ${onCreate ? html`<button type="button" class="icon-button" aria-label="Create tmux target" title="Create" onClick=${() => onCreate({})}><${Icon} name="plus" /></button>` : null}
     <button type="button" class="icon-button" title="Settings" onClick=${onSettings}><${Icon} name="settings" /></button>
   </header>`;
 }
@@ -745,7 +746,7 @@ function TimelineDestination({ state, route }) {
   return html`<section class="timeline-destination"><${DestinationHeading} eyebrow="Historical replay" title=${agent ? `${agent.name} timeline` : "Timeline"} detail=${agent ? "Structured activity for this session." : "Structured activity across all retained agent sessions."} action=${route.id ? html`<a class="button secondary" href=${agentRoute("timeline")}><${Icon} name="users" size=${17} />All agents</a>` : null} /><${TimelineList} events=${events} /></section>`;
 }
 
-function AgentChrome({ layout, state, route, connection, onRetry, onSettings, children }) {
+function AgentChrome({ layout, state, route, connection, onRetry, onSettings, onCreate, children }) {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const pending = state.decisions.filter((item) => item.status === "pending").length;
   const items = state.reviewEnabled ? AGENT_DESTINATIONS : LEGACY_AGENT_DESTINATIONS;
@@ -758,8 +759,8 @@ function AgentChrome({ layout, state, route, connection, onRetry, onSettings, ch
     },
     onNavigate: (destination) => navigateAgentRoute(destination),
   };
-  if (layout === "compact") return html`<div class="agent-workspace agent-workspace-compact app-shell"><${AgentHeader} compact=${true} connection=${connection} onConnection=${() => setConnectionOpen(true)} onSettings=${onSettings} /><main class="agent-workspace-main">${children}</main><${WorkspaceNav} navigation=${navigation} layout="compact" />${connectionOpen ? html`<${Dialog} title="Connection" subtitle=${connectionLabel(connection)} onClose=${() => setConnectionOpen(false)}><${ConnectionDetails} connection=${connection} onRetry=${onRetry} /><//>` : null}</div>`;
-  return html`<div class=${cx("agent-workspace", `agent-workspace-${layout}`, "app-shell")}><aside class="agent-workspace-sidebar"><${AgentHeader} connection=${connection} onConnection=${() => setConnectionOpen(true)} onSettings=${onSettings} /><${WorkspaceNav} navigation=${navigation} layout="wide" /><div class="agent-sidebar-summary"><strong>${state.agents.length}</strong><span>agents</span><strong>${pending}</strong><span>need you</span></div></aside><main class="agent-workspace-main">${children}</main>${connectionOpen ? html`<${Dialog} title="Connection" subtitle=${connectionLabel(connection)} onClose=${() => setConnectionOpen(false)}><${ConnectionDetails} connection=${connection} onRetry=${onRetry} /><//>` : null}</div>`;
+  if (layout === "compact") return html`<div class="agent-workspace agent-workspace-compact app-shell"><${AgentHeader} compact=${true} connection=${connection} onConnection=${() => setConnectionOpen(true)} onSettings=${onSettings} onCreate=${onCreate} /><main class="agent-workspace-main">${children}</main><${WorkspaceNav} navigation=${navigation} layout="compact" />${connectionOpen ? html`<${Dialog} title="Connection" subtitle=${connectionLabel(connection)} onClose=${() => setConnectionOpen(false)}><${ConnectionDetails} connection=${connection} onRetry=${onRetry} /><//>` : null}</div>`;
+  return html`<div class=${cx("agent-workspace", `agent-workspace-${layout}`, "app-shell")}><aside class="agent-workspace-sidebar"><${AgentHeader} connection=${connection} onConnection=${() => setConnectionOpen(true)} onSettings=${onSettings} onCreate=${onCreate} /><${WorkspaceNav} navigation=${navigation} layout="wide" /><div class="agent-sidebar-summary"><strong>${state.agents.length}</strong><span>agents</span><strong>${pending}</strong><span>need you</span></div></aside><main class="agent-workspace-main">${children}</main>${connectionOpen ? html`<${Dialog} title="Connection" subtitle=${connectionLabel(connection)} onClose=${() => setConnectionOpen(false)}><${ConnectionDetails} connection=${connection} onRetry=${onRetry} /><//>` : null}</div>`;
 }
 
 export function AgentWorkspace({
@@ -770,6 +771,8 @@ export function AgentWorkspace({
   onRetry,
   onBroadcast,
   onSettings,
+  onCreate,
+  openPaneId,
 }) {
   const capability = agentContextCapability(config);
   const reviewCapability = agentReviewCapability(config);
@@ -785,7 +788,19 @@ export function AgentWorkspace({
     return () => agentStore.stop();
   }, [config]);
 
-  if (!capability.enabled) return html`<${Workspace} layout=${layout} panes=${panes} connection=${connection} onRetry=${onRetry} onBroadcast=${onBroadcast} onSettings=${onSettings} />`;
+  useEffect(() => {
+    if (!config || capability.enabled || !rawRoute.valid || !globalThis.history?.replaceState) return;
+    globalThis.history.replaceState(
+      globalThis.history.state,
+      "",
+      `${globalThis.location.pathname}${globalThis.location.search}`,
+    );
+    if (typeof globalThis.Event === "function") {
+      globalThis.dispatchEvent(new globalThis.Event("hashchange"));
+    }
+  }, [Boolean(config), capability.enabled, rawRoute.valid]);
+
+  if (!capability.enabled) return html`<${Workspace} layout=${layout} panes=${panes} connection=${connection} onRetry=${onRetry} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} openPaneId=${openPaneId} />`;
 
   const pending = state.decisions.filter((item) => item.status === "pending").length;
   const navigation = {
@@ -799,7 +814,7 @@ export function AgentWorkspace({
     paneId: route.destination === "panes" ? route.id : "",
   };
   if (route.destination === "panes" || route.destination === "stats") {
-    return html`<${Workspace} layout=${layout} panes=${panes} connection=${connection} onRetry=${onRetry} onBroadcast=${onBroadcast} onSettings=${onSettings} workspaceNav=${navigation} />`;
+    return html`<${Workspace} layout=${layout} panes=${panes} connection=${connection} onRetry=${onRetry} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} openPaneId=${openPaneId} workspaceNav=${navigation} />`;
   }
 
   let content;
@@ -810,5 +825,5 @@ export function AgentWorkspace({
   else if (route.destination === "timeline") content = html`<${TimelineDestination} state=${state} route=${route} />`;
   else content = html`<${AgentDestination} state=${state} route=${route} panes=${panes} connection=${connection} layout=${layout} />`;
 
-  return html`<${AgentChrome} layout=${layout} state=${state} route=${route} connection=${connection} onRetry=${onRetry} onSettings=${onSettings}>${content}<//>`;
+  return html`<${AgentChrome} layout=${layout} state=${state} route=${route} connection=${connection} onRetry=${onRetry} onSettings=${onSettings} onCreate=${onCreate}>${content}<//>`;
 }

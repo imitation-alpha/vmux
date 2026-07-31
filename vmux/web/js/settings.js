@@ -24,6 +24,7 @@ const CATEGORIES = [
   ["appearance", "sun", "Appearance & Alerts"],
   ["input", "keyboard", "Input Shortcuts & Snippets"],
   ["server", "server", "Server & Discovery"],
+  ["experimental", "shield-question", "Experimental"],
   ["agents", "bot", "Agent Overrides & Detectors"],
   ["usage", "chart-no-axes-column", "Usage"],
   ["sessions", "monitor", "Sessions"],
@@ -309,6 +310,32 @@ function AgentSettings({ config, panes, pending, patch }) {
   </div>`;
 }
 
+function ExperimentalSettings({ config, pending, patch }) {
+  const key = "experimental_agent_workspace_enabled";
+  return html`<div>
+    <${SettingGroup}
+      title="Agent Workspace"
+      detail="Experimental features may change as runtime log formats and workspace contracts evolve."
+    >
+      <${SettingRow}
+        label="Enable Agent Workspace"
+        detail="Observes local Codex and Claude runtime logs and stores normalized visible messages, decisions, and timeline history on this server. Turning it off stops observation, review scheduling, agent sockets, and access without deleting existing structured history."
+        align="start"
+      >
+        <${Switch}
+          label="Enable Agent Workspace"
+          checked=${config[key] === true}
+          disabled=${pending.has(key)}
+          onChange=${(value) => patch({ [key]: value }, key, false).catch(reportPatchFailure)}
+        />
+      <//>
+    <//>
+    <${InlineNotice} icon="database">
+      Re-enabling restores access to retained history. Runtime-log locations and retention remain server YAML settings.
+    <//>
+  </div>`;
+}
+
 function UsageSettings({ config, pending, patch }) {
   const [quota, setQuota] = useState(String(config.usage_quota_refresh));
   const [report, setReport] = useState(String(config.usage_report_refresh));
@@ -432,6 +459,7 @@ export function SettingsOverlay({ layout, panes, connection, config: initialConf
     : active === "appearance" ? html`<${AppearanceSettings} />`
     : active === "input" ? html`<${InputSettings} allowedKeys=${allowedKeys} />`
     : active === "server" ? html`<${ServerSettings} config=${server.config} pending=${server.pending} patch=${server.patch} />`
+    : active === "experimental" ? html`<${ExperimentalSettings} config=${server.config} pending=${server.pending} patch=${server.patch} />`
     : active === "agents" ? html`<${AgentSettings} config=${server.config} panes=${panes} pending=${server.pending} patch=${server.patch} />`
     : active === "usage" ? html`<${UsageSettings} config=${server.config} pending=${server.pending} patch=${server.patch} />`
     : active === "sessions" ? html`<${SessionsSettings} />`

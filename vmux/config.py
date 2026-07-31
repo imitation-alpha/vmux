@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -84,6 +85,8 @@ DEFAULT_AUTO_NAMING_SYSTEM_PROMPT = (
 MAX_PATTERNS = 40
 MAX_PATTERN_LEN = 200
 
+CREATION_RUNTIME_IDS = ("codex", "claude", "agy", "grok", "opencode")
+
 # Crude ReDoS guard: reject a group containing * or + that is itself quantified —
 # e.g. (a+)+, (.*)*, (a+){2,} — the dominant catastrophic-backtracking shape.
 # Not exhaustive (a determined token-holder can still craft one, but they already
@@ -97,6 +100,14 @@ class PaneOverride:
     name: Optional[str] = None
     kind: Optional[str] = None
     star: bool = False               # keep at top + visible even when offline
+
+
+@dataclass(frozen=True)
+class CreationRoot:
+    """One canonically resolved filesystem boundary exposed to clients."""
+
+    label: str
+    path: str
 
 
 @dataclass
@@ -158,14 +169,23 @@ class Config:
     auto_naming_antigravity_flags: List[str] = field(default_factory=list)
     auto_naming_cache_path: Optional[str] = field(default=None, repr=False)
 
-    # Structured Agent Context is YAML-only for v1.  It reads runtime-owned
-    # session logs but stores only normalized context/messages/decisions.
-    agent_context_enabled: bool = True
+    # Structured Agent Context is one opt-in experimental workspace bundle.
+    # Activation is controlled only by the UI-managed settings overlay; YAML
+    # configures retention and observer locations but cannot enable it.
+    experimental_agent_workspace_enabled: bool = False
     agent_retention_days: int = 30
     agent_store_path: Optional[str] = field(default=None, repr=False)
     agent_codex_home: str = field(default_factory=lambda: os.path.expanduser("~/.codex"), repr=False)
     agent_claude_home: str = field(default_factory=lambda: os.path.expanduser("~/.claude"), repr=False)
     server_instance_id: str = field(default_factory=lambda: str(uuid.uuid4()), repr=False)
+
+    # Optional tmux target creation. This is deliberately YAML-only: roots and
+    # executable argument arrays grant filesystem/process authority and must
+    # never be writable through the settings API or JSON overlay.
+    creation_enabled: bool = False
+    creation_roots: List[CreationRoot] = field(default_factory=list)
+    creation_runtimes: Dict[str, List[str]] = field(default_factory=dict, repr=False)
+    creation_setup_reason: str = field(default="Creation is disabled in server configuration.", repr=False)
 
     # compiled, filled in __post_init__
     generic_re: List["re.Pattern"] = field(default_factory=list, repr=False)
@@ -179,7 +199,70 @@ class Config:
             raise ValueError("bad naming_mode: %s" % self.naming_mode)
         if self.auto_naming_ai_backend not in AUTO_NAMING_BACKENDS:
             raise ValueError("bad auto_naming.ai_backend: %s" % self.auto_naming_ai_backend)
+        self._validate_creation()
         self._recompile()
+
+    def _validate_creation(self) -> None:
+        """Resolve configured roots once and fail closed on invalid entries.
+
+        Invalid roots are rejected from the authorization set. A partially
+        valid list remains usable; an empty valid set disables creation.
+        """
+        valid_roots: List[CreationRoot] = []
+        seen = set()
+        for raw in self.creation_roots:
+            if isinstance(raw, CreationRoot):
+                label, path = raw.label, raw.path
+            elif isinstance(raw, dict):
+                label, path = raw.get("label"), raw.get("path")
+            else:
+                continue
+            if not isinstance(label, str) or not isinstance(path, str):
+                continue
+            label = label.strip()
+            path = path.strip()
+            if not label or len(label) > 80 or not path or "\x00" in path:
+                continue
+            try:
+                expanded = os.path.expanduser(path)
+                resolved = os.path.realpath(expanded)
+                info = os.stat(resolved)
+            except (OSError, ValueError):
+                continue
+            if not stat.S_ISDIR(info.st_mode) or not os.access(resolved, os.R_OK | os.X_OK):
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            valid_roots.append(CreationRoot(label=label, path=resolved))
+        self.creation_roots = valid_roots
+
+        valid_runtimes: Dict[str, List[str]] = {}
+        for runtime_id in CREATION_RUNTIME_IDS:
+            raw_command = self.creation_runtimes.get(runtime_id)
+            if not isinstance(raw_command, list) or not raw_command:
+                continue
+            command = []
+            malformed = False
+            for arg in raw_command:
+                if not isinstance(arg, str) or not arg or "\x00" in arg or len(arg) > 1000:
+                    malformed = True
+                    break
+                command.append(arg)
+            if not malformed and len(command) <= 64:
+                valid_runtimes[runtime_id] = command
+        self.creation_runtimes = valid_runtimes
+
+        if not self.creation_enabled:
+            self.creation_setup_reason = "Creation is disabled in server configuration."
+        elif not self.creation_roots:
+            self.creation_setup_reason = "No valid creation roots are configured."
+        else:
+            self.creation_setup_reason = ""
+
+    @property
+    def creation_configured(self) -> bool:
+        return self.creation_enabled and bool(self.creation_roots)
 
     def _recompile(self) -> None:
         # compiled with the `regex` module so detectors can match with a timeout=
@@ -204,12 +287,17 @@ class Config:
             "usage_quota_refresh": self.usage_quota_refresh,
             "usage_report_refresh": self.usage_report_refresh,
             "usage_alert_threshold": self.usage_alert_threshold,
+            "experimental_agent_workspace_enabled": self.experimental_agent_workspace_enabled,
         }
 
     def apply_patch(self, data: dict) -> None:
         """Validate + apply a partial settings update in place. Raises ValueError
         on bad input (the server maps that to HTTP 400). Recompiles regexes so
         the change takes effect on the next poll."""
+        if "experimental_agent_workspace_enabled" in data:
+            value = data["experimental_agent_workspace_enabled"]
+            if not isinstance(value, bool):
+                raise ValueError("experimental_agent_workspace_enabled must be true or false")
         if "poll_interval" in data:
             try:
                 pi = float(data["poll_interval"])
@@ -268,6 +356,10 @@ class Config:
             except (TypeError, ValueError):
                 raise ValueError("usage_alert_threshold must be a number")
             self.usage_alert_threshold = min(100.0, max(0.0, v))
+        if "experimental_agent_workspace_enabled" in data:
+            self.experimental_agent_workspace_enabled = data[
+                "experimental_agent_workspace_enabled"
+            ]
         # usage_command is deliberately NOT patchable: it is exec'd, so it may
         # only come from the local YAML file, never over the HTTP API.
         for key in ("generic_prompt_patterns", "error_patterns"):
@@ -406,6 +498,35 @@ def load(path: Optional[str]) -> Config:
     usage = data.get("usage", {}) or {}
     auto_naming = data.get("auto_naming", {}) or {}
     agents = data.get("agents", {}) or {}
+    creation = data.get("creation", {}) or {}
+
+    if not isinstance(creation, dict):
+        raise SystemExit("creation must be a mapping")
+    creation_enabled = creation.get("enabled", False)
+    if not isinstance(creation_enabled, bool):
+        raise SystemExit("creation.enabled must be true or false")
+    raw_creation_roots = creation.get("roots", []) or []
+    if not isinstance(raw_creation_roots, list):
+        raise SystemExit("creation.roots must be a list")
+    creation_roots: List[CreationRoot] = []
+    for entry in raw_creation_roots:
+        if not isinstance(entry, dict):
+            continue
+        if not isinstance(entry.get("label"), str) or not isinstance(entry.get("path"), str):
+            continue
+        creation_roots.append(CreationRoot(
+            label=entry["label"],
+            path=entry["path"],
+        ))
+    raw_creation_runtimes = creation.get("runtimes", {}) or {}
+    if not isinstance(raw_creation_runtimes, dict):
+        raise SystemExit("creation.runtimes must be a mapping")
+    unknown_creation_runtimes = set(raw_creation_runtimes) - set(CREATION_RUNTIME_IDS)
+    if unknown_creation_runtimes:
+        raise SystemExit(
+            "creation.runtimes contains unsupported presets: %s"
+            % ", ".join(sorted(str(value) for value in unknown_creation_runtimes))
+        )
 
     apns_env = str(push.get("environment", "sandbox") or "sandbox")
     if apns_env not in ("sandbox", "production"):
@@ -487,10 +608,12 @@ def load(path: Optional[str]) -> Config:
             [],
             split_shell=True,
         ),
-        agent_context_enabled=bool(agents.get("enabled", True)),
         agent_retention_days=min(3650, max(1, int(agents.get("retention_days", 30)))),
         agent_codex_home=os.path.expanduser(str(agents.get("codex_home", "~/.codex") or "~/.codex")),
         agent_claude_home=os.path.expanduser(str(agents.get("claude_home", "~/.claude") or "~/.claude")),
+        creation_enabled=creation_enabled,
+        creation_roots=creation_roots,
+        creation_runtimes=dict(raw_creation_runtimes),
     )
     # layer UI-managed settings (if any) over the YAML — overlay wins
     cfg.overlay_path = _overlay_path_for(path)

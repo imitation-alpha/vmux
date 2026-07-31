@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "generatedAt": "2026-07-29T12:00:00Z",
+    "version": "4.7.0",
+    "dateRange": {"start": "2026-07-29", "end": "2026-07-29"}
+  },
+  "summary": {
+    "totalTokens": 150,
+    "totalCost": 0.25,
+    "totalDays": 1,
+    "activeDays": 1,
+    "averagePerDay": 0.25,
+    "maxCostInSingleDay": 0.25,
+    "clients": ["antigravity"],
+    "models": ["gemini-synthetic"]
+  },
+  "years": [],
+  "contributions": [{
+    "date": "2026-07-29",
+    "totals": {"tokens": 150, "cost": 0.25, "messages": 2},
+    "intensity": 1,
+    "tokenBreakdown": {"input": 100, "output": 25, "cacheRead": 20, "cacheWrite": 5, "reasoning": 0},
+    "clients": [{
+      "client": "antigravity",
+      "modelId": "gemini-synthetic",
+      "providerId": "google",
+      "tokens": {"input": 100, "output": 25, "cacheRead": 20, "cacheWrite": 5, "reasoning": 0},
+      "cost": 0.25,
+      "messages": 2
+    }],
+    "activeTimeMs": 1000
+  }],
+  "timeMetrics": {"totalActiveTimeMs": 1000}
+}

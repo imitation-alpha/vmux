@@ -19,7 +19,7 @@ def test_editable_dict_has_expected_keys():
         "poll_interval", "capture_lines", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
         "usage_enabled", "usage_quota_refresh", "usage_report_refresh",
-        "usage_alert_threshold",
+        "usage_alert_threshold", "experimental_agent_workspace_enabled",
     }
     # the exec'd command must never be exposed to (or settable from) the UI
     assert "usage_command" not in d
@@ -80,6 +80,14 @@ def test_tmux_auto_rename_yaml_can_opt_out(tmp_path):
     cfgfile.write_text("tmux:\n  disable_auto_rename: false\n")
     c = config.load(str(cfgfile))
     assert c.disable_tmux_auto_rename is False
+
+
+def test_creation_enabled_requires_a_yaml_boolean(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text('creation:\n  enabled: "false"\n')
+
+    with pytest.raises(SystemExit, match="creation.enabled must be true or false"):
+        config.load(str(cfgfile))
 
 
 def test_naming_mode_loads_from_yaml(tmp_path):
@@ -279,6 +287,45 @@ def test_usage_patch_clamps_and_command_immutable():
     assert c.usage_command == "tokscale"
 
 
+def test_experimental_agent_workspace_is_strict_opt_in_and_overlay_persisted(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("agents:\n  enabled: true\n  retention_days: 45\n")
+
+    fresh = config.load(str(cfgfile))
+    assert fresh.experimental_agent_workspace_enabled is False
+    assert fresh.agent_retention_days == 45
+
+    fresh.apply_patch({"experimental_agent_workspace_enabled": True})
+    config.save_overlay(fresh)
+    restored = config.load(str(cfgfile))
+    assert restored.experimental_agent_workspace_enabled is True
+    assert config._load_overlay(restored.overlay_path)[
+        "experimental_agent_workspace_enabled"
+    ] is True
+
+
+@pytest.mark.parametrize("invalid", [1, 0, "true", "false", None, [], {}])
+def test_experimental_agent_workspace_rejects_non_booleans(invalid):
+    cfg = config.Config()
+    with pytest.raises(
+        ValueError,
+        match="experimental_agent_workspace_enabled must be true or false",
+    ):
+        cfg.apply_patch({"experimental_agent_workspace_enabled": invalid})
+    assert cfg.experimental_agent_workspace_enabled is False
+
+
+def test_upgraded_overlay_without_experimental_key_defaults_off(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("agents:\n  enabled: true\n")
+    (tmp_path / "vmux-settings.json").write_text('{"poll_interval": 2.0}')
+
+    loaded = config.load(str(cfgfile))
+
+    assert loaded.poll_interval == 2.0
+    assert loaded.experimental_agent_workspace_enabled is False
+
+
 def test_overlay_roundtrip_preserves_yaml(tmp_path):
     cfgfile = tmp_path / "config.yaml"
     cfgfile.write_text("server:\n  token: secret123\npoll_interval: 0.7\n")
@@ -307,3 +354,51 @@ def test_corrupt_overlay_ignored(tmp_path):
     (tmp_path / "vmux-settings.json").write_text("{ not valid json ")
     c = config.load(str(cfgfile))  # should not raise
     assert c.poll_interval == 0.5
+
+
+def test_creation_yaml_is_canonical_and_not_editable(tmp_path):
+    root = tmp_path / "products"
+    root.mkdir()
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "creation:\n"
+        "  enabled: true\n"
+        "  roots:\n"
+        "    - label: Products\n"
+        f"      path: {root}\n"
+        "  runtimes:\n"
+        "    codex: [codex, --safe]\n"
+        "    grok: [grok]\n"
+    )
+
+    c = config.load(str(cfgfile))
+
+    assert c.creation_configured is True
+    assert c.creation_roots == [config.CreationRoot("Products", str(root.resolve()))]
+    assert c.creation_runtimes == {"codex": ["codex", "--safe"], "grok": ["grok"]}
+    editable = c.editable_dict()
+    assert not any(key.startswith("creation") for key in editable)
+
+
+def test_creation_rejects_invalid_roots_and_disables_without_valid_root(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text(
+        "creation:\n"
+        "  enabled: true\n"
+        "  roots:\n"
+        "    - label: Missing\n"
+        "      path: /definitely/not/a/vmux/root\n"
+    )
+
+    c = config.load(str(cfgfile))
+
+    assert c.creation_roots == []
+    assert c.creation_configured is False
+    assert c.creation_setup_reason == "No valid creation roots are configured."
+
+
+def test_creation_rejects_unknown_runtime_preset(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("creation:\n  runtimes:\n    arbitrary: [sh]\n")
+    with pytest.raises(SystemExit, match="unsupported presets"):
+        config.load(str(cfgfile))

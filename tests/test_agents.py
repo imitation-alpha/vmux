@@ -42,6 +42,7 @@ def _obs(tmp_path, *, runtime="codex", status="idle", question=None, menu=(), cr
 
 def _cfg(tmp_path):
     return Config(
+        experimental_agent_workspace_enabled=True,
         agent_store_path=str(tmp_path / "state" / "agents.sqlite3"),
         agent_codex_home=str(tmp_path / "codex"),
         agent_claude_home=str(tmp_path / "claude"),
@@ -291,6 +292,7 @@ def test_agent_api_contract_and_capability_advertisement(tmp_path):
     context.update({"goal": "API contract", "last_updated": time.time()})
     store.apply_projection(agent["id"], context, [], [], [])
     client = TestClient(app)
+    client.__enter__()  # run the real server lifespan before capability checks
     auth = {"Authorization": "Bearer secret"}
     config = client.get("/api/config", headers=auth).json()
     feature = config["_info"]["capabilities"]["agent_context_v1"]
@@ -303,3 +305,4 @@ def test_agent_api_contract_and_capability_advertisement(tmp_path):
     timeline = client.get("/api/timeline", headers=auth).json()
     assert set(timeline) == {"events", "next_cursor"}
     assert {"type", "title", "occurred_at"} <= set(timeline["events"][0])
+    client.__exit__(None, None, None)

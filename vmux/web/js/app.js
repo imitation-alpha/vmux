@@ -23,7 +23,8 @@ import {
 import { SettingsOverlay } from "./settings.js";
 import { TokenGate } from "./ui.js";
 import { AgentWorkspace } from "./agent-ui.js";
-import { useAgentState } from "./agent-state.js";
+import { navigateAgentRoute, useAgentState } from "./agent-state.js";
+import { CreationDialog, creationCapability } from "./creation.js";
 import { UsageProvider } from "./usage.js";
 
 function useServiceWorkerLifecycle() {
@@ -245,9 +246,17 @@ function App() {
   const lifecycle = useServiceWorkerLifecycle();
   const [broadcast, setBroadcast] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [creation, setCreation] = useState(null);
+  const [pendingCreated, setPendingCreated] = useState(null);
+  const [createdPaneID, setCreatedPaneID] = useState("");
+  const [creationNotice, setCreationNotice] = useState(null);
   const [configOverride, setConfigOverride] = useState(null);
   const config = configOverride || state.config;
-  useAttentionNotifications(state.panes, agentState.review);
+  const createCapability = creationCapability(config);
+  useAttentionNotifications(
+    state.panes,
+    config?.experimental_agent_workspace_enabled === true ? agentState.review : null,
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -263,6 +272,36 @@ function App() {
     };
   }, []);
   useEffect(() => { if (state.config) setConfigOverride(state.config); }, [state.config]);
+  useEffect(() => {
+    if (!pendingCreated) return undefined;
+    if (state.panes.some((pane) => pane.id === pendingCreated.paneId)) {
+      if (config?._info?.capabilities?.agent_context_v1?.enabled === true) {
+        navigateAgentRoute("panes", pendingCreated.paneId);
+      } else {
+        setCreatedPaneID(pendingCreated.paneId);
+      }
+      setCreationNotice({
+        status: "success",
+        message: `Created ${pendingCreated.target} and opened its pane.`,
+      });
+      setPendingCreated(null);
+      return undefined;
+    }
+    const remaining = Math.max(0, pendingCreated.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      setCreationNotice({
+        status: "success",
+        message: `Created ${pendingCreated.target}, but its pane has not appeared. Refresh the workspace.`,
+      });
+      setPendingCreated(null);
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [config, pendingCreated, state.panes]);
+  useEffect(() => {
+    if (!creationNotice) return undefined;
+    const timer = setTimeout(() => setCreationNotice(null), 7000);
+    return () => clearTimeout(timer);
+  }, [creationNotice]);
 
   const retry = useCallback(() => {
     vmuxStore.retry().catch((err) => console.warn("[vmux] manual retry failed", err instanceof Error ? err.name : "error"));
@@ -271,6 +310,14 @@ function App() {
     await clearCredentials({ reload: false });
     localStorage.setItem(TOKEN_KEY, token);
     location.replace(`${location.pathname}${location.hash || ""}`);
+  };
+  const created = (result) => {
+    setCreation(null);
+    setCreationNotice({ status: "success", message: `Created ${result.target}. Opening its pane…` });
+    setPendingCreated({ paneId: result.pane_id, target: result.target, expiresAt: Date.now() + 10000 });
+    vmuxStore.refreshState().catch((error) => {
+      console.warn("[vmux] post-creation refresh failed", error instanceof Error ? error.name : "error");
+    });
   };
 
   if (state.connection.mode === "unauthorized") {
@@ -285,6 +332,8 @@ function App() {
       onRetry=${retry}
       onBroadcast=${() => setBroadcast(true)}
       onSettings=${() => setSettings(true)}
+      onCreate=${createCapability.supported ? (initial = {}) => setCreation(initial) : null}
+      openPaneId=${createdPaneID}
     />
     ${broadcast ? html`<${BroadcastDialog} panes=${state.panes} connection=${state.connection} onClose=${() => setBroadcast(false)} />` : null}
     ${settings ? html`<${SettingsOverlay}
@@ -296,7 +345,15 @@ function App() {
       onRetry=${retry}
       onClose=${() => setSettings(false)}
     />` : null}
-    <${ActionAnnouncement} event=${state.lastEvent} />
+    ${creation ? html`<${CreationDialog}
+      panes=${state.panes}
+      connection=${state.connection}
+      config=${config}
+      initial=${creation}
+      onClose=${() => setCreation(null)}
+      onCreated=${created}
+    />` : null}
+    <${ActionAnnouncement} event=${creationNotice || state.lastEvent} />
     <${UpdateBanner} lifecycle=${lifecycle} />
   <//>`;
 }

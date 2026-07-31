@@ -12,8 +12,7 @@ vmux follows Semantic Versioning style with an explicit pre-1.0 policy.
   a migration path.
 - v1.0 will mark a stronger compatibility commitment.
 
-The current tree is the v0.1.0 release candidate; no v0.1.0 PyPI release, tag,
-or GitHub Release exists yet.
+The first published backend and PWA release is v0.1.0.
 
 ## Public surface
 
@@ -86,6 +85,14 @@ work unchanged. A client that offers image upload must treat `404` from an
 older compatible server as feature unavailability, keep the draft, and leave
 ordinary text submission available.
 
+`tmux_create_v1` plus `GET /api/tmux/creation`,
+`GET /api/tmux/directories`, and `POST /api/tmux/create` are also additive
+protocol 1 surfaces. Updated clients hide creation when the capability is
+absent; older clients ignore the unknown capability and continue monitoring and
+acting on panes. Adding `grok` to the server-owned runtime allowlist is additive:
+the existing `agy` ID still means Antigravity, while clients display the new
+entry as Grok Build. No existing request, pane, or WebSocket frame changed.
+
 The bundled web client expects protocol 1 and a compatible server version of
 0.1.0 or newer. Missing server version or compatibility metadata is a legacy,
 **Unverified** condition: the PWA may continue after `/api/config` and
@@ -110,8 +117,8 @@ shape is documented in the [client API](client-api.md).
 
 ## Supported versions
 
-Security fixes support the latest release only. Before the first release,
-security fixes land on `main`. No long-term-support branch is promised.
+Security fixes support the latest release only and land on `main` for the next
+release. No long-term-support branch is promised.
 
 The supported Python range is 3.10–3.14. macOS is the daily-use platform; Linux
 is expected but needs broader verification, and WSL is not yet verified.

@@ -103,3 +103,58 @@ def test_process_start_parser(monkeypatch):
     monkeypatch.setattr(tmux.subprocess, "run", lambda *args, **kwargs: Result())
     assert isinstance(tmux._process_started("4321"), float)
     assert tmux._process_started("not-a-pid") is None
+
+
+def test_create_session_uses_detached_argument_list(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tmux,
+        "_run",
+        lambda args, **kw: calls.append(args) or "%7\twork:0.0\n",
+    )
+
+    result = tmux.create_session("work", "/srv/products", ["codex", "--safe"])
+
+    assert result == {"pane_id": "%7", "target": "work:0.0"}
+    assert calls == [[
+        "new-session", "-d", "-P", "-F", tmux._CREATE_FORMAT,
+        "-s", "work", "-c", "/srv/products", "--", "codex", "--safe",
+    ]]
+
+
+def test_create_window_uses_detached_argument_list(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tmux,
+        "_run",
+        lambda args, **kw: calls.append(args) or "%8\twork:2.0\n",
+    )
+
+    result = tmux.create_window("work", "api", "/srv/api")
+
+    assert result == {"pane_id": "%8", "target": "work:2.0"}
+    assert calls == [[
+        "new-window", "-d", "-P", "-F", tmux._CREATE_FORMAT,
+        "-t", "work", "-n", "api", "-c", "/srv/api",
+    ]]
+
+
+def test_create_pane_maps_direction_and_size(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tmux,
+        "_run",
+        lambda args, **kw: calls.append(args) or "%9\twork:2.1\n",
+    )
+
+    result = tmux.create_pane("%8", "/srv/api", "side_by_side", 40, ["claude"])
+
+    assert result == {"pane_id": "%9", "target": "work:2.1"}
+    assert calls == [[
+        "split-window", "-d", "-P", "-F", tmux._CREATE_FORMAT,
+        "-t", "%8", "-h", "-p", "40", "-c", "/srv/api", "--", "claude",
+    ]]
+
+    calls.clear()
+    tmux.create_pane("%8", "/srv/api", "stacked", 50)
+    assert "-v" in calls[0]

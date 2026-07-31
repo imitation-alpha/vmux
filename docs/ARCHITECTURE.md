@@ -151,13 +151,18 @@ worker activates only after the visible update prompt asks it to do so.
 
 - `usage.py` invokes an explicitly configured tokscale command and normalizes
   quota/history output. The PWA renders that data as quota meters, summary
-  cards, local SVG charts, and an equivalent table. It is disabled by default.
+  cards, local SVG charts, and an equivalent table. Before each serialized
+  report pass it performs a bounded, best-effort Antigravity sync; quota refresh
+  remains independent. It is disabled by default.
 - `push.py` stores registered device tokens locally and can send APNs alerts
   when optional dependencies and credentials are present. Pane and agent
   decision alerts use generic copy; agent decision routing carries only opaque
   identifiers and a revision. Scheduled Review digests are also generic and
   contain only an event type and opaque server id.
 - `naming.py` supplies local naming heuristics and an opt-in AI naming layer.
+- `creation.py` owns canonical root authorization, bounded directory browsing,
+  runtime availability, serialized automatic naming, and detached tmux target
+  creation. Clients select only an allowed runtime ID.
 
 Failures in these optional paths are designed not to terminate the pane polling
 loop.
@@ -173,6 +178,7 @@ built-in defaults < YAML < JSON overlay < CLI overrides
 
 The overlay never rewrites YAML. Bind, token, tmux auto-rename, APNs
 credentials, `usage.command`, and AI backend settings stay YAML/CLI-only.
+Creation roots and runtime arrays are also YAML-only.
 
 ## Trust boundaries
 
@@ -181,6 +187,8 @@ credentials, `usage.command`, and AI backend settings stay YAML/CLI-only.
 An authenticated client can intentionally cause input to be sent to a pane.
 That pane may be a shell or an agent capable of running commands as the vmux OS
 user. The bearer token therefore authorizes a high-impact capability.
+When creation is enabled, it additionally authorizes in-root directory browsing
+and detached process creation as that same OS user.
 
 ### network boundary
 

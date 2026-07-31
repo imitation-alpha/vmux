@@ -13,6 +13,7 @@ from vmux.push import collect_alerts
 
 def config(tmp_path) -> Config:
     cfg = Config(
+        experimental_agent_workspace_enabled=True,
         agent_store_path=str(tmp_path / "agents.sqlite3"),
         agent_codex_home=str(tmp_path / "codex"),
         agent_claude_home=str(tmp_path / "claude"),
@@ -133,6 +134,7 @@ def test_pane_transition_policy_batches_input_and_can_bypass_errors():
 
 def test_hub_due_work_sends_one_digest_updates_state_and_publishes(tmp_path):
     hub = Hub(config(tmp_path))
+    hub.agents._runtime_active = True
     add_changed_agent(hub.agents.store)
     hub.agents.store.update_review_settings(
         interval_present=True, interval_minutes=5, now=100
@@ -156,6 +158,7 @@ def test_hub_due_work_sends_one_digest_updates_state_and_publishes(tmp_path):
 
 def test_hub_empty_window_suppresses_digest_and_invalidation(tmp_path):
     hub = Hub(config(tmp_path))
+    hub.agents._runtime_active = True
     hub.agents.store.update_review_settings(
         interval_present=True, interval_minutes=5, now=100
     )
@@ -175,6 +178,7 @@ def test_hub_empty_window_suppresses_digest_and_invalidation(tmp_path):
 
 def test_hub_poll_uses_database_batching_policy(tmp_path, monkeypatch):
     hub = Hub(config(tmp_path))
+    hub.agents._runtime_active = True
     hub.agents.store.update_review_settings(
         interval_present=True,
         interval_minutes=30,
@@ -204,6 +208,7 @@ def test_due_poll_ingests_current_observations_before_claiming_window(
     tmp_path, monkeypatch
 ):
     hub = Hub(config(tmp_path))
+    hub.agents._runtime_active = True
     hub.agents.store.update_review_settings(
         interval_present=True, interval_minutes=5, now=100
     )

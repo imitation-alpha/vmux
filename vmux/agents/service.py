@@ -95,6 +95,7 @@ class AgentService:
         self._latest: Dict[str, PaneObservation] = {}
         self._latest_lock = threading.RLock()
         self._process_lock = threading.Lock()
+        self._api_lock = threading.RLock()
         self._action_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
         self._control_lock = threading.RLock()
         self._event_lock = threading.RLock()
@@ -108,22 +109,33 @@ class AgentService:
         self._last_prune = 0.0
         self._last_enqueued = 0.0
         self._disabled_reason: Optional[str] = None
+        self._runtime_active = False
         self._history_generation: Dict[str, int] = defaultdict(int)
 
     @property
     def enabled(self) -> bool:
-        return bool(self.cfg.agent_context_enabled and not self._disabled_reason)
+        return bool(
+            self.cfg.experimental_agent_workspace_enabled
+            and not self._disabled_reason
+        )
+
+    @property
+    def runtime_active(self) -> bool:
+        """Whether server-facing APIs and background work may run."""
+        return bool(self.enabled and self._runtime_active)
 
     def disable(self, reason: str) -> None:
         self._disabled_reason = bounded_text(reason, 300) or "startup_failed"
+        self._runtime_active = False
 
     def info(self) -> Dict[str, Any]:
+        enabled = self.runtime_active
         return {
-            "enabled": self.enabled,
+            "enabled": enabled,
             "runtimes": ["codex", "claude"],
-            "websocket": True,
-            "websocket_path": "/ws/agents",
-            "mode": "log_observer",
+            "websocket": enabled,
+            "websocket_path": "/ws/agents" if enabled else None,
+            "mode": "log_observer" if enabled else "disabled",
             "retention_days": self.cfg.agent_retention_days,
             "persistence": "structured_only",
             "chat": "confirmed_idle_only",
@@ -132,24 +144,48 @@ class AgentService:
         }
 
     def review_info(self) -> Dict[str, Any]:
+        enabled = self.runtime_active
         return {
-            "enabled": self.enabled,
+            "enabled": enabled,
             "version": 1,
-            "scheduling": True,
+            "scheduling": enabled,
             "min_interval_minutes": MIN_REVIEW_INTERVAL_MINUTES,
             "max_interval_minutes": MAX_REVIEW_INTERVAL_MINUTES,
         }
 
     async def start(self) -> None:
-        if not self.enabled or self._task is not None:
+        if not self.cfg.experimental_agent_workspace_enabled or self._runtime_active:
             return
-        await asyncio.to_thread(self.store.open)
-        await asyncio.to_thread(self.store.prune)
-        self._loop = asyncio.get_running_loop()
-        self._last_prune = time.time()
-        self._queue = asyncio.Queue(maxsize=1)
-        self._stop = False
-        self._task = asyncio.create_task(self._worker())
+        self._disabled_reason = None
+        try:
+            await asyncio.to_thread(self._open_store)
+            self._loop = asyncio.get_running_loop()
+            self._last_prune = time.time()
+            self._queue = asyncio.Queue(maxsize=1)
+            self._stop = False
+            self._task = asyncio.create_task(self._worker())
+            self._runtime_active = True
+        except Exception:
+            self._runtime_active = False
+            self._queue = None
+            self._task = None
+            await asyncio.to_thread(self._close_store)
+            raise
+
+    def _open_store(self) -> None:
+        with self._api_lock:
+            self.store.open()
+            self.store.prune()
+
+    def _close_store(self) -> None:
+        with self._api_lock:
+            self.store.close()
+
+    @contextlib.contextmanager
+    def api_guard(self):
+        """Serialize API calls against runtime shutdown and store closure."""
+        with self._api_lock:
+            yield
 
     def stop(self) -> None:
         self._stop = True
@@ -163,16 +199,29 @@ class AgentService:
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
                     pass
 
-    async def aclose(self) -> None:
-        """Cancel and await the worker before closing its SQLite connection."""
+    async def stop_runtime(self, reason: str = "workspace_disabled") -> None:
+        """Stop observation, writes, and invalidations while retaining history."""
+        self._runtime_active = False
         self._stop = True
+        stop_push = getattr(self.push, "stop_agent_notifications", None)
+        if callable(stop_push):
+            stop_push()
+        self._close_subscribers(reason)
         task = self._task
         if task is not None:
             self.stop()
             with contextlib.suppress(asyncio.CancelledError):
                 await task  # lets an in-flight to_thread extraction finish
         self._task = None
-        await asyncio.to_thread(self.store.close)
+        self._queue = None
+        self._loop = None
+        with self._latest_lock:
+            self._latest = {}
+        await asyncio.to_thread(self._close_store)
+
+    async def aclose(self) -> None:
+        """Cancel and await the worker before closing its SQLite connection."""
+        await self.stop_runtime("server_shutdown")
 
     def submit(self, observations: Sequence[PaneObservation]) -> None:
         if not self.enabled:
@@ -237,6 +286,8 @@ class AgentService:
             self._process_sync(observations)
 
     def _process_sync(self, observations: Sequence[PaneObservation]) -> None:
+        if not self.enabled:
+            return
         if time.time() - self._last_prune > 86400:
             self.store.prune()
             self._last_prune = time.time()
@@ -464,7 +515,7 @@ class AgentService:
                          message_id=message_id)
 
     def _fire_agent_decision(self, decision: Dict[str, Any]) -> None:
-        if self.push is None:
+        if not self.enabled or self.push is None:
             return
         settings = self.store.get_review_settings()
         if (
@@ -996,6 +1047,8 @@ class AgentService:
             return self._event_cursor
 
     def publish(self, kind: str, agent_id: str, revision: int, **extra) -> None:
+        if not self.enabled:
+            return
         with self._event_lock:
             self._event_cursor += 1
             envelope = {
@@ -1049,3 +1102,20 @@ class AgentService:
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         with self._event_lock:
             self._subscribers.pop(queue, None)
+
+    def _close_subscribers(self, reason: str) -> None:
+        """Wake every agent socket so the server can close it immediately."""
+        with self._event_lock:
+            queues = list(self._subscribers)
+        envelope = {"type": "workspace_disabled", "reason": reason}
+        for queue in queues:
+            try:
+                queue.put_nowait(envelope)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait(envelope)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    # Shutdown is already in progress, so a racing subscriber
+                    # queue needs no further delivery or recovery attempt.
+                    pass

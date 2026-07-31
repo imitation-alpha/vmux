@@ -43,7 +43,7 @@ dependencies = [
 push = ["httpx[http2]>=0.27", "PyJWT[crypto]>=2.8"]
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["httpx2>=2.9.1,<3", "pytest>=8.0", "ruff>=0.6"]
 docs = ["mkdocs-material>=9.6"]
 web-test = [
     "httpx>=0.27",

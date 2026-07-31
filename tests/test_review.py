@@ -19,6 +19,7 @@ from vmux.server import create_app
 
 def config(tmp_path) -> Config:
     return Config(
+        experimental_agent_workspace_enabled=True,
         agent_store_path=str(tmp_path / "agents.sqlite3"),
         agent_codex_home=str(tmp_path / "codex"),
         agent_claude_home=str(tmp_path / "claude"),
@@ -581,6 +582,7 @@ def test_api_review_is_read_only_settings_are_partial_and_ack_is_explicit(tmp_pa
     agent = store.upsert_session("codex", "api", "/private/log", "/project", "v1")
     first = add_snapshot(store, agent["id"], goal="Review API")
     client = TestClient(app)
+    client.__enter__()  # run the real server lifespan before capability checks
     auth = {"Authorization": "Bearer secret"}
 
     capability = client.get("/api/config", headers=auth).json()["_info"][
@@ -679,6 +681,7 @@ def test_api_review_is_read_only_settings_are_partial_and_ack_is_explicit(tmp_pa
     assert disabled["enabled"] is False
     assert disabled["interval_minutes"] is None
     assert disabled["next_due_at"] is None
+    client.__exit__(None, None, None)
 
 
 def test_priority_is_only_explicit_runtime_metadata():

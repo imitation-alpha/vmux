@@ -219,6 +219,7 @@ class PushManager:
         self._jwt_ts: float = 0.0
         self._client = None          # lazy httpx.AsyncClient
         self._warned = False
+        self._agent_tasks: set[asyncio.Task] = set()
 
     @property
     def configured(self) -> bool:
@@ -319,7 +320,9 @@ class PushManager:
             for device in self.registry.registrations()
         ]
         try:
-            asyncio.get_running_loop().create_task(self._send_token_payloads(pairs))
+            self._schedule_agent_notification(
+                lambda: self._send_token_payloads(pairs)
+            )
         except RuntimeError:
             pass
 
@@ -333,11 +336,22 @@ class PushManager:
         if not self.can_send:
             return
         try:
-            asyncio.get_running_loop().create_task(
-                self._send_payloads([self._review_digest_payload()])
+            self._schedule_agent_notification(
+                lambda: self._send_payloads([self._review_digest_payload()])
             )
         except RuntimeError:
             pass
+
+    def _schedule_agent_notification(self, operation_factory) -> None:
+        task = asyncio.get_running_loop().create_task(operation_factory())
+        self._agent_tasks.add(task)
+        task.add_done_callback(self._agent_tasks.discard)
+
+    def stop_agent_notifications(self) -> None:
+        """Cancel decision/review sends when the experimental bundle stops."""
+        for task in list(self._agent_tasks):
+            task.cancel()
+        self._agent_tasks.clear()
 
     def _review_digest_payload(self) -> dict:
         """Build the privacy-minimized, server-wide Review notification."""

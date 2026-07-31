@@ -7,10 +7,14 @@ the documentation.
 
 ## [Unreleased]
 
-This section is the release candidate for v0.1.0. It will become
-`## [0.1.0] - YYYY-MM-DD` only in the commit that is tagged for publication.
+## [0.1.0] - 2026-07-29
 
 ### Added
+
+- Opt-in authenticated tmux session, window, and split-pane creation across the
+  backend, responsive PWA, and native iOS app, with canonical configured roots,
+  fixed server runtime presets including Antigravity and Grok Build, contextual
+  actions, and automatic pane opening.
 
 - FastAPI and WebSocket backend that polls tmux panes, detects agent status,
   parses Claude Code selection dialogs into tappable choices, and safely sends
@@ -41,7 +45,7 @@ This section is the release candidate for v0.1.0. It will become
   tree and active filters, scrollback capture, extracted links, snippets,
   customizable shortcut keys, and free-form reply flows.
 - Optional APNs push support and opt-in tokscale usage/quota reporting with
-  low-quota alerts.
+  low-quota alerts and best-effort Antigravity synchronization before reports.
 - Smart pane naming with local heuristic and optional explicitly configured AI
   backends.
 - Configuration overlays so live UI edits do not rewrite the hand-authored
@@ -123,4 +127,5 @@ This section is the release candidate for v0.1.0. It will become
 - Starlette is constrained to 1.3.1 or newer to exclude
   GHSA-82w8-qh3p-5jfq, a denial-of-service flaw in URL-encoded form parsing.
 
-[Unreleased]: https://github.com/imitation-alpha/vmux/commits/main
+[Unreleased]: https://github.com/imitation-alpha/vmux/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/imitation-alpha/vmux/releases/tag/v0.1.0
