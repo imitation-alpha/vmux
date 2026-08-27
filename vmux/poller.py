@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import os
 import re
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -115,6 +116,7 @@ class Hub:
         self._snapshot_revision = 0
         self._snapshot_signature: Optional[tuple] = None
         self.lifecycle = LifecycleKernel()
+        self._lifecycle_lock = threading.RLock()
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
@@ -124,28 +126,32 @@ class Hub:
         self.created_panes.add(pane_id)
 
     def lifecycle_diagnostics(self, pane_id: str, limit: int = 32) -> dict:
-        if pane_id not in self.states:
-            raise KeyError(pane_id)
-        return self.lifecycle.diagnostics(pane_id, limit)
+        with self._lifecycle_lock:
+            if pane_id not in self.states:
+                raise KeyError(pane_id)
+            return self.lifecycle.diagnostics(pane_id, limit)
 
     def acknowledge_lifecycle(self, pane_id: str, expected_revision: int) -> dict:
-        if pane_id not in self.states:
-            raise KeyError(pane_id)
-        summary = self.lifecycle.acknowledge(pane_id, expected_revision, now=time.time())
-        state = self.states[pane_id]
-        state.lifecycle = summary.to_dict()
-        state.status = project_legacy_status(summary.state)
-        self._update_snapshot_revision()
+        with self._lifecycle_lock:
+            if pane_id not in self.states:
+                raise KeyError(pane_id)
+            summary = self.lifecycle.acknowledge(pane_id, expected_revision, now=time.time())
+            state = self.states[pane_id]
+            state.lifecycle = summary.to_dict()
+            state.status = project_legacy_status(summary.state)
+            self._update_snapshot_revision()
+            result = self.lifecycle.diagnostics(pane_id)
         self.kick()
-        return self.lifecycle.diagnostics(pane_id)
+        return result
 
     def acknowledge_done_after_action(self, pane_id: str) -> None:
-        summary = self.lifecycle.acknowledge_current_done(pane_id, now=time.time())
-        if summary is None or pane_id not in self.states:
-            return
-        self.states[pane_id].lifecycle = summary.to_dict()
-        self.states[pane_id].status = project_legacy_status(summary.state)
-        self._update_snapshot_revision()
+        with self._lifecycle_lock:
+            summary = self.lifecycle.acknowledge_current_done(pane_id, now=time.time())
+            if summary is None or pane_id not in self.states:
+                return
+            self.states[pane_id].lifecycle = summary.to_dict()
+            self.states[pane_id].status = project_legacy_status(summary.state)
+            self._update_snapshot_revision()
 
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
@@ -178,194 +184,197 @@ class Hub:
             for path, value in resolved_workspaces.items()
         }
 
-        now = time.time()
-        new_states: Dict[str, PaneState] = {}
-        new_order: List[str] = []
-        agent_observations: List[PaneObservation] = []
+        with self._lifecycle_lock:
+            now = time.time()
+            new_states: Dict[str, PaneState] = {}
+            new_order: List[str] = []
+            agent_observations: List[PaneObservation] = []
 
-        for pane, captured_text in zip(panes, captures):
-            pid = pane["id"]
-            target = pane["target"]
-            override = self.cfg.overrides.get(target)
-            previous_state = self.states.get(pid)
-            capture_available = captured_text is not None
-            text = captured_text if capture_available else "\n".join(
-                previous_state.lines if previous_state else ()
-            )
-
-            kind = (override.kind if override and override.kind
-                    else previous_state.kind if not capture_available and previous_state
-                    else classify_kind(pane["cmd"], pane["title"], text))
-
-            prev = self._meta.get(pid)
-            if capture_available:
-                digest = _hash(text)
-                changed = prev is None or prev["hash"] != digest
-                activity_changed = prev is not None and prev["hash"] != digest
-                updated = now if changed else (prev["updated"] if prev else now)
-                self._meta[pid] = {"hash": digest, "updated": updated}
-                res = detect(text, kind, activity_changed, self.cfg, pane["title"])
-            else:
-                changed = False
-                updated = prev["updated"] if prev else (
-                    previous_state.updated if previous_state else now
+            for pane, captured_text in zip(panes, captures):
+                pid = pane["id"]
+                target = pane["target"]
+                override = self.cfg.overrides.get(target)
+                previous_state = self.states.get(pid)
+                capture_available = captured_text is not None
+                text = captured_text if capture_available else "\n".join(
+                    previous_state.lines if previous_state else ()
                 )
-                res = DetectResult(
-                    status=previous_state.status if previous_state else STATUS_IDLE,
-                    question=previous_state.question if previous_state else None,
-                    menu=list(previous_state.menu) if previous_state else None,
-                    reason="capture_unavailable",
-                    authority="fallback",
-                    confidence="low",
+
+                kind = (override.kind if override and override.kind
+                        else previous_state.kind if not capture_available and previous_state
+                        else classify_kind(pane["cmd"], pane["title"], text))
+
+                prev = self._meta.get(pid)
+                if capture_available:
+                    digest = _hash(text)
+                    changed = prev is None or prev["hash"] != digest
+                    activity_changed = prev is not None and prev["hash"] != digest
+                    updated = now if changed else (prev["updated"] if prev else now)
+                    self._meta[pid] = {"hash": digest, "updated": updated}
+                    res = detect(text, kind, activity_changed, self.cfg, pane["title"])
+                else:
+                    changed = False
+                    updated = prev["updated"] if prev else (
+                        previous_state.updated if previous_state else now
+                    )
+                    res = DetectResult(
+                        status=previous_state.status if previous_state else STATUS_IDLE,
+                        question=previous_state.question if previous_state else None,
+                        menu=list(previous_state.menu) if previous_state else None,
+                        reason="capture_unavailable",
+                        authority="fallback",
+                        confidence="low",
+                    )
+                # Generic/Codex detectors use changed output as their working hint.
+                # A single quiet capture is common while tmux redraws, so do not
+                # turn a just-active pane idle until it has been quiet briefly.
+                # Attention and errors always win without delay.
+                if (
+                    kind in (KIND_GENERIC, KIND_CODEX)
+                    and res.status == STATUS_IDLE
+                    and previous_state is not None
+                    and previous_state.status == STATUS_WORKING
+                    and now - previous_state.updated < ACTIVITY_GRACE_SECONDS
+                ):
+                    res.status = STATUS_WORKING
+                    res.reason = "activity_grace"
+                    res.authority = "terminal_activity"
+                    res.confidence = "medium"
+                try:
+                    pane_created = float(pane.get("created") or 0)
+                except (TypeError, ValueError):
+                    pane_created = 0.0
+                incarnation_raw = "%s\0%s\0%s" % (pid, str(pane.get("pid", "")), pane_created)
+                incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
+                # Runtime-log observation is part of the opt-in experimental
+                # workspace. Do not even construct observations while it is off.
+                if self.agents.runtime_active:
+                    runtime = runtime_from_command(pane["cmd"])
+                    if runtime is None:
+                        runtime = {
+                            KIND_CLAUDE: "claude",
+                            KIND_CODEX: "codex",
+                        }.get(kind)
+                else:
+                    runtime = None
+                if capture_available and self.agents.runtime_active and runtime in ("codex", "claude"):
+                    agent_observations.append(PaneObservation(
+                        pane_id=pid,
+                        target=target,
+                        command=pane["cmd"],
+                        title=pane["title"],
+                        cwd=pane.get("path", ""),
+                        pid=str(pane.get("pid", "")),
+                        pane_created=pane_created,
+                        runtime=runtime,
+                        status=res.status,
+                        question=res.question,
+                        menu=tuple(item.to_dict() for item in res.menu_list()),
+                        prompt_fingerprint=fingerprint_terminal(text),
+                        observed_at=now,
+                    ))
+
+                # Agent observation is independent of whether the terminal pane is
+                # included in the pane workspace/navigation.
+                if not self._included(pane, kind):
+                    continue
+
+                lifecycle_evidence = [LifecycleEvidence(
+                    state="unknown" if not capture_available else {
+                        "needs_input": "blocked", "error": "error",
+                        "working": "working", "idle": "idle",
+                    }.get(res.status, "unknown"),
+                    reason=res.reason, authority=res.authority,
+                    confidence=res.confidence, observed_at=now,
+                )]
+                structured = self.agents.lifecycle_evidence(pid, incarnation)
+                if structured:
+                    lifecycle_evidence.append(LifecycleEvidence(**structured))
+                if override:
+                    identity = ({"reason": "configuration_override", "authority": "user", "confidence": "high"},)
+                elif agent_kind_from_cmd(pane["cmd"]):
+                    identity = ({"reason": "recognized_process_command", "authority": "process", "confidence": "high"},)
+                elif kind not in (KIND_GENERIC, "shell"):
+                    identity = ({"reason": "strong_screen_signature", "authority": "terminal_ui", "confidence": "medium"},)
+                else:
+                    identity = ({"reason": "generic_fallback", "authority": "fallback", "confidence": "low"},)
+                lifecycle = self.lifecycle.observe(
+                    pid, incarnation, lifecycle_evidence, identity=identity,
+                    process_present=True, now=now,
                 )
-            # Generic/Codex detectors use changed output as their working hint.
-            # A single quiet capture is common while tmux redraws, so do not
-            # turn a just-active pane idle until it has been quiet briefly.
-            # Attention and errors always win without delay.
-            if (
-                kind in (KIND_GENERIC, KIND_CODEX)
-                and res.status == STATUS_IDLE
-                and previous_state is not None
-                and previous_state.status == STATUS_WORKING
-                and now - previous_state.updated < ACTIVITY_GRACE_SECONDS
-            ):
-                res.status = STATUS_WORKING
-                res.reason = "activity_grace"
-                res.authority = "terminal_activity"
-                res.confidence = "medium"
-            try:
-                pane_created = float(pane.get("created") or 0)
-            except (TypeError, ValueError):
-                pane_created = 0.0
-            incarnation_raw = "%s\0%s\0%s" % (pid, str(pane.get("pid", "")), pane_created)
-            incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
-            # Runtime-log observation is part of the opt-in experimental
-            # workspace. Do not even construct observations while it is off.
-            if self.agents.runtime_active:
-                runtime = runtime_from_command(pane["cmd"])
-                if runtime is None:
-                    runtime = {
-                        KIND_CLAUDE: "claude",
-                        KIND_CODEX: "codex",
-                    }.get(kind)
-            else:
-                runtime = None
-            if capture_available and self.agents.runtime_active and runtime in ("codex", "claude"):
-                agent_observations.append(PaneObservation(
-                    pane_id=pid,
+
+                override_name = override.name if override else None
+                smart_name = None
+                if self.cfg.naming_mode == "smart" and not override_name:
+                    smart_name = self.namer.name(pane, text, target)
+                name = choose_name(
+                    self.cfg.naming_mode,
+                    title=pane["title"], window=pane.get("window", ""),
+                    target=target, command=pane["cmd"],
+                    override_name=override_name,
+                    smart_name=smart_name,
+                )
+
+                st = PaneState(
+                    id=pid,
                     target=target,
-                    command=pane["cmd"],
+                    name=name,
+                    kind=kind,
+                    status=project_legacy_status(lifecycle.state),
                     title=pane["title"],
-                    cwd=pane.get("path", ""),
-                    pid=str(pane.get("pid", "")),
-                    pane_created=pane_created,
-                    runtime=runtime,
-                    status=res.status,
                     question=res.question,
-                    menu=tuple(item.to_dict() for item in res.menu_list()),
-                    prompt_fingerprint=fingerprint_terminal(text),
-                    observed_at=now,
-                ))
+                    menu=res.menu_list(),
+                    lines=text.splitlines(),
+                    updated=updated,
+                    changed=changed,
+                    window=pane.get("window", ""),
+                    starred=bool(override and override.star),
+                    interacted=self.interactions.get(pid, 0.0),
+                    lifecycle=lifecycle.to_dict(),
+                    workspace=(
+                        workspace_by_path.get(os.path.realpath(pane.get("path", ""))).to_dict()
+                        if workspace_by_path.get(os.path.realpath(pane.get("path", "")))
+                        else None
+                    ),
+                )
+                new_states[pid] = st
+                new_order.append(pid)
 
-            # Agent observation is independent of whether the terminal pane is
-            # included in the pane workspace/navigation.
-            if not self._included(pane, kind):
-                continue
+            # configured panes that aren't present right now -> offline cards
+            for target, ov in self.cfg.overrides.items():
+                if target in present_targets:
+                    continue
+                pid = "cfg:" + target
+                lifecycle = self.lifecycle.observe(
+                    pid, pid, (),
+                    identity=({"reason": "configuration_override", "authority": "user", "confidence": "high"},),
+                    process_present=False, now=now,
+                )
+                new_states[pid] = PaneState(
+                    id=pid,
+                    target=target,
+                    name=ov.name or target,
+                    kind=ov.kind or "generic",
+                    status=project_legacy_status(lifecycle.state),
+                    starred=ov.star,
+                    lifecycle=lifecycle.to_dict(),
+                )
+                new_order.append(pid)
 
-            lifecycle_evidence = [LifecycleEvidence(
-                state="unknown" if not capture_available else {
-                    "needs_input": "blocked", "error": "error",
-                    "working": "working", "idle": "idle",
-                }.get(res.status, "unknown"),
-                reason=res.reason, authority=res.authority,
-                confidence=res.confidence, observed_at=now,
-            )]
-            structured = self.agents.lifecycle_evidence(pid, incarnation)
-            if structured:
-                lifecycle_evidence.append(LifecycleEvidence(**structured))
-            if override:
-                identity = ({"reason": "configuration_override", "authority": "user", "confidence": "high"},)
-            elif agent_kind_from_cmd(pane["cmd"]):
-                identity = ({"reason": "recognized_process_command", "authority": "process", "confidence": "high"},)
-            elif kind not in (KIND_GENERIC, "shell"):
-                identity = ({"reason": "strong_screen_signature", "authority": "terminal_ui", "confidence": "medium"},)
-            else:
-                identity = ({"reason": "generic_fallback", "authority": "fallback", "confidence": "low"},)
-            lifecycle = self.lifecycle.observe(
-                pid, incarnation, lifecycle_evidence, identity=identity,
-                process_present=True, now=now,
+            review_policy = self.agents.review_notification_policy()
+            self.push.suppress_done_alerts = review_policy["batching_enabled"]
+            alerts = self.push.collect(
+                self.states,
+                new_states,
+                alert_on_needs_input=not review_policy["batching_enabled"],
+                alert_on_error=review_policy["urgent_pane_errors"],
             )
+            self.states = new_states
+            self.order = new_order
+            self.lifecycle.prune(new_states)
+            self._update_snapshot_revision()
+            self.push.fire(alerts)
 
-            override_name = override.name if override else None
-            smart_name = None
-            if self.cfg.naming_mode == "smart" and not override_name:
-                smart_name = self.namer.name(pane, text, target)
-            name = choose_name(
-                self.cfg.naming_mode,
-                title=pane["title"], window=pane.get("window", ""),
-                target=target, command=pane["cmd"],
-                override_name=override_name,
-                smart_name=smart_name,
-            )
-
-            st = PaneState(
-                id=pid,
-                target=target,
-                name=name,
-                kind=kind,
-                status=project_legacy_status(lifecycle.state),
-                title=pane["title"],
-                question=res.question,
-                menu=res.menu_list(),
-                lines=text.splitlines(),
-                updated=updated,
-                changed=changed,
-                window=pane.get("window", ""),
-                starred=bool(override and override.star),
-                interacted=self.interactions.get(pid, 0.0),
-                lifecycle=lifecycle.to_dict(),
-                workspace=(
-                    workspace_by_path.get(os.path.realpath(pane.get("path", ""))).to_dict()
-                    if workspace_by_path.get(os.path.realpath(pane.get("path", "")))
-                    else None
-                ),
-            )
-            new_states[pid] = st
-            new_order.append(pid)
-
-        # configured panes that aren't present right now -> offline cards
-        for target, ov in self.cfg.overrides.items():
-            if target in present_targets:
-                continue
-            pid = "cfg:" + target
-            lifecycle = self.lifecycle.observe(
-                pid, pid, (),
-                identity=({"reason": "configuration_override", "authority": "user", "confidence": "high"},),
-                process_present=False, now=now,
-            )
-            new_states[pid] = PaneState(
-                id=pid,
-                target=target,
-                name=ov.name or target,
-                kind=ov.kind or "generic",
-                status=project_legacy_status(lifecycle.state),
-                starred=ov.star,
-                lifecycle=lifecycle.to_dict(),
-            )
-            new_order.append(pid)
-
-        review_policy = self.agents.review_notification_policy()
-        self.push.suppress_done_alerts = review_policy["batching_enabled"]
-        alerts = self.push.collect(
-            self.states,
-            new_states,
-            alert_on_needs_input=not review_policy["batching_enabled"],
-            alert_on_error=review_policy["urgent_pane_errors"],
-        )
-        self.states = new_states
-        self.order = new_order
-        self.lifecycle.prune(new_states)
-        self._update_snapshot_revision()
         schedule_now = time.time()
         if self.agents.runtime_active:
             if self.agents.review_schedule_is_due(now=schedule_now):
@@ -378,7 +387,6 @@ class Hub:
         # drop interaction timestamps for panes that no longer exist
         self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
         self.created_panes.intersection_update(new_states)
-        self.push.fire(alerts)   # async, best-effort; never blocks the poll
         # Use the same clock sample as the due check above. If the boundary is
         # crossed during this tick, the next tick ingests first and then claims.
         if self.agents.runtime_active:
@@ -386,10 +394,11 @@ class Hub:
 
     # -- snapshot + broadcast ---------------------------------------------- #
     def snapshot(self) -> dict:
-        return {
-            "type": "state",
-            "panes": [self.states[pid].to_dict() for pid in self.order if pid in self.states],
-        }
+        with self._lifecycle_lock:
+            return {
+                "type": "state",
+                "panes": [self.states[pid].to_dict() for pid in self.order if pid in self.states],
+            }
 
     def _update_snapshot_revision(self) -> None:
         """Advance only for a wire-visible pane snapshot change."""
@@ -400,8 +409,9 @@ class Hub:
 
     def review_payload(self, *, now: Optional[float] = None) -> dict:
         """Combine durable agent review state with safe live pane references."""
-        panes = [self.states[pid] for pid in self.order if pid in self.states]
-        return self.agents.review_payload(panes, now=now)
+        with self._lifecycle_lock:
+            panes = [self.states[pid] for pid in self.order if pid in self.states]
+            return self.agents.review_payload(panes, now=now)
 
     def _process_review_schedule(self, *, now: Optional[float] = None) -> None:
         """Claim due review windows and fan out one generic invalidation/digest."""

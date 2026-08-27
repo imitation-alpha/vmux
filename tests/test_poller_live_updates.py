@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -128,3 +129,45 @@ def test_failed_capture_is_unknown_and_preserves_content_identity(monkeypatch):
     asyncio.run(hub.poll_once())
     assert hub.states["%1"].lifecycle["state"] == "working"
     assert hub.states["%1"].changed is False
+
+
+def test_acknowledgment_cannot_be_overwritten_by_inflight_poll(monkeypatch):
+    pane = {**PANE, "cmd": "claude", "title": "Claude Code"}
+    captures = iter(["Claude Code\n⠋ Working… (1s)", "Claude Code\n? for shortcuts"])
+    monkeypatch.setattr(tmux, "list_panes", lambda: [pane])
+    monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
+    hub = Hub(Config())
+    asyncio.run(hub.poll_once())
+
+    observed_done = threading.Event()
+    release_poll = threading.Event()
+    acknowledgment_done = threading.Event()
+    original_observe = hub.lifecycle.observe
+
+    def paused_observe(*args, **kwargs):
+        summary = original_observe(*args, **kwargs)
+        if summary.state == "done":
+            observed_done.set()
+            release_poll.wait(2)
+        return summary
+
+    monkeypatch.setattr(hub.lifecycle, "observe", paused_observe)
+    poll_thread = threading.Thread(target=lambda: asyncio.run(hub.poll_once()))
+    poll_thread.start()
+    assert observed_done.wait(2)
+
+    def acknowledge():
+        hub.acknowledge_lifecycle("%1", 2)
+        acknowledgment_done.set()
+
+    acknowledgment_thread = threading.Thread(target=acknowledge)
+    acknowledgment_thread.start()
+    assert not acknowledgment_done.wait(0.05)
+    release_poll.set()
+    poll_thread.join(2)
+    acknowledgment_thread.join(2)
+
+    assert not poll_thread.is_alive()
+    assert not acknowledgment_thread.is_alive()
+    assert hub.states["%1"].lifecycle["state"] == "idle"
+    assert hub.states["%1"].lifecycle["revision"] == 3
