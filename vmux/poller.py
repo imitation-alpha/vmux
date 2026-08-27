@@ -94,6 +94,7 @@ class Hub:
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts, revision}
         self._meta: Dict[str, dict] = {}   # id -> {hash, updated}
         self.interactions: Dict[str, float] = {}   # pane id -> epoch of last user send
+        self._interaction_generations: Dict[str, int] = {}
         # Shells created through vmux stay visible even when general shell
         # discovery is disabled, so clients can open the successful result.
         self.created_panes = set()
@@ -120,7 +121,11 @@ class Hub:
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
-        self.interactions[pane_id] = time.time()
+        with self._lifecycle_lock:
+            self.interactions[pane_id] = time.time()
+            self._interaction_generations[pane_id] = (
+                self._interaction_generations.get(pane_id, 0) + 1
+            )
 
     def mark_created(self, pane_id: str) -> None:
         self.created_panes.add(pane_id)
@@ -171,6 +176,11 @@ class Hub:
         panes = await asyncio.to_thread(tmux.list_panes)
         self.created_panes.intersection_update(pane["id"] for pane in panes)
         present_targets = {p["target"] for p in panes}
+        with self._lifecycle_lock:
+            capture_generations = {
+                pane["id"]: self._interaction_generations.get(pane["id"], 0)
+                for pane in panes
+            }
 
         # capture all panes concurrently (with configured scrollback depth)
         captures = await asyncio.gather(
@@ -195,7 +205,13 @@ class Hub:
                 target = pane["target"]
                 override = self.cfg.overrides.get(target)
                 previous_state = self.states.get(pid)
-                capture_available = captured_text is not None
+                capture_precedes_interaction = (
+                    capture_generations[pid]
+                    != self._interaction_generations.get(pid, 0)
+                )
+                capture_available = (
+                    captured_text is not None and not capture_precedes_interaction
+                )
                 text = captured_text if capture_available else "\n".join(
                     previous_state.lines if previous_state else ()
                 )
@@ -221,7 +237,11 @@ class Hub:
                         status=previous_state.status if previous_state else STATUS_IDLE,
                         question=previous_state.question if previous_state else None,
                         menu=list(previous_state.menu) if previous_state else None,
-                        reason="capture_unavailable",
+                        reason=(
+                            "capture_precedes_interaction"
+                            if capture_precedes_interaction
+                            else "capture_unavailable"
+                        ),
                         authority="fallback",
                         confidence="low",
                     )
@@ -287,7 +307,11 @@ class Hub:
                     reason=res.reason, authority=res.authority,
                     confidence=res.confidence, observed_at=now,
                 )]
-                structured = self.agents.lifecycle_evidence(pid, incarnation)
+                structured = (
+                    None
+                    if capture_precedes_interaction
+                    else self.agents.lifecycle_evidence(pid, incarnation)
+                )
                 if structured:
                     lifecycle_evidence.append(LifecycleEvidence(**structured))
                 if override:
@@ -374,6 +398,14 @@ class Hub:
             self.lifecycle.prune(new_states)
             self._update_snapshot_revision()
             self.push.fire(alerts)
+            self.interactions = {
+                key: value for key, value in self.interactions.items()
+                if key in new_states
+            }
+            self._interaction_generations = {
+                key: value for key, value in self._interaction_generations.items()
+                if key in new_states
+            }
 
         schedule_now = time.time()
         if self.agents.runtime_active:
@@ -384,8 +416,6 @@ class Hub:
                 await self.agents.process_now(agent_observations)
             else:
                 self.agents.submit(agent_observations)
-        # drop interaction timestamps for panes that no longer exist
-        self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
         self.created_panes.intersection_update(new_states)
         # Use the same clock sample as the due check above. If the boundary is
         # crossed during this tick, the next tick ingests first and then claims.

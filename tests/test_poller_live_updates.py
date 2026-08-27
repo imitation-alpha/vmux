@@ -171,3 +171,35 @@ def test_acknowledgment_cannot_be_overwritten_by_inflight_poll(monkeypatch):
     assert not acknowledgment_thread.is_alive()
     assert hub.states["%1"].lifecycle["state"] == "idle"
     assert hub.states["%1"].lifecycle["revision"] == 3
+
+
+def test_action_invalidates_capture_taken_before_interaction(monkeypatch):
+    pane = {**PANE, "cmd": "claude", "title": "Claude Code"}
+    captures = iter(["Claude Code\n⠋ Working… (1s)", "Claude Code\n? for shortcuts"])
+    monkeypatch.setattr(tmux, "list_panes", lambda: [pane])
+    monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
+    hub = Hub(Config())
+    asyncio.run(hub.poll_once())
+
+    capture_finished = threading.Event()
+    release_poll = threading.Event()
+    original_resolve = hub.workspaces.resolve_active
+
+    async def paused_resolve(paths):
+        capture_finished.set()
+        release_poll.wait(2)
+        return await original_resolve(paths)
+
+    monkeypatch.setattr(hub.workspaces, "resolve_active", paused_resolve)
+    poll_thread = threading.Thread(target=lambda: asyncio.run(hub.poll_once()))
+    poll_thread.start()
+    assert capture_finished.wait(2)
+
+    hub.mark_interaction("%1")
+    hub.acknowledge_done_after_action("%1")
+    release_poll.set()
+    poll_thread.join(2)
+
+    assert not poll_thread.is_alive()
+    assert hub.states["%1"].lifecycle["state"] == "unknown"
+    assert hub.states["%1"].lifecycle["reason"] == "capture_precedes_interaction"

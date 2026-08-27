@@ -81,6 +81,39 @@ def test_done_keyboard_open_acknowledges_completion(
     assert acknowledgments[-1]["body"] == {"id": "%4", "expected_revision": 8}
 
 
+def test_routed_pane_acknowledges_done_only_on_new_open(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    fixture_server.scenario("agent_workspace")
+    panes = fixture_panes()
+    fixture_server.set_panes(panes)
+    page = page_factory(browser_runtime, viewport=(1024, 768))
+    open_app(page, fixture_server, "/#/panes/%254")
+    wait_for_connection(page)
+
+    panes[3]["lifecycle"] = {
+        **panes[3]["lifecycle"], "state": "done", "reason": "work_became_idle",
+    }
+    fixture_server.set_panes(panes)
+    page.wait_for_timeout(1000)
+    assert not any(
+        row["endpoint"] == "/api/panes/lifecycle/acknowledge"
+        for row in fixture_server.action_requests()
+    )
+
+    page.evaluate("location.hash = '#/agents'")
+    page.get_by_role("heading", name="Agents", exact=True).wait_for()
+    page.evaluate("location.hash = '#/panes/%254'")
+    page.wait_for_timeout(500)
+    acknowledgments = [
+        row for row in fixture_server.action_requests()
+        if row["endpoint"] == "/api/panes/lifecycle/acknowledge"
+    ]
+    assert acknowledgments[-1]["body"] == {"id": "%4", "expected_revision": 8}
+
+
 def test_broadcast_queue_includes_done_panes(
     browser_runtime: BrowserRuntime,
     fixture_server: FixtureServer,

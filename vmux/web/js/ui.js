@@ -1341,6 +1341,7 @@ export function Workspace({
   const [filter, setFilterState] = useState(() => preferredFilter(prefs.defaultFilter));
   const [selectedId, setSelectedId] = useState(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const routedPaneOpen = useRef({ id: "", opened: false });
   const stablePanes = useStablePaneOrder(panes, prefs.sort, filter);
 
   const priority = useMemo(() => {
@@ -1355,11 +1356,23 @@ export function Workspace({
   }, [stablePanes, priority, selectedId]);
 
   useEffect(() => {
-    if (!workspaceNav) return;
+    if (!workspaceNav) {
+      routedPaneOpen.current = { id: "", opened: false };
+      return;
+    }
     if (workspaceNav.current === "stats" && filter !== "stats") setFilterState("stats");
     if (workspaceNav.current === "panes" && filter === "stats") setFilterState("queue");
-    if (workspaceNav.paneId && stablePanes.some((pane) => pane.id === workspaceNav.paneId)) {
-      acknowledgeDirectOpen(stablePanes, workspaceNav.paneId, setSelectedId);
+    const routedPaneId = workspaceNav.current === "panes" ? workspaceNav.paneId || "" : "";
+    if (routedPaneOpen.current.id !== routedPaneId) {
+      routedPaneOpen.current = { id: routedPaneId, opened: false };
+    }
+    if (routedPaneId && stablePanes.some((pane) => pane.id === routedPaneId)) {
+      if (!routedPaneOpen.current.opened) {
+        routedPaneOpen.current.opened = true;
+        acknowledgeDirectOpen(stablePanes, routedPaneId, setSelectedId);
+      } else {
+        setSelectedId(routedPaneId);
+      }
     }
   }, [filter, stablePanes, workspaceNav]);
   useEffect(() => {
