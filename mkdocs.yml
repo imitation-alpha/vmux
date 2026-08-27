@@ -93,6 +93,7 @@ nav:
       - CLI: reference/cli.md
       - REST and WebSocket API: reference/client-api.md
       - PaneState wire format: reference/pane-state.md
+      - Pane lifecycle: reference/pane-lifecycle.md
       - Compatibility and versioning: reference/compatibility.md
   - Contributing: contributing.md
   - Security and privacy: security.md

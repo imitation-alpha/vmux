@@ -132,6 +132,7 @@ def collect_alerts(
     *,
     alert_on_needs_input: bool = True,
     alert_on_error: bool = False,
+    alert_on_done: bool = True,
     cooldown: float = 30.0,
 ) -> List[PaneState]:
     """Pure transition detector: which panes just started wanting a human?
@@ -147,18 +148,27 @@ def collect_alerts(
 
     alerts: List[PaneState] = []
     for pid, st in new.items():
-        if st.status not in wanted:
+        lifecycle_state = (st.lifecycle or {}).get("state")
+        is_done = alert_on_done and lifecycle_state == "done"
+        if st.status not in wanted and not is_done:
             continue
         before = prev.get(pid)
-        if before is None or before.status == st.status:
+        before_lifecycle = (before.lifecycle or {}) if before else {}
+        same_done_revision = bool(
+            is_done and before_lifecycle.get("state") == "done"
+            and before_lifecycle.get("revision") == (st.lifecycle or {}).get("revision")
+        )
+        if before is None or same_done_revision or (not is_done and before.status == st.status):
             continue
-        if pid in last_alert and now - last_alert[pid] < cooldown:
+        alert_key = pid + ":done" if is_done else pid
+        if alert_key in last_alert and now - last_alert[alert_key] < cooldown:
             continue
-        last_alert[pid] = now
+        last_alert[alert_key] = now
         alerts.append(st)
 
     for pid in list(last_alert):
-        if pid not in new:
+        live_pid = pid[:-5] if pid.endswith(":done") else pid
+        if live_pid not in new:
             del last_alert[pid]
     return alerts
 
@@ -220,6 +230,7 @@ class PushManager:
         self._client = None          # lazy httpx.AsyncClient
         self._warned = False
         self._agent_tasks: set[asyncio.Task] = set()
+        self.suppress_done_alerts = False
 
     @property
     def configured(self) -> bool:
@@ -255,6 +266,7 @@ class PushManager:
         *,
         alert_on_needs_input: bool = True,
         alert_on_error: Optional[bool] = None,
+        alert_on_done: Optional[bool] = None,
     ) -> List[PaneState]:
         if not (self.configured and self.available):
             if self.configured and not self.available and not self._warned:
@@ -269,6 +281,7 @@ class PushManager:
                 if alert_on_error is None
                 else bool(alert_on_error)
             ),
+            alert_on_done=(not self.suppress_done_alerts if alert_on_done is None else alert_on_done),
             cooldown=self.cfg.push_cooldown,
         )
 
@@ -422,6 +435,15 @@ class PushManager:
         Common confirmations retain only the opaque option keys needed by the
         registered Yes/No actions; arbitrary menus use the generic category.
         """
+        if (pane.lifecycle or {}).get("state") == "done":
+            return {
+                "aps": {
+                    "alert": {"title": "vmux", "body": "An agent completed its work."},
+                    "sound": "default", "thread-id": "vmux",
+                    "interruption-level": "active", "category": "vmux.generic",
+                },
+                "vmux": {"type": "pane_done"},
+            }
         if pane.status == STATUS_ERROR:
             body = "A pane reported an error."
         else:

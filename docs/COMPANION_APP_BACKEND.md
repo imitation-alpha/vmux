@@ -195,6 +195,18 @@ Accepted bodies are exact and type-specific:
 {"type":"pane","parent_pane_id":"%4","cwd":"/path","runtime":"claude","split":"side_by_side","size_percent":50}
 ~~~
 
+Each body must contain exactly one location selector: either `cwd`, as above,
+or an opaque `worktree_id` from a currently represented pane or agent's
+[`workspace` identity](#workspace-identity). For example:
+
+~~~json
+{"type":"session","worktree_id":"wt_0123456789abcdef01234567","runtime":"codex","name":null}
+~~~
+
+The server resolves the id from its current in-memory registry and repeats the
+same canonical creation-root check used for `cwd`; clients must not persist or
+derive worktree ids.
+
 Pane split direction is `side_by_side` or `stacked`; size is an integer from
 10 through 90 and defaults to 50. Session/window names are 1–64 ASCII letters,
 numbers, underscores, or hyphens. `null` asks the server to slugify the working
@@ -209,8 +221,9 @@ Success is `201` after the returned pane is verified live:
 
 New targets are detached and do not change an attached host client. Errors are
 sanitized: `400` invalid shape/value, `403` outside configured roots, `404`
-missing directory or vanished parent, `409` name/tmux conflict, and `503`
-disabled creation, unavailable tmux/runtime, or an immediately exited pane.
+missing or stale worktree/directory or vanished parent, `409` name/tmux
+conflict, and `503` disabled creation, unavailable tmux/runtime, or an
+immediately exited pane.
 Responses never expose subprocess arguments, environment, or stderr.
 
 ## Configuration
@@ -226,7 +239,7 @@ Returns the live-editable fields plus:
     "host": "127.0.0.1",
     "port": 8787,
     "token_set": false,
-    "version": "0.1.0",
+    "version": "0.1.2",
     "compatibility": {
       "protocol_version": 1,
       "minimum_ios_version": "1.0.0"
@@ -253,8 +266,16 @@ Returns the live-editable fields plus:
         "enabled": true,
         "version": 1,
         "scheduling": true,
+        "finish_batch": true,
         "min_interval_minutes": 5,
         "max_interval_minutes": 1440
+      },
+      "pane_lifecycle_v1": {"version": 1, "history_limit": 32},
+      "workspaces_v1": {
+        "version": 1,
+        "supported": true,
+        "enabled": true,
+        "reason": null
       },
       "tmux_create_v1": {
         "version": 1,
@@ -273,18 +294,48 @@ oldest iOS marketing version supported by this server. `targets` contains
 currently represented tmux targets. Push and usage info report
 capability/availability without exposing credentials.
 
-`capabilities.agent_context_v1` gates the independent agent workspace, and
+`capabilities.agent_context_v1` gates the independent agent context, and
 `capabilities.agent_review_v1` gates the cross-client Review workflow. Clients
 must fall back to the terminal workspace when it is absent or disabled.
 `experimental_agent_workspace_enabled` is the authoritative server-persisted
 switch; clients must not hydrate agent REST resources or open `/ws/agents`
 unless it is `true` and the corresponding capability is enabled.
+`capabilities.pane_lifecycle_v1` gates the additive lifecycle summary and
+diagnostics, while `capabilities.workspaces_v1` gates workspace identities.
 `capabilities.tmux_create_v1` independently gates all creation entry points;
 older clients ignore it and updated clients hide creation when it is absent. The
 opaque `server_instance_id` lets a native client reject a notification route
 created by a different vmux server. Capability names and string values are an
 allowlist: an unknown future value must remain read-only until the client
 understands its safety rules.
+
+### Workspace identity
+
+When `workspaces_v1.enabled` is true, a live `PaneState` or `AgentSession` may
+contain this additive `workspace` object:
+
+~~~json
+{
+  "workspace_id": "ws_0123456789abcdef01234567",
+  "workspace_name": "vmux",
+  "worktree_id": "wt_0123456789abcdef01234567",
+  "worktree_name": "vmux-feature",
+  "branch": "feature/lifecycle",
+  "detached_commit": null,
+  "is_primary": false,
+  "launchable": true,
+  "launch_unavailable_reason": null
+}
+~~~
+
+`workspace_id` groups checkouts from the same Git repository;
+`worktree_id` identifies one checkout. Exactly one of `branch` and
+`detached_commit` is normally non-null. Names and branch/commit labels are for
+display only. Paths and Git-directory metadata never cross the API. The object
+is `null` when Git is unavailable, the working directory is not a resolvable
+checkout, or identity resolution fails. `launchable` reflects current tmux
+creation setup and root authorization; clients must still handle a stale id or
+changed launch status when they submit a creation request.
 
 ## Agent context workspace
 
@@ -313,7 +364,8 @@ accepts `status` and `agent_id` filters.
 
 An `AgentSession` contains identity/runtime fields, lifecycle and association,
 `binding_revision`, reported capabilities, extraction health, and a canonical
-`context`:
+`context`. It also carries the additive [`workspace`](#workspace-identity)
+identity when one can be resolved:
 
 ~~~json
 {
@@ -400,7 +452,36 @@ remain available to older clients.
 | --- | --- |
 | `GET /api/review` | Settings, due state, counts, ranked structured groups, and privacy-minimized terminal references |
 | `PATCH /api/review/settings` | Set `interval_minutes` to `null` or 5–1440, and optionally set `urgent_pane_errors`; returns the updated settings object |
+| `PUT /api/review/finish` | Atomically acknowledge 1–10 unique `{"agent_id":"...","snapshot_id":"..."}` targets |
 | `PUT /api/agents/{id}/review` | Monotonically acknowledge `{"snapshot_id":"..."}` and return the effective `snapshot_id`, `snapshot_sequence`, `snapshot_at`, `reviewed_at`, and `advanced` state; an advance resets an enabled timer |
+
+`PUT /api/review/finish` accepts `{"targets":[...]}` and returns
+`{"requested":2,"advanced":2,"unchanged":0,"processed_at":...,"next_due_at":...}`.
+The server validates every target before writing. A missing snapshot or a
+snapshot belonging to another agent returns `409` with no baseline advances.
+Valid targets advance together in one transaction, and the shared Review timer
+is reset once when at least one baseline advances. Replaying the same batch is
+a no-op. Clients must derive targets from an immutable displayed manifest;
+Watch clients send only their opaque run id to the iPhone companion, never
+server targets.
+
+### Apple Watch relay v2
+
+The Watch relay schema is version 2 while the server Review payload remains
+version 1. Its public state contracts are `WatchRelayReviewStatus`,
+`WatchRelayReviewRun`, and `WatchRelayFinishSummary`. Commands are
+`beginReview`, run-bound structured decision replies, `finishReview`, and
+`setReviewSchedule`; incompatible schemas and unexpected kind-specific fields
+are rejected without downgrade. `finishReview` carries only `reviewRunID`.
+
+The iPhone keeps each exact ordered run manifest in memory for 15 minutes and
+clears it on expiry, disconnect, server replacement, capability change, or
+phone restart. Finish is available only when every frozen decision has final
+delivery and all original Review work was representable on Watch. Delivery
+uncertainty stops the sprint and requires an authoritative iPhone refresh;
+mutations are never retried automatically. Schedule changes are limited to
+Off plus the presets advertised by `GET /api/review`; cached Watch state is
+read-only.
 
 `GET /api/review` returns:
 
@@ -457,9 +538,15 @@ refetch and compare every guard and option set. They must never use broadcast
 or automatically retry a conflict.
 
 Terminal items deliberately contain only `id`, `pane_id`, `status`, `kind`,
-`updated_at`, and `acknowledgeable:false`. They never contain pane names,
-targets, paths, prompts, menus, previews, or terminal capture. They remain in
-Review until the live pane state clears.
+`updated_at`, and `acknowledgeable`. The field is `true` only when `status` is
+`done`; it is `false` for blocked, needs-input, and error items. They never
+contain pane names, targets, paths, prompts, menus, previews, or terminal
+capture. Reading Review never acknowledges an item. When a client directly
+opens an acknowledgeable done pane, it matches `pane_id` to the current
+`PaneState` and sends that lifecycle revision to
+`PUT /api/panes/lifecycle/acknowledge`. Done items then leave Review after the
+refreshed pane state arrives. Other terminal items remain until the live pane
+state clears through an applicable pane action or terminal-side change.
 
 Batching is off by default. Enabling or changing the interval schedules the
 next window at `now + interval`; disabling clears it. At a due window, vmux
@@ -537,6 +624,12 @@ Accepts a partial object from the
 [live-editable schema](https://imitation-alpha.github.io/vmux/configuration/#live-editable-schema). Values are
 validated, applied immediately, and persisted to `vmux-settings.json`. Bad
 values return `400`; persistence failure returns `500`.
+
+The editable usage visibility fields are
+`usage_hidden_quota_providers: string[]` and
+`usage_hidden_quota_metrics: {provider: string, label: string}[]`. They match
+tokscale's normalized names exactly and affect only quota cards and meter rows
+on Stats. `GET /api/usage`, warning counts, and alerting remain unfiltered.
 
 `_info`, `version`, and `compatibility` are server-owned and read-only. A
 `PATCH` body cannot override them. Older vmux servers may omit `compatibility`;

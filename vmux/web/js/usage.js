@@ -32,7 +32,11 @@ function classify(snapshot) {
   return snapshot.reason || "error";
 }
 
-export function UsageProvider({ threshold = 20, children }) {
+function quotaMetricKey(provider, label) {
+  return `${provider}\u0000${label}`;
+}
+
+export function UsageProvider({ threshold = 20, hiddenProviders = [], hiddenMetrics = [], children }) {
   const [snapshot, setSnapshot] = useState(null);
   const [histories, setHistories] = useState({});
   const [status, setStatus] = useState("loading");
@@ -106,10 +110,26 @@ export function UsageProvider({ threshold = 20, children }) {
     })).filter((metric) => Number.isFinite(metric.remaining) && metric.remaining <= Number(threshold));
   }, [snapshot, threshold]);
 
+  const visibility = useMemo(() => {
+    const providers = new Set(Array.isArray(hiddenProviders) ? hiddenProviders : []);
+    const metrics = new Set((Array.isArray(hiddenMetrics) ? hiddenMetrics : []).map((value) => (
+      quotaMetricKey(value?.provider, value?.label)
+    )));
+    const quotas = (snapshot?.quotas || []).filter((quota) => !providers.has(quota.provider)).map((quota) => ({
+      ...quota,
+      _reportedMetricCount: (quota.metrics || []).length,
+      metrics: (quota.metrics || []).filter((metric) => !metrics.has(quotaMetricKey(quota.provider, metric.label))),
+    }));
+    const hiddenWarningCount = warnings.filter((metric) => (
+      providers.has(metric.provider) || metrics.has(quotaMetricKey(metric.provider, metric.label))
+    )).length;
+    return { providers, metrics, quotas, hiddenWarningCount };
+  }, [snapshot, warnings, hiddenProviders, hiddenMetrics]);
+
   const value = useMemo(() => ({
-    snapshot, histories, status, error, refreshing, historyRevision, threshold: Number(threshold), warnings,
+    snapshot, histories, status, error, refreshing, historyRevision, threshold: Number(threshold), warnings, visibility,
     loadSummary, loadHistory, refresh,
-  }), [snapshot, histories, status, error, refreshing, historyRevision, threshold, warnings, loadSummary, loadHistory, refresh]);
+  }), [snapshot, histories, status, error, refreshing, historyRevision, threshold, warnings, visibility, loadSummary, loadHistory, refresh]);
   return html`<${UsageContext.Provider} value=${value}>${children}<//>`;
 }
 
@@ -132,8 +152,10 @@ function resetLabel(metric) {
   return metric.resets_at_raw ? `Resets ${metric.resets_at_raw}` : "Reset time unavailable";
 }
 
-function QuotaMeters({ quotas, threshold }) {
-  if (!quotas?.length) return html`<${EmptyState} icon="gauge" title="No provider quotas" detail="Usage totals are available, but no provider quota data was returned." />`;
+function QuotaMeters({ quotas, threshold, unfilteredCount = 0 }) {
+  if (!quotas?.length) return unfilteredCount
+    ? html`<${EmptyState} icon="eye-off" title="All provider quotas are hidden" detail="Choose displayed quotas in Settings → Usage, or use Show all there." />`
+    : html`<${EmptyState} icon="gauge" title="No provider quotas" detail="Usage totals are available, but no provider quota data was returned." />`;
   return html`<div class="quota-grid">
     ${quotas.map((quota) => html`<article class="quota-card" key=${quota.provider}>
       <header>
@@ -151,7 +173,7 @@ function QuotaMeters({ quotas, threshold }) {
           </div>
           <div class="quota-reset">${resetLabel(metric)}</div>
         </div>`;
-      }) : html`<p class="secondary">No quota metrics reported.</p>`}
+      }) : html`<p class="secondary">${quota._reportedMetricCount ? "No quota meters are displayed." : "No quota metrics reported."}</p>`}
     </article>`)}
   </div>`;
 }
@@ -306,7 +328,7 @@ export function UsageDashboard() {
 
     ${usage.error ? html`<${InlineNotice} tone="error" icon="triangle-alert">${usage.error}<//>` : null}
     ${usage.status === "stale" ? html`<${InlineNotice} tone="warning" icon="clock">Showing the last successful snapshot because the newest refresh failed.<//>` : null}
-    ${usage.warnings.length ? html`<${InlineNotice} tone="warning" icon="gauge">${usage.warnings.length} provider quota ${usage.warnings.length === 1 ? "meter is" : "meters are"} at or below ${usage.threshold}% remaining.<//>` : null}
+    ${usage.warnings.length ? html`<${InlineNotice} tone="warning" icon="gauge">${usage.warnings.length} provider quota ${usage.warnings.length === 1 ? "meter is" : "meters are"} at or below ${usage.threshold}% remaining.${usage.visibility.hiddenWarningCount ? ` This includes ${usage.visibility.hiddenWarningCount} hidden ${usage.visibility.hiddenWarningCount === 1 ? "meter" : "meters"}.` : ""}<//>` : null}
 
     ${usage.status === "loading" ? html`<div class="stats-loading"><${Spinner} /><span>Loading usage…</span></div>`
       : !usage.snapshot?.available || ["disabled", "not_installed", "timeout", "error", "empty"].includes(usage.status)
@@ -314,7 +336,7 @@ export function UsageDashboard() {
         : html`<div class="stats-content">
           <${SummaryCards} today=${usage.snapshot.today} />
           <section class="stats-section" aria-labelledby="quota-title"><div class="section-heading"><div><p class="eyebrow">Capacity</p><h2 id="quota-title">Provider quotas</h2></div></div>
-            <${QuotaMeters} quotas=${usage.snapshot.quotas} threshold=${usage.threshold} /></section>
+            <${QuotaMeters} quotas=${usage.visibility.quotas} unfilteredCount=${usage.snapshot.quotas?.length || 0} threshold=${usage.threshold} /></section>
 
           <section class="stats-section" aria-labelledby="history-title">
             <div class="section-heading history-heading"><div><p class="eyebrow">History</p><h2 id="history-title">Usage over time</h2></div>

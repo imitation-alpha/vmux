@@ -10,13 +10,10 @@ This file keeps the repository path deliberately short.
 - tmux with at least one agent running in a pane
 - pipx
 
-## Install the pre-release source
-
-`vmux-agent` is not published to PyPI yet. Install from GitHub until v0.1.0 is
-released:
+## Install
 
 ~~~bash
-pipx install git+https://github.com/imitation-alpha/vmux.git
+pipx install vmux-agent
 ~~~
 
 ## Run locally

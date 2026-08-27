@@ -84,6 +84,8 @@ DEFAULT_AUTO_NAMING_SYSTEM_PROMPT = (
 )
 MAX_PATTERNS = 40
 MAX_PATTERN_LEN = 200
+MAX_HIDDEN_QUOTA_ENTRIES = 256
+MAX_QUOTA_NAME_LEN = 200
 
 CREATION_RUNTIME_IDS = ("codex", "claude", "agy", "grok", "opencode")
 
@@ -92,6 +94,54 @@ CREATION_RUNTIME_IDS = ("codex", "claude", "agy", "grok", "opencode")
 # Not exhaustive (a determined token-holder can still craft one, but they already
 # have shell access), but it blocks the realistic fat-finger / content-trigger case.
 _NESTED_QUANT = re.compile(r"\([^()]*[*+][^()]*\)\s*[*+{]")
+
+
+def _quota_name(value, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("%s must be a string" % field_name)
+    value = value.strip()
+    if len(value) > MAX_QUOTA_NAME_LEN:
+        raise ValueError("%s is too long (max %d chars)" % (field_name, MAX_QUOTA_NAME_LEN))
+    return value
+
+
+def _normalize_quota_visibility(providers, metrics):
+    """Validate the UI-managed tokscale names without changing their case.
+
+    ToksScale's normalized provider/label strings are identifiers here, so the
+    browser and server intentionally use exact, case-sensitive matching.
+    """
+    if not isinstance(providers, list):
+        raise ValueError("usage_hidden_quota_providers must be a list")
+    if not isinstance(metrics, list):
+        raise ValueError("usage_hidden_quota_metrics must be a list")
+    if len(providers) > MAX_HIDDEN_QUOTA_ENTRIES:
+        raise ValueError("too many hidden quota providers (max %d)" % MAX_HIDDEN_QUOTA_ENTRIES)
+    if len(metrics) > MAX_HIDDEN_QUOTA_ENTRIES:
+        raise ValueError("too many hidden quota metrics (max %d)" % MAX_HIDDEN_QUOTA_ENTRIES)
+
+    clean_providers: List[str] = []
+    seen_providers = set()
+    for raw in providers:
+        provider = _quota_name(raw, "hidden quota provider")
+        if provider and provider not in seen_providers:
+            seen_providers.add(provider)
+            clean_providers.append(provider)
+
+    clean_metrics: List[dict] = []
+    seen_metrics = set()
+    for raw in metrics:
+        if not isinstance(raw, dict):
+            raise ValueError("each hidden quota metric must be an object")
+        provider = _quota_name(raw.get("provider"), "hidden quota metric provider")
+        label = _quota_name(raw.get("label"), "hidden quota metric label")
+        if not provider or not label:
+            continue
+        key = (provider, label)
+        if key not in seen_metrics:
+            seen_metrics.add(key)
+            clean_metrics.append({"provider": provider, "label": label})
+    return clean_providers, clean_metrics
 
 
 @dataclass
@@ -146,6 +196,8 @@ class Config:
     usage_quota_refresh: float = 180.0   # seconds between `tokscale usage` calls
     usage_report_refresh: float = 300.0  # seconds between report scans (CPU-heavy)
     usage_alert_threshold: float = 20.0  # push when quota drops below this %; 0 = off
+    usage_hidden_quota_providers: List[str] = field(default_factory=list)
+    usage_hidden_quota_metrics: List[dict] = field(default_factory=list)
 
     # optional smart pane naming (`naming_mode: smart`). The heuristic layer is
     # always local; the AI layer is YAML-only because it can capture pane text,
@@ -199,6 +251,13 @@ class Config:
             raise ValueError("bad naming_mode: %s" % self.naming_mode)
         if self.auto_naming_ai_backend not in AUTO_NAMING_BACKENDS:
             raise ValueError("bad auto_naming.ai_backend: %s" % self.auto_naming_ai_backend)
+        (
+            self.usage_hidden_quota_providers,
+            self.usage_hidden_quota_metrics,
+        ) = _normalize_quota_visibility(
+            self.usage_hidden_quota_providers,
+            self.usage_hidden_quota_metrics,
+        )
         self._validate_creation()
         self._recompile()
 
@@ -287,6 +346,8 @@ class Config:
             "usage_quota_refresh": self.usage_quota_refresh,
             "usage_report_refresh": self.usage_report_refresh,
             "usage_alert_threshold": self.usage_alert_threshold,
+            "usage_hidden_quota_providers": list(self.usage_hidden_quota_providers),
+            "usage_hidden_quota_metrics": [dict(value) for value in self.usage_hidden_quota_metrics],
             "experimental_agent_workspace_enabled": self.experimental_agent_workspace_enabled,
         }
 
@@ -356,6 +417,13 @@ class Config:
             except (TypeError, ValueError):
                 raise ValueError("usage_alert_threshold must be a number")
             self.usage_alert_threshold = min(100.0, max(0.0, v))
+        if "usage_hidden_quota_providers" in data or "usage_hidden_quota_metrics" in data:
+            providers, metrics = _normalize_quota_visibility(
+                data.get("usage_hidden_quota_providers", self.usage_hidden_quota_providers),
+                data.get("usage_hidden_quota_metrics", self.usage_hidden_quota_metrics),
+            )
+            self.usage_hidden_quota_providers = providers
+            self.usage_hidden_quota_metrics = metrics
         if "experimental_agent_workspace_enabled" in data:
             self.experimental_agent_workspace_enabled = data[
                 "experimental_agent_workspace_enabled"

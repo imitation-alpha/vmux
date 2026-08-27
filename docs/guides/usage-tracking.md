@@ -55,6 +55,13 @@ The client endpoints are:
 - `GET /api/usage/history?period=hourly|daily|monthly&days=30`
 - `POST /api/usage/refresh` with `{"scope":"quota"|"reports"|"all"}`
 
+**Settings → Usage → Displayed quotas** controls which provider cards and
+individual meters appear on Stats for every authenticated client. New tokscale
+providers and meters are shown automatically. Hidden choices persist in
+`vmux-settings.json` even when an entry is temporarily absent. This is a display
+preference only: `/api/usage` remains unfiltered, and hidden low quotas still
+count toward the Stats badge and warning notice and can trigger APNs alerts.
+
 `usage.alert_threshold` can send an APNs alert when a known quota crosses from
 above to at or below the selected remaining percentage. Set it to zero to turn
 quota alerts off; APNs must also be configured.

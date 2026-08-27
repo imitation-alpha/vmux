@@ -1333,6 +1333,82 @@ class AgentStore:
             "advanced": advanced,
         }
 
+    def finish_review(self, targets: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Atomically acknowledge a validated set of displayed snapshots.
+
+        Every target is resolved before the first baseline is written.  This is
+        deliberately stricter than repeated ``review`` calls: a stale or
+        mistargeted Watch manifest must never partially finish a server-wide
+        review.
+        """
+        when = time.time()
+        with self.transaction() as conn:
+            snapshots: List[sqlite3.Row] = []
+            for target in targets:
+                snapshot = conn.execute(
+                    """SELECT id,session_id,sequence FROM agent_snapshots
+                       WHERE id=? AND session_id=?""",
+                    (target["snapshot_id"], target["agent_id"]),
+                ).fetchone()
+                if snapshot is None:
+                    raise KeyError((target["agent_id"], target["snapshot_id"]))
+                snapshots.append(snapshot)
+
+            advanced = 0
+            for snapshot in snapshots:
+                current = conn.execute(
+                    "SELECT snapshot_sequence FROM session_reviews WHERE session_id=?",
+                    (snapshot["session_id"],),
+                ).fetchone()
+                should_advance = (
+                    current is None
+                    or int(snapshot["sequence"]) > int(current["snapshot_sequence"])
+                )
+                if not should_advance:
+                    continue
+                conn.execute(
+                    """INSERT INTO session_reviews(
+                           session_id,snapshot_id,snapshot_sequence,reviewed_at
+                       ) VALUES (?,?,?,?)
+                       ON CONFLICT(session_id) DO UPDATE SET
+                           snapshot_id=excluded.snapshot_id,
+                           snapshot_sequence=excluded.snapshot_sequence,
+                           reviewed_at=excluded.reviewed_at""",
+                    (
+                        snapshot["session_id"],
+                        snapshot["id"],
+                        snapshot["sequence"],
+                        when,
+                    ),
+                )
+                advanced += 1
+
+            if advanced:
+                settings = conn.execute(
+                    "SELECT interval_minutes FROM review_settings WHERE id=1"
+                ).fetchone()
+                if settings and settings["interval_minutes"] is not None:
+                    conn.execute(
+                        """UPDATE review_settings
+                           SET next_due_at=?,updated_at=? WHERE id=1""",
+                        (
+                            when + int(settings["interval_minutes"]) * 60,
+                            when,
+                        ),
+                    )
+            settings = conn.execute(
+                "SELECT next_due_at FROM review_settings WHERE id=1"
+            ).fetchone()
+
+        requested = len(targets)
+        return {
+            "requested": requested,
+            "advanced": advanced,
+            "unchanged": requested - advanced,
+            "processed_at": when,
+            "next_due_at": settings["next_due_at"] if settings else None,
+        }
+
     def claim_review_due(
         self, *, has_work: bool, now: Optional[float] = None
     ) -> Dict[str, Any]:

@@ -16,9 +16,9 @@ import {
 } from "./core.js";
 import {
   KIND_LABEL,
-  ORDER,
   STATUS_META,
   actionsAllowed,
+  api,
   normalizeStatus,
   setPrefs,
   useActions,
@@ -51,6 +51,15 @@ const UNKNOWN_STATUS = {
   icon: "circle-help",
   tone: "neutral",
 };
+const LIFECYCLE_META = {
+  blocked: STATUS_META.needs_input,
+  error: STATUS_META.error,
+  working: STATUS_META.working,
+  done: { label: "Done", shortLabel: "Done", icon: "circle-check-big", tone: "success" },
+  idle: STATUS_META.idle,
+  offline: STATUS_META.offline,
+  unknown: STATUS_META.unknown,
+};
 const CONNECTION_META = {
   connecting: { label: "Connecting", icon: "loader-circle", tone: "neutral" },
   live: { label: "Live", icon: "wifi", tone: "success" },
@@ -76,17 +85,23 @@ function normalizedStatus(value) {
 }
 
 function statusMeta(value) {
+  const raw = typeof value === "string" ? value : value?.state;
+  if (LIFECYCLE_META[raw]) return { status: raw, ...LIFECYCLE_META[raw] };
   const status = normalizedStatus(value);
   return { status, ...(STATUS_META[status] || UNKNOWN_STATUS) };
 }
+
+export function lifecycleState(pane) { return pane?.lifecycle?.state || ({ needs_input: "blocked" }[normalizedStatus(pane?.status)] || normalizedStatus(pane?.status)); }
+function displayLifecycle(pane) { return pane?.lifecycle || { state: lifecycleState(pane), confidence: "low", freshness: "stale", conflicted: false }; }
 
 function kindLabel(value) {
   return KIND_LABEL[value] || "Agent";
 }
 
 function rank(pane) {
-  const status = normalizedStatus(pane && pane.status);
-  return Number.isFinite(ORDER[status]) ? ORDER[status] : 99;
+  const state = lifecycleState(pane);
+  const order = { blocked: 0, error: 1, done: 2, working: 3, idle: 4, offline: 5, unknown: 6 };
+  return order[state] ?? 99;
 }
 
 function targetCompare(a, b) {
@@ -123,8 +138,8 @@ function sameIDs(left, right) {
 function hasUrgentTransition(previous, panes) {
   return panes.some((pane) => {
     const before = previous.get(pane.id);
-    const after = normalizedStatus(pane.status);
-    return (after === "needs_input" || after === "error") && before !== after;
+    const after = lifecycleState(pane);
+    return (after === "blocked" || after === "error" || after === "done") && before !== after;
   });
 }
 
@@ -138,7 +153,7 @@ function useStablePaneOrder(panes, sort, filter) {
   const desired = sortPanesByPreference(panes, sort);
   const desiredIDs = desired.map((pane) => pane.id);
   const paneMap = new Map(panes.map((pane) => [pane.id, pane]));
-  const statuses = new Map(panes.map((pane) => [pane.id, normalizedStatus(pane.status)]));
+  const statuses = new Map(panes.map((pane) => [pane.id, lifecycleState(pane)]));
   const now = Date.now();
 
   if (state.current === null) {
@@ -178,25 +193,39 @@ function useStablePaneOrder(panes, sort, filter) {
   return ordered;
 }
 
+export function paneMatchesFilter(pane, filter) {
+  const status = lifecycleState(pane);
+  if (filter === "queue") return pane.attentionSuppressed !== true && (status === "blocked" || status === "error" || status === "done");
+  if (filter === "active") return pane.attentionSuppressed !== true && status === "working";
+  return true;
+}
+
 function attentionPanes(panes) {
-  return sortedPanes(panes.filter((pane) => {
-    const status = normalizedStatus(pane.status);
-    return status === "needs_input" || status === "error";
-  }), "status");
+  return sortedPanes(panes.filter((pane) => paneMatchesFilter(pane, "queue")), "status");
 }
 
 function panesForFilter(panes, filter, sort) {
   if (filter === "queue") return attentionPanes(panes);
-  if (filter === "active") return sortedPanes(panes.filter((pane) => normalizedStatus(pane.status) === "working"), sort);
+  if (filter === "active") return sortedPanes(panes.filter((pane) => paneMatchesFilter(pane, "active")), sort);
   return sortedPanes(panes, sort);
 }
 
 function countsFor(panes) {
   return panes.reduce((out, pane) => {
-    const status = normalizedStatus(pane.status);
+    const status = lifecycleState(pane);
     out[status] = (out[status] || 0) + 1;
     return out;
   }, {});
+}
+
+function acknowledgeDirectOpen(panes, id, select, after = null) {
+  select(id);
+  if (after) after();
+  const pane = panes.find((item) => item.id === id);
+  if (pane?.lifecycle?.state !== "done" || !pane.lifecycle.revision) return;
+  api("/panes/lifecycle/acknowledge", {
+    id: pane.id, expected_revision: pane.lifecycle.revision,
+  }, "PUT").catch(() => null);
 }
 
 function preferredFilter(value) {
@@ -520,12 +549,13 @@ function PaneActionCard({ pane, actions, connection }) {
 }
 
 function AttentionCard({ pane, selected, onOpen, actions, connection }) {
-  const meta = statusMeta(pane.status);
-  const needsReply = meta.status === "needs_input";
+  const lifecycle = displayLifecycle(pane);
+  const meta = statusMeta(lifecycle);
+  const needsReply = meta.status === "blocked";
   const [replyOpen, setReplyOpen] = useState(false);
   const question = needsReply
     ? pane.question || (pane.menu && pane.menu.length ? "Choose an option to unblock this agent." : "Waiting for a reply.")
-    : "Recent output matched an error pattern.";
+    : meta.status === "done" ? "Work completed. Opening this pane acknowledges completion." : "Recent output matched an error pattern.";
   const more = needsReply && Array.isArray(pane.menu) && pane.menu.length > 3;
 
   useEffect(() => { setReplyOpen(false); }, [pane.id]);
@@ -536,12 +566,12 @@ function AttentionCard({ pane, selected, onOpen, actions, connection }) {
         <span class=${cx("status-dot", `status-${meta.status}`)} aria-hidden="true"></span>
         <span class="attention-heading">
           <strong>${pane.name || pane.target || "Unnamed pane"}</strong>
-          <span>${pane.target || "Unknown target"} · ${kindLabel(pane.kind)} · ${formatAge(Math.max(pane.updated || 0, pane.interacted || 0))}</span>
+          <span>${pane.target || "Unknown target"} · ${kindLabel(pane.kind)} · ${lifecycle.confidence}/${lifecycle.freshness}${lifecycle.conflicted ? " · conflict" : ""} · ${formatAge(Math.max(pane.updated || 0, pane.interacted || 0))}</span>
         </span>
         <span class="sr-only">Open pane detail</span>
       </button>
       <${StarButton} pane=${pane} actions=${actions} connection=${connection} />
-      <${StatusBadge} value=${pane.status} compact=${true} />
+      <${StatusBadge} value=${lifecycle} compact=${true} />
     </header>
     <p class="attention-question">${question}</p>
     ${needsReply ? html`<${PromptActions}
@@ -565,15 +595,16 @@ function AttentionCard({ pane, selected, onOpen, actions, connection }) {
 }
 
 function PaneRow({ pane, selected, onOpen, actions, connection, onCreate = null }) {
-  const meta = statusMeta(pane.status);
+  const lifecycle = displayLifecycle(pane);
+  const meta = statusMeta(lifecycle);
   return html`<div class=${cx("pane-row", selected && "selected", `status-${meta.status}`)}>
     <button type="button" class="pane-row-open" onClick=${() => onOpen(pane.id)}>
       <span class=${cx("status-dot", `status-${meta.status}`)} aria-hidden="true"></span>
       <span class="pane-row-copy">
         <strong>${pane.name || pane.target || "Unnamed pane"}</strong>
-        <span>${pane.target || "Unknown target"} · ${kindLabel(pane.kind)}</span>
+        <span>${pane.target || "Unknown target"} · ${kindLabel(pane.kind)} · ${lifecycle.confidence}/${lifecycle.freshness}${lifecycle.conflicted ? " · conflict" : ""}</span>
       </span>
-      <${StatusBadge} value=${pane.status} compact=${true} />
+      <${StatusBadge} value=${lifecycle} compact=${true} />
     </button>
     ${onCreate ? html`<button type="button" class="icon-button tree-create" aria-label=${`Split ${pane.name || pane.target}`} title="Split pane" onClick=${() => onCreate({ type: "pane", parentPaneID: pane.id })}><${Icon} name="plus" size=${16} /></button>` : null}
     <${StarButton} pane=${pane} actions=${actions} connection=${connection} />
@@ -593,7 +624,7 @@ function splitTarget(pane) {
 
 function worstStatus(panes) {
   if (!panes.length) return "unknown";
-  return panes.reduce((best, pane) => rank(pane) < rank({ status: best }) ? normalizedStatus(pane.status) : best, "unknown");
+  return panes.reduce((best, pane) => rank(pane) < rank({ lifecycle: { state: best } }) ? lifecycleState(pane) : best, "unknown");
 }
 
 function buildTree(panes) {
@@ -664,7 +695,7 @@ function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = n
       const sessionKey = `session:${session.id}`;
       const sessionOpen = expanded.has(sessionKey);
       return html`<div class="tree-session" key=${session.id}>
-        <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(session.status)}`)} aria-expanded=${sessionOpen} onClick=${() => toggle(sessionKey)}>
+        <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${session.status}`)} aria-expanded=${sessionOpen} onClick=${() => toggle(sessionKey)}>
             <${Icon} name=${sessionOpen ? "chevron-down" : "chevron-right"} size=${16} />
             <${StatusBadge} value=${session.status} compact=${true} />
             <strong>${session.id}</strong>
@@ -677,7 +708,7 @@ function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = n
             const windowKey = `window:${session.id}:${windowItem.id}`;
             const windowOpen = expanded.has(windowKey);
             return html`<div class="tree-window" key=${windowItem.id}>
-              <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(windowItem.status)}`)} aria-expanded=${windowOpen} onClick=${() => toggle(windowKey)}>
+              <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${windowItem.status}`)} aria-expanded=${windowOpen} onClick=${() => toggle(windowKey)}>
                   <${Icon} name=${windowOpen ? "chevron-down" : "chevron-right"} size=${16} />
                   <${StatusBadge} value=${windowItem.status} compact=${true} />
                   <span>${windowItem.name}</span>
@@ -791,6 +822,14 @@ function Terminal({ pane, actions, connection }) {
     setWrap(next);
     setPrefs({ terminalWrap: next });
   };
+  const toggleFullScreen = () => {
+    if (!fullScreen && pane?.lifecycle?.state === "done" && pane.lifecycle.revision) {
+      api("/panes/lifecycle/acknowledge", {
+        id: pane.id, expected_revision: pane.lifecycle.revision,
+      }, "PUT").catch(() => null);
+    }
+    setFullScreen((open) => !open);
+  };
   const sendKey = async (key) => {
     if (!allowed || pending(actions, pane, `key:${key}`)) return;
     try { await actions.key(pane, key); } catch (error) { reportActionError(error); }
@@ -806,7 +845,7 @@ function Terminal({ pane, actions, connection }) {
       ${links.length ? html`<button type="button" class="button quiet" aria-label=${`${linksOpen ? "Hide" : "Show"} ${links.length} extracted link${links.length === 1 ? "" : "s"}`} aria-expanded=${linksOpen} onClick=${() => setLinksOpen((open) => !open)}>
         <${Icon} name="link" size=${16} /> ${links.length}
       </button>` : null}
-      <button type="button" class="icon-button" aria-label=${fullScreen ? "Exit full screen terminal" : "Open full screen terminal"} onClick=${() => setFullScreen((open) => !open)}>
+      <button type="button" class="icon-button" aria-label=${fullScreen ? "Exit full screen terminal" : "Open full screen terminal"} onClick=${toggleFullScreen}>
         <${Icon} name=${fullScreen ? "minimize-2" : "maximize-2"} size=${18} />
       </button>
     </div>
@@ -840,7 +879,8 @@ function Terminal({ pane, actions, connection }) {
 
 function PaneDetail({ pane, actions, connection }) {
   if (!pane) return html`<${EmptyState} icon="panel-right" title="Select a pane" detail="Choose a pane from the queue or navigator to inspect it." />`;
-  const meta = statusMeta(pane.status);
+  const lifecycle = displayLifecycle(pane);
+  const meta = statusMeta(lifecycle);
   return html`<article class="pane-detail">
     <header class="pane-detail-head">
       <div>
@@ -851,12 +891,13 @@ function PaneDetail({ pane, actions, connection }) {
         <p>${pane.target || "Unknown target"} · ${kindLabel(pane.kind)}</p>
       </div>
       <span class="spacer"></span>
-      <${StatusBadge} value=${pane.status} />
+      <${StatusBadge} value=${lifecycle} />
       <${StarButton} pane=${pane} actions=${actions} connection=${connection} />
     </header>
     <div class="pane-detail-scroll">
       <${PaneActionCard} pane=${pane} actions=${actions} connection=${connection} />
       <dl class="pane-facts">
+        <div><dt>Lifecycle</dt><dd>${meta.label} · ${lifecycle.confidence} confidence · ${lifecycle.freshness}${lifecycle.conflicted ? " · conflict" : ""}</dd></div>
         <div><dt>Pane</dt><dd>${pane.target || "Unknown"}</dd></div>
         <div><dt>Updated</dt><dd>${formatAge(pane.updated)}</dd></div>
         <div><dt>Last sent</dt><dd>${formatAge(pane.interacted)}</dd></div>
@@ -867,7 +908,7 @@ function PaneDetail({ pane, actions, connection }) {
 }
 
 function FilterTabs({ value, onChange, counts, usageWarning = 0, includeStats = true }) {
-  const queueCount = Number(counts.needs_input || 0) + Number(counts.error || 0);
+  const queueCount = Number(counts.blocked || 0) + Number(counts.error || 0) + Number(counts.done || 0);
   const options = [
     ["queue", "Queue", queueCount],
     ["active", "Active", counts.working || 0],
@@ -994,7 +1035,7 @@ function CommandPalette({ panes, onPick, onClose }) {
           onMouseEnter=${() => setIndex(itemIndex)}
           onClick=${() => onPick(pane.id)}
         >
-          <${StatusBadge} value=${pane.status} compact=${true} />
+          <${StatusBadge} value=${displayLifecycle(pane)} compact=${true} />
           <span><strong>${pane.name || pane.target}</strong><small>${pane.target} · ${kindLabel(pane.kind)}</small></span>
         </button>`)}
         ${matches.length ? null : html`<${EmptyState} icon="search-x" title="No matches" detail="Try a pane target or agent name." />`}
@@ -1015,7 +1056,7 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
   const searched = useMemo(() => panes.filter((pane) => !query || `${pane.name || ""} ${pane.target || ""} ${kindLabel(pane.kind)}`.toLowerCase().includes(query.toLowerCase())), [panes, query]);
   const visible = useMemo(() => panesForFilter(searched, filter, prefs.sort), [searched, filter, prefs.sort]);
   const selected = panes.find((pane) => pane.id === selectedId) || null;
-  const openPane = (id) => { setSelectedId(id); setDetailOpen(true); };
+  const openPane = (id) => acknowledgeDirectOpen(panes, id, setSelectedId, () => setDetailOpen(true));
   useEffect(() => {
     if (!workspaceNav?.paneId || !panes.some((pane) => pane.id === workspaceNav.paneId)) return;
     setSelectedId(workspaceNav.paneId);
@@ -1043,7 +1084,7 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
     </main>
     ${workspaceNav ? html`<${WorkspaceNav} navigation=${workspaceNav} layout="compact" />` : html`<nav class="compact-dock glass" aria-label="Primary">
       ${[
-        ["queue", "inbox", "Queue", Number(counts.needs_input || 0) + Number(counts.error || 0)],
+        ["queue", "inbox", "Queue", Number(counts.blocked || 0) + Number(counts.error || 0) + Number(counts.done || 0)],
         ["active", "loader-circle", "Active", counts.working || 0],
         ["all", "panels-top-left", "All", panes.length],
         ["stats", "chart-no-axes-combined", "Stats", warningCount],
@@ -1056,7 +1097,7 @@ function CompactShell({ panes, connection, actions, usage, selectedId, setSelect
       ><${Icon} name=${icon} size=${20} /><span>${label}</span>${badge ? html`<b>${badge}</b>` : null}</button>`)}
     </nav>`}
     ${treeOpen ? html`<${Dialog} title="Swarm tree" subtitle=${`${panes.length} panes`} onClose=${() => setTreeOpen(false)} className="focus-sheet compact-sheet">
-      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); setDetailOpen(true); }} actions=${actions} connection=${connection} onCreate=${onCreate} />
+      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => acknowledgeDirectOpen(panes, id, setSelectedId, () => { setTreeOpen(false); setDetailOpen(true); })} actions=${actions} connection=${connection} onCreate=${onCreate} />
     <//>` : null}
     ${detailOpen && selected ? html`<${Dialog} title=${selected.name || selected.target} subtitle=${`${selected.target || ""} · ${kindLabel(selected.kind)}`} onClose=${() => setDetailOpen(false)} className="focus-sheet compact-sheet">
       <${PaneDetail} pane=${selected} actions=${actions} connection=${connection} />
@@ -1073,6 +1114,7 @@ function MediumShell({ panes, connection, actions, usage, selectedId, setSelecte
   const searched = useMemo(() => panes.filter((pane) => !query || `${pane.name || ""} ${pane.target || ""} ${kindLabel(pane.kind)}`.toLowerCase().includes(query.toLowerCase())), [panes, query]);
   const visible = useMemo(() => panesForFilter(searched, filter, prefs.sort), [searched, filter, prefs.sort]);
   const selected = panes.find((pane) => pane.id === selectedId) || null;
+  const openPane = (id) => acknowledgeDirectOpen(panes, id, setSelectedId);
 
   if (filter === "stats") return html`<div class="app-shell medium-shell stats-shell">
     <${BrandHeader} connection=${connection} onConnection=${onConnection} onBroadcast=${onBroadcast} onSettings=${onSettings} onCreate=${onCreate} />
@@ -1090,11 +1132,11 @@ function MediumShell({ panes, connection, actions, usage, selectedId, setSelecte
         <button type="button" class="icon-button" aria-label="Open swarm tree" onClick=${() => setTreeOpen(true)}><${Icon} name="network" /></button>
       </div>
       ${filter === "all" ? html`<${SortSelect} value=${prefs.sort} onChange=${(sort) => setPrefs({ sort })} />` : null}
-      <div class="master-scroll"><${PaneList} panes=${visible} mode=${filter} selectedId=${selectedId} onOpen=${setSelectedId} actions=${actions} connection=${connection} /></div>
+      <div class="master-scroll"><${PaneList} panes=${visible} mode=${filter} selectedId=${selectedId} onOpen=${openPane} actions=${actions} connection=${connection} /></div>
     </aside>
     <main class="detail-column"><${PaneDetail} pane=${selected} actions=${actions} connection=${connection} /></main>
     ${treeOpen ? html`<${Dialog} side=${true} title="Swarm tree" subtitle=${`${panes.length} panes`} onClose=${() => setTreeOpen(false)} className="tree-drawer">
-      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => { setSelectedId(id); setTreeOpen(false); }} actions=${actions} connection=${connection} onCreate=${onCreate} />
+      <${TreeView} panes=${panes} selectedId=${selectedId} onOpen=${(id) => acknowledgeDirectOpen(panes, id, setSelectedId, () => setTreeOpen(false))} actions=${actions} connection=${connection} onCreate=${onCreate} />
     <//>` : null}
   </div>`;
 }
@@ -1111,7 +1153,7 @@ function Navigator({ panes, connection, actions, usage, selectedId, onOpen, dest
     ${workspaceNav ? html`<${WorkspaceNav} navigation=${workspaceNav} layout="wide" />` : html`<nav class="wide-destinations" aria-label="Workspace">
       <button type="button" class=${destination === "queue" ? "selected" : ""} aria-current=${destination === "queue" ? "page" : null} onClick=${() => setDestination("queue")}>
         <${Icon} name="inbox" size=${18} /> Workspace
-        ${Number(counts.needs_input || 0) + Number(counts.error || 0) ? html`<b>${Number(counts.needs_input || 0) + Number(counts.error || 0)}</b>` : null}
+        ${Number(counts.blocked || 0) + Number(counts.error || 0) + Number(counts.done || 0) ? html`<b>${Number(counts.blocked || 0) + Number(counts.error || 0) + Number(counts.done || 0)}</b>` : null}
       </button>
       <button type="button" class=${destination === "stats" ? "selected" : ""} aria-current=${destination === "stats" ? "page" : null} onClick=${() => setDestination("stats")}>
         <${Icon} name="chart-no-axes-combined" size=${18} /> Stats
@@ -1119,7 +1161,8 @@ function Navigator({ panes, connection, actions, usage, selectedId, onOpen, dest
       </button>
     </nav>`}
     <div class="navigator-summary" aria-label="Pane summary">
-      <span><b>${counts.needs_input || 0}</b> need you</span>
+      <span><b>${counts.blocked || 0}</b> need you</span>
+      <span><b>${counts.done || 0}</b> done</span>
       <span><b>${counts.error || 0}</b> errors</span>
       <span><b>${counts.working || 0}</b> working</span>
     </div>
@@ -1139,6 +1182,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
   const [paletteOpen, setPaletteOpen] = useState(false);
   const queue = useMemo(() => attentionPanes(panes), [panes]);
   const selected = panes.find((pane) => pane.id === selectedId) || null;
+  const openPane = (id) => acknowledgeDirectOpen(panes, id, setSelectedId);
   const priority = useMemo(() => {
     const urgent = attentionPanes(panes);
     const urgentIds = new Set(urgent.map((pane) => pane.id));
@@ -1160,7 +1204,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
         const current = priority.findIndex((pane) => pane.id === selectedId);
         const start = current < 0 ? 0 : current;
         const next = event.key === "ArrowDown" ? Math.min(priority.length - 1, start + 1) : Math.max(0, start - 1);
-        if (priority[next]) setSelectedId(priority[next].id);
+        if (priority[next]) openPane(priority[next].id);
       } else if (/^[0-9]$/.test(event.key) && selected && Array.isArray(selected.menu)) {
         const option = selected.menu.find((item) => String(item.key) === event.key);
         if (option && canAct(actions, connection, selected)) {
@@ -1174,9 +1218,9 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, connection, filter, paletteOpen, priority, selected, selectedId, setSelectedId]);
+  }, [actions, connection, filter, openPane, paletteOpen, priority, selected, selectedId]);
 
-  const pick = (id) => { setSelectedId(id); setFilter("queue"); setPaletteOpen(false); };
+  const pick = (id) => acknowledgeDirectOpen(panes, id, setSelectedId, () => { setFilter("queue"); setPaletteOpen(false); });
   return html`<div class="app-shell wide-shell">
     <${Navigator}
       panes=${panes}
@@ -1184,7 +1228,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
       actions=${actions}
       usage=${usage}
       selectedId=${selectedId}
-      onOpen=${setSelectedId}
+      onOpen=${openPane}
       destination=${filter === "stats" ? "stats" : "queue"}
       setDestination=${setFilter}
       onBroadcast=${onBroadcast}
@@ -1196,7 +1240,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
     ${filter === "stats" ? html`<main class="wide-stats"><${UsageView} usage=${usage} layout="wide" /></main>` : html`<${Fragment}>
       <section class="wide-queue">
         <header class="column-head"><div><p>Attention queue</p><h1>${queue.length ? `${queue.length} need attention` : "Queue clear"}</h1></div><span class="spacer"></span><kbd>⌘K</kbd></header>
-        <div class="column-scroll"><${PaneList} panes=${queue} mode="queue" selectedId=${selectedId} onOpen=${setSelectedId} actions=${actions} connection=${connection} /></div>
+        <div class="column-scroll"><${PaneList} panes=${queue} mode="queue" selectedId=${selectedId} onOpen=${openPane} actions=${actions} connection=${connection} /></div>
       </section>
       <main class="wide-inspector"><${PaneDetail} pane=${selected} actions=${actions} connection=${connection} /></main>
     <//>`}
@@ -1297,6 +1341,7 @@ export function Workspace({
   const [filter, setFilterState] = useState(() => preferredFilter(prefs.defaultFilter));
   const [selectedId, setSelectedId] = useState(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const routedPaneOpen = useRef({ id: "", opened: false });
   const stablePanes = useStablePaneOrder(panes, prefs.sort, filter);
 
   const priority = useMemo(() => {
@@ -1311,11 +1356,23 @@ export function Workspace({
   }, [stablePanes, priority, selectedId]);
 
   useEffect(() => {
-    if (!workspaceNav) return;
+    if (!workspaceNav) {
+      routedPaneOpen.current = { id: "", opened: false };
+      return;
+    }
     if (workspaceNav.current === "stats" && filter !== "stats") setFilterState("stats");
     if (workspaceNav.current === "panes" && filter === "stats") setFilterState("queue");
-    if (workspaceNav.paneId && stablePanes.some((pane) => pane.id === workspaceNav.paneId)) {
-      setSelectedId(workspaceNav.paneId);
+    const routedPaneId = workspaceNav.current === "panes" ? workspaceNav.paneId || "" : "";
+    if (routedPaneOpen.current.id !== routedPaneId) {
+      routedPaneOpen.current = { id: routedPaneId, opened: false };
+    }
+    if (routedPaneId && stablePanes.some((pane) => pane.id === routedPaneId)) {
+      if (!routedPaneOpen.current.opened) {
+        routedPaneOpen.current.opened = true;
+        acknowledgeDirectOpen(stablePanes, routedPaneId, setSelectedId);
+      } else {
+        setSelectedId(routedPaneId);
+      }
     }
   }, [filter, stablePanes, workspaceNav]);
   useEffect(() => {
@@ -1323,7 +1380,6 @@ export function Workspace({
       setSelectedId(openPaneId);
     }
   }, [openPaneId, stablePanes]);
-
   const setFilter = (next) => {
     const normalized = preferredFilter(next);
     setFilterState(normalized);

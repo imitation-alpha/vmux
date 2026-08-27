@@ -58,6 +58,7 @@ from .images import (
     UnsupportedImage,
     UploadQuotaExceeded,
 )
+from .lifecycle import HISTORY_LIMIT, LIFECYCLE_VERSION, LifecycleConflict
 from .poller import Hub
 from .usage import PERIODS, UsageCollector
 
@@ -84,6 +85,11 @@ class BroadcastReq(BaseModel):
     ids: List[str]
     text: str
     enter: bool = True
+
+
+class LifecycleAcknowledgeReq(BaseModel):
+    id: str
+    expected_revision: int = Field(ge=0)
 
 
 class KillReq(BaseModel):
@@ -119,6 +125,15 @@ class ReviewSettingsReq(BaseModel):
     urgent_pane_errors: Optional[bool] = None
 
 
+class ReviewFinishTarget(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=160)
+    snapshot_id: str = Field(min_length=1, max_length=160)
+
+
+class ReviewFinishReq(BaseModel):
+    targets: List[ReviewFinishTarget] = Field(min_length=1, max_length=10)
+
+
 class AgentBindingReq(BaseModel):
     pane_id: str = Field(min_length=1, max_length=64)
     expected_binding_revision: int = Field(ge=0)
@@ -152,7 +167,8 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     hub = Hub(cfg)
     usage = UsageCollector(cfg, push=hub.push)
     images = image_store or ImageStore()
-    creation = CreationService(cfg)
+    creation = CreationService(cfg, workspace_resolver=hub.workspaces)
+    hub.workspaces.set_creation_status_provider(creation.setup_status)
     config_transition_lock = asyncio.Lock()
 
     async def cleanup_images() -> None:
@@ -235,6 +251,26 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     def get_state(_=Depends(require_auth)):
         return hub.snapshot()
 
+    @app.get("/api/panes/lifecycle")
+    def get_pane_lifecycle(
+        id: str = Query(..., min_length=1, max_length=128),
+        limit: int = Query(HISTORY_LIMIT, ge=1, le=HISTORY_LIMIT),
+        _=Depends(require_auth),
+    ):
+        try:
+            return hub.lifecycle_diagnostics(id, limit)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown pane")
+
+    @app.put("/api/panes/lifecycle/acknowledge")
+    def acknowledge_pane_lifecycle(req: LifecycleAcknowledgeReq, _=Depends(require_auth)):
+        try:
+            return hub.acknowledge_lifecycle(req.id, req.expected_revision)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown pane")
+        except LifecycleConflict as exc:
+            return JSONResponse(status_code=409, content=exc.current)
+
     @app.post("/api/images", status_code=201, response_model=ImageUploadResponse)
     async def post_image(request: Request, response: Response, _=Depends(require_auth)):
         response.headers["Cache-Control"] = "no-store, max-age=0"
@@ -266,10 +302,9 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     def post_key(req: KeyReq, _=Depends(require_auth)):
         real = _resolve(req.id)
         try:
-            tmux.send_key(real, req.key)
+            hub.send_key(real, req.key)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
         hub.kick()
         return {"ok": True}
 
@@ -277,10 +312,9 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     def post_text(req: TextReq, _=Depends(require_auth)):
         real = _resolve(req.id)
         try:
-            tmux.send_literal(real, req.text, enter=req.enter)
+            hub.send_text(real, req.text, req.enter)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
         hub.kick()
         return {"ok": True}
 
@@ -302,8 +336,7 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
                 errors.append(pid)
                 continue
             try:
-                tmux.send_literal(real, req.text, enter=req.enter)
-                hub.mark_interaction(real)
+                hub.send_text(real, req.text, req.enter)
                 sent += 1
             except tmux.TmuxError as exc:
                 errors.append("%s: %s" % (pid, exc))
@@ -326,6 +359,11 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
             "capabilities": {
                 "agent_context_v1": hub.agents.info(),
                 "agent_review_v1": hub.agents.review_info(),
+                "pane_lifecycle_v1": {
+                    "version": LIFECYCLE_VERSION,
+                    "history_limit": HISTORY_LIMIT,
+                },
+                "workspaces_v1": hub.workspaces.capability(),
                 "tmux_create_v1": creation.capability(),
             },
         }
@@ -564,6 +602,19 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
             hub.agents.list_decisions, cursor, limit, status, agent_id
         )
         return {"decisions": decisions, "next_cursor": next_cursor}
+
+    @app.put("/api/review/finish")
+    def finish_review(req: ReviewFinishReq, _=Depends(require_auth)):
+        targets = [
+            target.model_dump() if hasattr(target, "model_dump") else target.dict()
+            for target in req.targets
+        ]
+        if len({target["agent_id"] for target in targets}) != len(targets):
+            raise HTTPException(
+                status_code=422,
+                detail="review targets must have unique agent_id values",
+            )
+        return _agent_call(hub.agents.finish_review, targets)
 
     @app.get("/api/decisions/{decision_id}")
     def get_decision(decision_id: str, _=Depends(require_auth)):

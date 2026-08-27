@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import tmux
 from .config import CREATION_RUNTIME_IDS, Config, CreationRoot
+from .workspaces import WorkspaceResolver
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 PANE_ID_RE = re.compile(r"^%\d+$")
@@ -38,8 +39,9 @@ class CreationProblem(RuntimeError):
 
 
 class CreationService:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, *, workspace_resolver: Optional[WorkspaceResolver] = None):
         self.cfg = cfg
+        self.workspace_resolver = workspace_resolver
         # The critical section includes uniqueness lookup, final parent/runtime
         # validation, and tmux creation. This prevents two HTTP workers from
         # choosing the same automatic suffix.
@@ -175,7 +177,20 @@ class CreationService:
         enabled, reason = self.setup_status()
         if not enabled:
             raise CreationProblem(503, reason or "Creation is unavailable.")
-        cwd, _root = self.resolve_directory(req["cwd"])
+        if "worktree_id" in req:
+            if self.workspace_resolver is None:
+                raise CreationProblem(404, "Worktree is no longer active.")
+            identity = self.workspace_resolver.active_identity(req["worktree_id"])
+            if identity is None:
+                raise CreationProblem(404, "Worktree is no longer active.")
+            if not identity.launchable:
+                raise CreationProblem(403, identity.launch_unavailable_reason or "Worktree launch is unavailable.")
+            raw_cwd = self.workspace_resolver.active_path(req["worktree_id"])
+            if raw_cwd is None:
+                raise CreationProblem(404, "Worktree is no longer active.")
+        else:
+            raw_cwd = req["cwd"]
+        cwd, _root = self.resolve_directory(raw_cwd)
         runtime_id = req["runtime"]
 
         with self._lock:
@@ -295,18 +310,27 @@ class CreationService:
         if create_type not in CREATE_TYPES:
             raise CreationProblem(400, "Creation type must be session, window, or pane.")
         allowed = {
-            "session": {"type", "cwd", "runtime", "name"},
-            "window": {"type", "parent_session", "cwd", "runtime", "name"},
-            "pane": {"type", "parent_pane_id", "cwd", "runtime", "split", "size_percent"},
+            "session": {"type", "cwd", "worktree_id", "runtime", "name"},
+            "window": {"type", "parent_session", "cwd", "worktree_id", "runtime", "name"},
+            "pane": {"type", "parent_pane_id", "cwd", "worktree_id", "runtime", "split", "size_percent"},
         }[create_type]
         if set(raw) - allowed:
             raise CreationProblem(400, "Creation request contains unsupported fields.")
-        if "cwd" not in raw:
-            raise CreationProblem(400, "Creation directory is required.")
+        has_cwd = "cwd" in raw
+        has_worktree = "worktree_id" in raw
+        if has_cwd == has_worktree:
+            raise CreationProblem(400, "Supply exactly one of cwd or worktree_id.")
         runtime_id = raw.get("runtime", "shell")
         if runtime_id not in ("shell",) + CREATION_RUNTIME_IDS:
             raise CreationProblem(400, "Unknown runtime preset.")
-        req = {"type": create_type, "cwd": raw["cwd"], "runtime": runtime_id}
+        req = {"type": create_type, "runtime": runtime_id}
+        if has_cwd:
+            req["cwd"] = raw["cwd"]
+        else:
+            worktree_id = raw.get("worktree_id")
+            if not isinstance(worktree_id, str) or not re.fullmatch(r"wt_[0-9a-f]{24}", worktree_id):
+                raise CreationProblem(404, "Worktree is no longer active.")
+            req["worktree_id"] = worktree_id
 
         if create_type in ("session", "window"):
             name = raw.get("name")

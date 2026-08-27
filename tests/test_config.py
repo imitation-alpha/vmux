@@ -19,7 +19,8 @@ def test_editable_dict_has_expected_keys():
         "poll_interval", "capture_lines", "auto_discover", "include_shells", "naming_mode",
         "overrides", "generic_prompt_patterns", "error_patterns",
         "usage_enabled", "usage_quota_refresh", "usage_report_refresh",
-        "usage_alert_threshold", "experimental_agent_workspace_enabled",
+        "usage_alert_threshold", "usage_hidden_quota_providers",
+        "usage_hidden_quota_metrics", "experimental_agent_workspace_enabled",
     }
     # the exec'd command must never be exposed to (or settable from) the UI
     assert "usage_command" not in d
@@ -270,6 +271,68 @@ def test_usage_defaults():
     assert c.usage_quota_refresh == 180.0
     assert c.usage_report_refresh == 300.0
     assert c.usage_alert_threshold == 20.0
+    assert c.usage_hidden_quota_providers == []
+    assert c.usage_hidden_quota_metrics == []
+
+
+def test_usage_quota_visibility_is_trimmed_deduplicated_and_exact():
+    c = config.Config()
+    c.apply_patch({
+        "usage_hidden_quota_providers": [" Copilot ", "Copilot", "copilot", ""],
+        "usage_hidden_quota_metrics": [
+            {"provider": " Copilot ", "label": " Premium requests "},
+            {"provider": "Copilot", "label": "Premium requests"},
+            {"provider": "copilot", "label": "Premium requests"},
+            {"provider": "Copilot", "label": ""},
+        ],
+    })
+    assert c.usage_hidden_quota_providers == ["Copilot", "copilot"]
+    assert c.usage_hidden_quota_metrics == [
+        {"provider": "Copilot", "label": "Premium requests"},
+        {"provider": "copilot", "label": "Premium requests"},
+    ]
+
+
+@pytest.mark.parametrize("patch", [
+    {"usage_hidden_quota_providers": "Copilot"},
+    {"usage_hidden_quota_providers": [1]},
+    {"usage_hidden_quota_metrics": {}},
+    {"usage_hidden_quota_metrics": ["Copilot:Premium requests"]},
+    {"usage_hidden_quota_metrics": [{"provider": "Copilot"}]},
+    {"usage_hidden_quota_providers": ["x"] * (config.MAX_HIDDEN_QUOTA_ENTRIES + 1)},
+    {"usage_hidden_quota_metrics": [
+        {"provider": "Copilot", "label": str(index)}
+        for index in range(config.MAX_HIDDEN_QUOTA_ENTRIES + 1)
+    ]},
+])
+def test_usage_quota_visibility_rejects_invalid_bounded_values_without_partial_update(patch):
+    c = config.Config(
+        usage_hidden_quota_providers=["Existing"],
+        usage_hidden_quota_metrics=[{"provider": "Existing", "label": "Daily"}],
+    )
+    before = c.editable_dict()
+    with pytest.raises(ValueError):
+        c.apply_patch(patch)
+    assert c.editable_dict() == before
+
+
+def test_usage_quota_visibility_overlay_roundtrip(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("usage:\n  enabled: true\n")
+    c = config.load(str(cfgfile))
+    c.apply_patch({
+        "usage_hidden_quota_providers": ["Copilot", "Temporarily absent"],
+        "usage_hidden_quota_metrics": [
+            {"provider": "Antigravity", "label": "Daily requests"},
+        ],
+    })
+    config.save_overlay(c)
+
+    restored = config.load(str(cfgfile))
+    assert restored.usage_hidden_quota_providers == ["Copilot", "Temporarily absent"]
+    assert restored.usage_hidden_quota_metrics == [
+        {"provider": "Antigravity", "label": "Daily requests"},
+    ]
 
 
 def test_usage_patch_clamps_and_command_immutable():

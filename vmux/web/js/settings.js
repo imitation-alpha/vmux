@@ -19,6 +19,7 @@ import {
   setPrefs,
   usePrefs,
 } from "./state.js";
+import { useUsage } from "./usage.js";
 
 const CATEGORIES = [
   ["appearance", "sun", "Appearance & Alerts"],
@@ -314,16 +315,16 @@ function ExperimentalSettings({ config, pending, patch }) {
   const key = "experimental_agent_workspace_enabled";
   return html`<div>
     <${SettingGroup}
-      title="Agent Workspace"
+      title="Agent Context"
       detail="Experimental features may change as runtime log formats and workspace contracts evolve."
     >
       <${SettingRow}
-        label="Enable Agent Workspace"
+        label="Enable Agent Context"
         detail="Observes local Codex and Claude runtime logs and stores normalized visible messages, decisions, and timeline history on this server. Turning it off stops observation, review scheduling, agent sockets, and access without deleting existing structured history."
         align="start"
       >
         <${Switch}
-          label="Enable Agent Workspace"
+          label="Enable Agent Context"
           checked=${config[key] === true}
           disabled=${pending.has(key)}
           onChange=${(value) => patch({ [key]: value }, key, false).catch(reportPatchFailure)}
@@ -337,17 +338,43 @@ function ExperimentalSettings({ config, pending, patch }) {
 }
 
 function UsageSettings({ config, pending, patch }) {
+  const usage = useUsage();
   const [quota, setQuota] = useState(String(config.usage_quota_refresh));
   const [report, setReport] = useState(String(config.usage_report_refresh));
   const [threshold, setThreshold] = useState(String(config.usage_alert_threshold));
+  const [hiddenProviders, setHiddenProviders] = useState(config.usage_hidden_quota_providers || []);
+  const [hiddenMetrics, setHiddenMetrics] = useState(config.usage_hidden_quota_metrics || []);
+  const serverProviders = JSON.stringify(config.usage_hidden_quota_providers || []);
+  const serverMetrics = JSON.stringify(config.usage_hidden_quota_metrics || []);
+  useEffect(() => { setHiddenProviders(JSON.parse(serverProviders)); }, [serverProviders]);
+  useEffect(() => { setHiddenMetrics(JSON.parse(serverMetrics)); }, [serverMetrics]);
   const quotaDraft = validateNumberDraft(quota, "Quota refresh", 30, 3600);
   const reportDraft = validateNumberDraft(report, "Report refresh", 60, 3600);
   const thresholdDraft = validateNumberDraft(threshold, "Warning threshold", 0, 100);
   const errors = [quotaDraft.error, reportDraft.error, thresholdDraft.error].filter(Boolean);
-  const dirty = Number(quota) !== Number(config.usage_quota_refresh) || Number(report) !== Number(config.usage_report_refresh) || Number(threshold) !== Number(config.usage_alert_threshold);
+  const dirty = Number(quota) !== Number(config.usage_quota_refresh)
+    || Number(report) !== Number(config.usage_report_refresh)
+    || Number(threshold) !== Number(config.usage_alert_threshold)
+    || JSON.stringify(hiddenProviders) !== serverProviders
+    || JSON.stringify(hiddenMetrics) !== serverMetrics;
+  const metricHidden = (provider, label) => hiddenMetrics.some((value) => value.provider === provider && value.label === label);
+  const toggleProvider = (provider, visible) => setHiddenProviders((values) => (
+    visible ? values.filter((value) => value !== provider) : [...values.filter((value) => value !== provider), provider]
+  ));
+  const toggleMetric = (provider, label, visible) => setHiddenMetrics((values) => (
+    visible
+      ? values.filter((value) => value.provider !== provider || value.label !== label)
+      : [...values.filter((value) => value.provider !== provider || value.label !== label), { provider, label }]
+  ));
   const save = () => {
     if (errors.length) return;
-    patch({ usage_quota_refresh: quotaDraft.number, usage_report_refresh: reportDraft.number, usage_alert_threshold: thresholdDraft.number }, "usage-values", false).catch(reportPatchFailure);
+    patch({
+      usage_quota_refresh: quotaDraft.number,
+      usage_report_refresh: reportDraft.number,
+      usage_alert_threshold: thresholdDraft.number,
+      usage_hidden_quota_providers: hiddenProviders,
+      usage_hidden_quota_metrics: hiddenMetrics,
+    }, "usage-values", false).catch(reportPatchFailure);
   };
   const info = config._info?.usage || {};
   return html`<div>
@@ -357,6 +384,21 @@ function UsageSettings({ config, pending, patch }) {
       <${SettingRow} label="Quota refresh" detail="30–3,600 seconds"><input aria-label="Quota refresh" aria-invalid=${!!quotaDraft.error} aria-describedby=${quotaDraft.error ? "usage-number-errors" : undefined} class="number-input" type="number" min="30" max="3600" step="any" value=${quota} onInput=${(e) => setQuota(e.target.value)} /><//>
       <${SettingRow} label="Report refresh" detail="60–3,600 seconds"><input aria-label="Report refresh" aria-invalid=${!!reportDraft.error} aria-describedby=${reportDraft.error ? "usage-number-errors" : undefined} class="number-input" type="number" min="60" max="3600" step="any" value=${report} onInput=${(e) => setReport(e.target.value)} /><//>
       <${SettingRow} label="Warning threshold" detail="Percent remaining; 0 disables alerts"><input aria-label="Warning threshold" aria-invalid=${!!thresholdDraft.error} aria-describedby=${thresholdDraft.error ? "usage-number-errors" : undefined} class="number-input" type="number" min="0" max="100" step="any" value=${threshold} onInput=${(e) => setThreshold(e.target.value)} /><//>
+    <//>
+    <${SettingGroup} title="Displayed quotas" detail="Choose the provider cards and meters shown on Stats. Warnings and alerts still use every quota.">
+      <div class="quota-visibility-actions"><span>New providers and meters appear automatically.</span><button type="button" class="button" disabled=${pending.has("usage-values") || (!hiddenProviders.length && !hiddenMetrics.length)} onClick=${() => { setHiddenProviders([]); setHiddenMetrics([]); }}>Show all</button></div>
+      ${usage.status === "loading" ? html`<div class="setting-loading"><${Spinner} /> Loading current quotas…</div>`
+        : (usage.snapshot?.quotas || []).length ? (usage.snapshot.quotas || []).map((provider) => {
+          const providerHidden = hiddenProviders.includes(provider.provider);
+          return html`<div class="quota-visibility-provider" key=${provider.provider}>
+            <${SettingRow} label=${provider.provider} detail="Provider card">
+              <${Switch} label=${`Show ${provider.provider} quotas`} checked=${!providerHidden} disabled=${pending.has("usage-values")} onChange=${(visible) => toggleProvider(provider.provider, visible)} />
+            <//>
+            ${(provider.metrics || []).map((metric) => html`<${SettingRow} key=${metric.label} label=${metric.label} detail="Quota meter">
+              <${Switch} label=${`Show ${provider.provider} ${metric.label} quota`} checked=${!metricHidden(provider.provider, metric.label)} disabled=${providerHidden || pending.has("usage-values")} onChange=${(visible) => toggleMetric(provider.provider, metric.label, visible)} />
+            <//>`)}
+          </div>`;
+        }) : html`<p class="setting-empty">No provider quotas are currently available. Saved hidden choices are preserved.</p>`}
     <//>
     ${errors.length ? html`<p id="usage-number-errors" class="settings-validation" role="alert">${errors.join(" ")}</p>` : null}
     <${SaveBar} dirty=${dirty} pending=${pending.has("usage-values")} invalid=${!!errors.length} onSave=${save} />

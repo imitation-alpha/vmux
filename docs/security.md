@@ -100,7 +100,7 @@ data flow:
   and the self-hosted server never send those events. See the
   [privacy policy](https://github.com/imitation-alpha/vmux/blob/main/PRIVACY.md).
 
-Smart naming, APNs, usage tracking, and the experimental Agent Workspace are
+Smart naming, APNs, usage tracking, and the experimental Agent Context are
 off, unavailable, or unconfigured by default. Review the workspace's
 [data and control model](guides/agent-context.md) before exposing vmux beyond a
 single-user host.

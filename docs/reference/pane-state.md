@@ -29,7 +29,19 @@ state frames.
   "changed": false,
   "window": "api",
   "starred": false,
-  "interacted": 0.0
+  "interacted": 0.0,
+  "lifecycle": {
+    "version": 1,
+    "state": "blocked",
+    "reason": "claude_menu_visible",
+    "authority": "terminal_ui",
+    "confidence": "high",
+    "freshness": "fresh",
+    "transitioned_at": 1720000000.0,
+    "revision": 2,
+    "conflicted": false
+  },
+  "workspace": null
 }
 ~~~
 
@@ -52,6 +64,8 @@ state frames.
 | `window` | string | tmux window name. |
 | `starred` | boolean | Current per-target star override. |
 | `interacted` | number | Unix epoch seconds of the last action vmux sent to this live pane, or 0. |
+| `lifecycle` | object | Additive lifecycle v1 summary. See [pane lifecycle](pane-lifecycle.md). |
+| `workspace` | object or null | Additive repository/worktree identity. See [Workspace identity](client-api.md#workspace-identity). |
 
 `updated` is not the snapshot time. It stays constant while output is unchanged.
 `changed` is a transient hint and may become false on the next snapshot.
@@ -74,6 +88,8 @@ Clients should display `label` but submit `key` unchanged.
 - Use `id` for immediate actions and `target` for persistent user configuration.
 - Do not send actions to `cfg:` offline ids.
 - Treat unknown fields as additive and ignore them safely.
+- Prefer lifecycle when `pane_lifecycle_v1` is advertised; otherwise fall back
+  to legacy `status`.
 - Preserve unknown enum values as an “unknown” UI state rather than crashing.
 - Do not assume pane ids remain valid after a pane disappears.
 - Treat `lines` and `question` as untrusted terminal text; render them as text,

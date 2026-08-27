@@ -18,6 +18,8 @@ from vmux.agents.observers import MAX_READ_RECORDS, ClaudeObserver, CodexObserve
 from vmux.agents.service import AgentConflict, AgentService
 from vmux.agents.store import AgentStore
 from vmux.config import Config
+from vmux.lifecycle import LifecycleEvidence
+from vmux.models import PaneState
 from vmux.poller import Hub
 from vmux.push import DeviceRegistry, PushManager
 
@@ -276,6 +278,51 @@ def test_chat_reservation_fails_closed_after_uncertain_terminal_error(tmp_path, 
         service.send_message(agent["id"], "continue", "client-once", agent["binding_revision"])
     retry = service.send_message(agent["id"], "continue", "client-once", agent["binding_revision"])
     assert retry["status"] == "unknown" and calls == [1]
+
+
+def test_agent_context_send_uses_hub_lifecycle_action_boundary(tmp_path, monkeypatch):
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    now = time.time()
+    write_log(tmp_path / "codex" / "sessions" / "live.jsonl", "live", cwd, now)
+    hub = Hub(config(tmp_path))
+    service = hub.agents
+    obs = observation(tmp_path, "%1", now)
+    asyncio.run(service.process_now([obs]))
+    agent = service.list_agents()[0][0]
+    working = hub.lifecycle.observe(
+        "%1", "pane", [LifecycleEvidence(
+            "working", "terminal_busy", "terminal_ui", "high", now,
+        )], now=now,
+    )
+    done = hub.lifecycle.observe(
+        "%1", "pane", [LifecycleEvidence(
+            "idle", "terminal_prompt", "terminal_ui", "high", now + 1,
+        )], now=now + 1,
+    )
+    assert working.state == "working" and done.state == "done"
+    hub.states["%1"] = PaneState(
+        id="%1", target="work:1.1", name="Agent", lifecycle=done.to_dict(),
+    )
+    monkeypatch.setattr("vmux.agents.service.tmux.list_panes", lambda: [{
+        "id": "%1", "pid": "1", "created": str(now),
+        "cmd": "codex", "path": str(cwd),
+    }])
+    monkeypatch.setattr("vmux.agents.service.tmux.capture", lambda *_: "prompt")
+    monkeypatch.setattr("vmux.agents.service.fingerprint_terminal", lambda _: "hash-%1")
+    sent = []
+    monkeypatch.setattr(
+        "vmux.agents.controllers.tmux.send_literal",
+        lambda *args, **kwargs: sent.append((args, kwargs)),
+    )
+
+    service.send_message(
+        agent["id"], "continue", "hub-boundary", agent["binding_revision"],
+    )
+
+    assert sent == [(("%1", "continue"), {"enter": True})]
+    assert hub._interaction_generations["%1"] == 1
+    assert hub.states["%1"].lifecycle["state"] == "idle"
 
 
 def test_live_validation_rejects_runtime_and_cwd_changes(tmp_path, monkeypatch):
