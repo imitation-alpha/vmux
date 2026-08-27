@@ -91,7 +91,7 @@ function statusMeta(value) {
   return { status, ...(STATUS_META[status] || UNKNOWN_STATUS) };
 }
 
-function lifecycleState(pane) { return pane?.lifecycle?.state || ({ needs_input: "blocked" }[normalizedStatus(pane?.status)] || normalizedStatus(pane?.status)); }
+export function lifecycleState(pane) { return pane?.lifecycle?.state || ({ needs_input: "blocked" }[normalizedStatus(pane?.status)] || normalizedStatus(pane?.status)); }
 function displayLifecycle(pane) { return pane?.lifecycle || { state: lifecycleState(pane), confidence: "low", freshness: "stale", conflicted: false }; }
 
 function kindLabel(value) {
@@ -193,16 +193,20 @@ function useStablePaneOrder(panes, sort, filter) {
   return ordered;
 }
 
+export function paneMatchesFilter(pane, filter) {
+  const status = lifecycleState(pane);
+  if (filter === "queue") return pane.attentionSuppressed !== true && (status === "blocked" || status === "error" || status === "done");
+  if (filter === "active") return pane.attentionSuppressed !== true && status === "working";
+  return true;
+}
+
 function attentionPanes(panes) {
-  return sortedPanes(panes.filter((pane) => {
-    const status = lifecycleState(pane);
-    return pane.attentionSuppressed !== true && (status === "blocked" || status === "error" || status === "done");
-  }), "status");
+  return sortedPanes(panes.filter((pane) => paneMatchesFilter(pane, "queue")), "status");
 }
 
 function panesForFilter(panes, filter, sort) {
   if (filter === "queue") return attentionPanes(panes);
-  if (filter === "active") return sortedPanes(panes.filter((pane) => pane.attentionSuppressed !== true && lifecycleState(pane) === "working"), sort);
+  if (filter === "active") return sortedPanes(panes.filter((pane) => paneMatchesFilter(pane, "active")), sort);
   return sortedPanes(panes, sort);
 }
 

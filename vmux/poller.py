@@ -19,7 +19,7 @@ from .agents.models import PaneObservation, fingerprint_terminal
 from .agents.observers import runtime_from_command
 from .agents.service import AgentService
 from .config import Config, save_overlay
-from .detectors import agent_kind_from_cmd, classify_kind, detect, is_spinner
+from .detectors import DetectResult, agent_kind_from_cmd, classify_kind, detect, is_spinner
 from .lifecycle import LifecycleEvidence, LifecycleKernel, project_legacy_status
 from .models import (
     KIND_CLAUDE,
@@ -183,28 +183,45 @@ class Hub:
         new_order: List[str] = []
         agent_observations: List[PaneObservation] = []
 
-        for pane, text in zip(panes, captures):
+        for pane, captured_text in zip(panes, captures):
             pid = pane["id"]
             target = pane["target"]
             override = self.cfg.overrides.get(target)
-            text = text or ""
+            previous_state = self.states.get(pid)
+            capture_available = captured_text is not None
+            text = captured_text if capture_available else "\n".join(
+                previous_state.lines if previous_state else ()
+            )
 
             kind = (override.kind if override and override.kind
+                    else previous_state.kind if not capture_available and previous_state
                     else classify_kind(pane["cmd"], pane["title"], text))
 
-            digest = _hash(text)
             prev = self._meta.get(pid)
-            changed = prev is None or prev["hash"] != digest
-            activity_changed = prev is not None and prev["hash"] != digest
-            updated = now if changed else (prev["updated"] if prev else now)
-            self._meta[pid] = {"hash": digest, "updated": updated}
-
-            res = detect(text, kind, activity_changed, self.cfg, pane["title"])
+            if capture_available:
+                digest = _hash(text)
+                changed = prev is None or prev["hash"] != digest
+                activity_changed = prev is not None and prev["hash"] != digest
+                updated = now if changed else (prev["updated"] if prev else now)
+                self._meta[pid] = {"hash": digest, "updated": updated}
+                res = detect(text, kind, activity_changed, self.cfg, pane["title"])
+            else:
+                changed = False
+                updated = prev["updated"] if prev else (
+                    previous_state.updated if previous_state else now
+                )
+                res = DetectResult(
+                    status=previous_state.status if previous_state else STATUS_IDLE,
+                    question=previous_state.question if previous_state else None,
+                    menu=list(previous_state.menu) if previous_state else None,
+                    reason="capture_unavailable",
+                    authority="fallback",
+                    confidence="low",
+                )
             # Generic/Codex detectors use changed output as their working hint.
             # A single quiet capture is common while tmux redraws, so do not
             # turn a just-active pane idle until it has been quiet briefly.
             # Attention and errors always win without delay.
-            previous_state = self.states.get(pid)
             if (
                 kind in (KIND_GENERIC, KIND_CODEX)
                 and res.status == STATUS_IDLE
@@ -233,7 +250,7 @@ class Hub:
                     }.get(kind)
             else:
                 runtime = None
-            if self.agents.runtime_active and runtime in ("codex", "claude"):
+            if capture_available and self.agents.runtime_active and runtime in ("codex", "claude"):
                 agent_observations.append(PaneObservation(
                     pane_id=pid,
                     target=target,
@@ -256,7 +273,7 @@ class Hub:
                 continue
 
             lifecycle_evidence = [LifecycleEvidence(
-                state={
+                state="unknown" if not capture_available else {
                     "needs_input": "blocked", "error": "error",
                     "working": "working", "idle": "idle",
                 }.get(res.status, "unknown"),

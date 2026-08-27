@@ -21,7 +21,7 @@ import {
   vmuxStore,
 } from "./state.js";
 import { SettingsOverlay } from "./settings.js";
-import { TokenGate } from "./ui.js";
+import { paneMatchesFilter, TokenGate } from "./ui.js";
 import { AgentWorkspace } from "./agent-ui.js";
 import { navigateAgentRoute, useAgentState } from "./agent-state.js";
 import { CreationDialog, creationCapability } from "./creation.js";
@@ -189,9 +189,7 @@ function ActionAnnouncement({ event }) {
 }
 
 function scopeMatches(pane, scope) {
-  if (scope === "queue") return pane.status === "needs_input" || pane.status === "error";
-  if (scope === "active") return pane.status === "working";
-  return true;
+  return paneMatchesFilter(pane, scope);
 }
 
 function BroadcastDialog({ panes, connection, onClose }) {

@@ -106,3 +106,25 @@ def test_initial_quiet_generic_pane_never_becomes_done(monkeypatch):
     hub.states["%1"].updated = time.time() - 3
     asyncio.run(hub.poll_once())
     assert hub.states["%1"].lifecycle["state"] == "idle"
+
+
+def test_failed_capture_is_unknown_and_preserves_content_identity(monkeypatch):
+    pane = {**PANE, "cmd": "claude", "title": "Claude Code"}
+    working = "Claude Code\n⠋ Working… (1s)"
+    captures = iter([working, None, working])
+    monkeypatch.setattr(tmux, "list_panes", lambda: [pane])
+    monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
+    hub = Hub(Config())
+
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].lifecycle["state"] == "working"
+    content_hash = hub._meta["%1"]["hash"]
+
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].lifecycle["state"] == "unknown"
+    assert hub.states["%1"].lines == working.splitlines()
+    assert hub._meta["%1"]["hash"] == content_hash
+
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].lifecycle["state"] == "working"
+    assert hub.states["%1"].changed is False
