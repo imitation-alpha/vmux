@@ -56,6 +56,31 @@ def test_done_queue_order_and_direct_open_acknowledgment(
     assert acknowledgments[-1]["body"] == {"id": "%4", "expected_revision": 8}
 
 
+def test_done_keyboard_open_acknowledges_completion(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    panes = fixture_panes()
+    panes[3]["lifecycle"] = {
+        **panes[3]["lifecycle"], "state": "done", "reason": "work_became_idle",
+    }
+    fixture_server.set_panes(panes)
+    page = page_factory(browser_runtime, viewport=(1440, 960))
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(500)
+
+    acknowledgments = [
+        row for row in fixture_server.action_requests()
+        if row["endpoint"] == "/api/panes/lifecycle/acknowledge"
+    ]
+    assert acknowledgments[-1]["body"] == {"id": "%4", "expected_revision": 8}
+
+
 def test_live_sort_order_is_coalesced_but_urgent_attention_moves_immediately(
     browser_runtime: BrowserRuntime,
     fixture_server: FixtureServer,

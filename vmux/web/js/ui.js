@@ -1200,7 +1200,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
         const current = priority.findIndex((pane) => pane.id === selectedId);
         const start = current < 0 ? 0 : current;
         const next = event.key === "ArrowDown" ? Math.min(priority.length - 1, start + 1) : Math.max(0, start - 1);
-        if (priority[next]) setSelectedId(priority[next].id);
+        if (priority[next]) openPane(priority[next].id);
       } else if (/^[0-9]$/.test(event.key) && selected && Array.isArray(selected.menu)) {
         const option = selected.menu.find((item) => String(item.key) === event.key);
         if (option && canAct(actions, connection, selected)) {
@@ -1214,7 +1214,7 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, connection, filter, paletteOpen, priority, selected, selectedId, setSelectedId]);
+  }, [actions, connection, filter, openPane, paletteOpen, priority, selected, selectedId]);
 
   const pick = (id) => acknowledgeDirectOpen(panes, id, setSelectedId, () => { setFilter("queue"); setPaletteOpen(false); });
   return html`<div class="app-shell wide-shell">

@@ -93,3 +93,16 @@ def test_generic_working_grace_expires(monkeypatch):
     hub.states["%1"].updated = time.time() - 3
     asyncio.run(hub.poll_once())
     assert hub.states["%1"].status == "idle"
+
+
+def test_initial_quiet_generic_pane_never_becomes_done(monkeypatch):
+    captures = iter(["ready", "ready"])
+    monkeypatch.setattr(tmux, "list_panes", lambda: [PANE])
+    monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
+    hub = Hub(Config())
+
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].lifecycle["state"] == "idle"
+    hub.states["%1"].updated = time.time() - 3
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].lifecycle["state"] == "idle"

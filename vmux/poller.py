@@ -195,10 +195,11 @@ class Hub:
             digest = _hash(text)
             prev = self._meta.get(pid)
             changed = prev is None or prev["hash"] != digest
+            activity_changed = prev is not None and prev["hash"] != digest
             updated = now if changed else (prev["updated"] if prev else now)
             self._meta[pid] = {"hash": digest, "updated": updated}
 
-            res = detect(text, kind, changed, self.cfg, pane["title"])
+            res = detect(text, kind, activity_changed, self.cfg, pane["title"])
             # Generic/Codex detectors use changed output as their working hint.
             # A single quiet capture is common while tmux redraws, so do not
             # turn a just-active pane idle until it has been quiet briefly.
