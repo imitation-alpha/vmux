@@ -198,6 +198,23 @@ class Hub:
             path: (value.identity if value else None)
             for path, value in resolved_workspaces.items()
         }
+        pane_created_by_id: Dict[str, float] = {}
+        pane_incarnation_by_id: Dict[str, str] = {}
+        structured_by_id: Dict[str, Optional[dict]] = {}
+        for pane in panes:
+            pid = pane["id"]
+            try:
+                pane_created = float(pane.get("created") or 0)
+            except (TypeError, ValueError):
+                pane_created = 0.0
+            incarnation_raw = "%s\0%s\0%s" % (
+                pid, str(pane.get("pid", "")), pane_created,
+            )
+            incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
+            pane_created_by_id[pid] = pane_created
+            pane_incarnation_by_id[pid] = incarnation
+            if self.agents.runtime_active:
+                structured_by_id[pid] = self.agents.lifecycle_evidence(pid, incarnation)
 
         with self._lifecycle_lock:
             now = time.time()
@@ -265,12 +282,8 @@ class Hub:
                     res.reason = "activity_grace"
                     res.authority = "terminal_activity"
                     res.confidence = "medium"
-                try:
-                    pane_created = float(pane.get("created") or 0)
-                except (TypeError, ValueError):
-                    pane_created = 0.0
-                incarnation_raw = "%s\0%s\0%s" % (pid, str(pane.get("pid", "")), pane_created)
-                incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
+                pane_created = pane_created_by_id[pid]
+                incarnation = pane_incarnation_by_id[pid]
                 # Runtime-log observation is part of the opt-in experimental
                 # workspace. Do not even construct observations while it is off.
                 if self.agents.runtime_active:
@@ -315,7 +328,7 @@ class Hub:
                 structured = (
                     None
                     if capture_precedes_interaction
-                    else self.agents.lifecycle_evidence(pid, incarnation)
+                    else structured_by_id.get(pid)
                 )
                 if structured:
                     lifecycle_evidence.append(LifecycleEvidence(**structured))

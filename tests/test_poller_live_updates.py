@@ -249,3 +249,50 @@ def test_action_send_is_serialized_with_stale_capture_publication(monkeypatch):
     assert not poll_thread.is_alive()
     assert hub.states["%1"].lifecycle["state"] == "unknown"
     assert hub.states["%1"].lifecycle["reason"] == "capture_precedes_interaction"
+
+
+def test_structured_evidence_wait_does_not_hold_lifecycle_lock(tmp_path, monkeypatch):
+    pane = {**PANE, "cmd": "codex", "title": "Codex"}
+    monkeypatch.setattr(tmux, "list_panes", lambda: [pane])
+    monkeypatch.setattr(tmux, "capture", lambda *_: "Codex prompt")
+    monkeypatch.setattr(tmux, "send_literal", lambda *_args, **_kwargs: None)
+    hub = Hub(Config(
+        experimental_agent_workspace_enabled=True,
+        agent_store_path=str(tmp_path / "agents.sqlite3"),
+    ))
+    hub.agents._runtime_active = True
+    hub.states["%1"] = PaneState(id="%1", target=pane["target"], name="Codex")
+    hub.order = ["%1"]
+    api_held = threading.Event()
+    evidence_started = threading.Event()
+    action_done = threading.Event()
+
+    def guarded_action():
+        with hub.agents.api_guard():
+            api_held.set()
+            evidence_started.wait(2)
+            hub.send_text("%1", "continue", True)
+        action_done.set()
+
+    def lifecycle_evidence(*_args):
+        evidence_started.set()
+        acquired = hub.agents._api_lock.acquire(timeout=0.5)
+        if acquired:
+            hub.agents._api_lock.release()
+        return None
+
+    monkeypatch.setattr(hub.agents, "lifecycle_evidence", lifecycle_evidence)
+    action_thread = threading.Thread(target=guarded_action)
+    action_thread.start()
+    assert api_held.wait(2)
+    poll_thread = threading.Thread(target=lambda: asyncio.run(hub.poll_once()))
+    poll_thread.start()
+    assert evidence_started.wait(2)
+
+    action_completed_without_waiting = action_done.wait(0.2)
+    action_thread.join(2)
+    poll_thread.join(2)
+
+    assert action_completed_without_waiting
+    assert not action_thread.is_alive()
+    assert not poll_thread.is_alive()
