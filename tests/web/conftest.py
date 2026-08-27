@@ -50,7 +50,6 @@ class FixtureServer:
         response = httpx.post(f"{self.url}/__test__/panes", json={"panes": panes}, timeout=5)
         response.raise_for_status()
 
-
 @pytest.fixture(scope="session")
 def fixture_server() -> Iterator[FixtureServer]:
     httpx = pytest.importorskip("httpx")

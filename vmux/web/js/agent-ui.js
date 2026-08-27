@@ -15,7 +15,7 @@ import {
   useRef,
   useState,
 } from "./core.js";
-import { actionsAllowed, useActions } from "./state.js";
+import { actionsAllowed, api, useActions } from "./state.js";
 import {
   ImageUploadButton,
   ImageUploadStatus,
@@ -329,11 +329,20 @@ function AgentDetail({ id, state, panes, connection, compact = false }) {
   const composer = useRef(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [deepContextOpen, setDeepContextOpen] = useState(false);
+  const [lifecycleDiagnostics, setLifecycleDiagnostics] = useState(null);
   const paneId = agent?.binding?.pane_id || agent?.pane_id;
   const pane = panes.find((item) => item.id === paneId) || null;
   const reviewGroup = state.review?.groups?.find((group) => group.agent_id === id) || null;
 
   useEffect(() => { if (id) agentStore.loadAgent(id).catch(() => null); }, [id]);
+  useEffect(() => {
+    if (!paneId || !pane?.lifecycle?.revision) { setLifecycleDiagnostics(null); return; }
+    let current = true;
+    api(`/panes/lifecycle?id=${encodeURIComponent(paneId)}&limit=32`).then((value) => {
+      if (current) setLifecycleDiagnostics(value);
+    }).catch(() => { if (current) setLifecycleDiagnostics(null); });
+    return () => { current = false; };
+  }, [paneId, pane?.lifecycle?.revision]);
   useEffect(() => {
     if (!id || state.reviewEnabled || !resume?.as_of_snapshot_id) return;
     // A v1 server has no explicit review baseline, so retain its visit contract.
@@ -352,6 +361,15 @@ function AgentDetail({ id, state, panes, connection, compact = false }) {
       }
     : resume;
   const association = agent.association || agent.binding?.association || "unavailable";
+  const terminalLifecycle = pane?.lifecycle || null;
+  const openTerminal = () => {
+    setTerminalOpen(true);
+    if (terminalLifecycle?.state === "done" && terminalLifecycle.revision) {
+      api("/panes/lifecycle/acknowledge", {
+        id: pane.id, expected_revision: terminalLifecycle.revision,
+      }, "PUT").catch(() => null);
+    }
+  };
   const openResume = () => {
     // Resume is deliberately non-mutating: it clears and focuses the composer.
     globalThis.dispatchEvent?.(new CustomEvent("vmux:focus-agent-chat", { detail: { id: agent.id } }));
@@ -378,9 +396,12 @@ function AgentDetail({ id, state, panes, connection, compact = false }) {
       <div class="context-grid"><${ContextList} title="Completed" items=${context.completed_items || agent.completed_items} empty="No completed items reported." tone="success" /><${ContextList} title="Blockers" items=${context.blockers || agent.blockers} empty="No blockers reported." tone="attention" /></div>
 
       <section class="agent-capabilities"><h2>Connection health</h2><div><${CapabilityPill} label="Association" value=${association} /><${CapabilityPill} label="Context" value=${capabilityMode(agent, "context")} /><${CapabilityPill} label="Chat" value=${capabilityMode(agent, "chat_send")} /><${CapabilityPill} label="Decisions" value=${capabilityMode(agent, "decision_reply")} /></div><p>Extraction: ${agent.extraction_health || "unknown"}. Features are controlled by reported capabilities, not the runtime name.</p></section>
+      <section class=${cx("agent-capabilities", terminalLifecycle?.conflicted && "lifecycle-conflict")}><h2>Lifecycle evidence</h2><div><${CapabilityPill} label="Semantic log" value=${context.lifecycle || agent.lifecycle || "unknown"} /><${CapabilityPill} label="Live terminal" value=${terminalLifecycle?.state || "unavailable"} /><${CapabilityPill} label="Authority" value=${terminalLifecycle?.authority || "unavailable"} /><${CapabilityPill} label="Confidence" value=${terminalLifecycle ? `${terminalLifecycle.confidence}/${terminalLifecycle.freshness}` : "unavailable"} /></div><p>${terminalLifecycle?.conflicted ? "Structured session context disagrees with live terminal evidence. The terminal lifecycle contract shows the winning authority." : "The live terminal state is shown beside structured session context so disagreements remain visible."}</p>
+        ${lifecycleDiagnostics?.winning_evidence ? html`<ol class="lifecycle-evidence-chain"><li><strong>Winner</strong><span>${lifecycleDiagnostics.winning_evidence.state} · ${lifecycleDiagnostics.winning_evidence.reason} · ${lifecycleDiagnostics.winning_evidence.authority}</span></li>${(lifecycleDiagnostics.rejected_evidence || []).map((item, index) => html`<li key=${`${item.reason}:${index}`}><strong>Rejected</strong><span>${item.state} · ${item.reason} · ${item.authority} · ${item.confidence}/${item.freshness}</span></li>`)}</ol>` : null}
+      </section>
       <${AgentChat} agent=${agent} messages=${messages} composerRef=${composer} connection=${connection} pane=${pane} />
       <section class="agent-local-timeline"><header><h2>Recent activity</h2><a href=${agentRoute("timeline", agent.id)}>Full timeline</a></header><${TimelineList} events=${timeline.slice(0, 8)} /></section>
-      ${pane ? html`<section class="terminal-fallback"><div><h2>Terminal fallback</h2><p>Open the live pane for output and controls that are not available as structured actions.</p></div><button type="button" class="button secondary" onClick=${() => setTerminalOpen(true)}><${Icon} name="square-terminal" size=${17} />Open terminal</button></section>` : null}
+      ${pane ? html`<section class="terminal-fallback"><div><h2>Terminal fallback</h2><p>Open the live pane for output and controls that are not available as structured actions.</p></div><button type="button" class="button secondary" onClick=${openTerminal}><${Icon} name="square-terminal" size=${17} />Open terminal</button></section>` : null}
     </div>
     ${terminalOpen && pane ? html`<${TerminalFallback} pane=${pane} connection=${connection} onClose=${() => setTerminalOpen(false)} />` : null}
     ${deepContextOpen ? html`<${DeepContext} agent=${agent} group=${reviewGroup} state=${state} onClose=${() => setDeepContextOpen(false)} />` : null}
@@ -602,10 +623,10 @@ function ReviewAgentCard({
 
 function TerminalReview({ items, panes }) {
   if (!items.length) return null;
-  return html`<section class="terminal-review"><header><div><p class="eyebrow">Unstructured requests</p><h2>Terminal review</h2><p>These panes do not expose a verified structured decision. Opening them does not acknowledge or answer anything.</p></div></header>
+  return html`<section class="terminal-review"><header><div><p class="eyebrow">Unstructured requests</p><h2>Terminal review</h2><p>Opening them does not acknowledge or answer anything. Completion is the exception: opening a done pane acknowledges it; blocked and error panes remain pending until you act.</p></div></header>
     <div>${items.map((item) => {
       const pane = panes.find((value) => value.id === item.pane_id);
-      return html`<article key=${item.id}><div><${Icon} name=${item.status === "error" ? "triangle-alert" : "square-terminal"} /><span><strong>${pane?.name || "Terminal pane"}</strong><small>${item.status.replaceAll("_", " ")} · ${item.kind.replaceAll("-", " ")}</small></span></div><a class="button secondary" href=${agentRoute("panes", item.pane_id)}>Open Pane</a></article>`;
+      return html`<article key=${item.id}><div><${Icon} name=${item.status === "error" ? "triangle-alert" : item.status === "done" ? "circle-check-big" : "square-terminal"} /><span><strong>${pane?.name || "Terminal pane"}</strong><small>${item.status.replaceAll("_", " ")} · ${item.kind.replaceAll("-", " ")}${item.status === "done" ? " · opening acknowledges" : ""}</small></span></div><a class="button secondary" href=${agentRoute("panes", item.pane_id)}>Open Pane</a></article>`;
     })}</div>
   </section>`;
 }

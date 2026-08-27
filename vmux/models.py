@@ -7,7 +7,7 @@ the backend produces and the frontend renders. Keep it stable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # Status values, in rough order of "how much it wants you".
 STATUS_NEEDS_INPUT = "needs_input"  # a dialog is waiting on a human  (red, pulsing)
@@ -62,6 +62,8 @@ class PaneState:
     window: str = ""                          # tmux window name (for the tree view)
     starred: bool = False                     # user-starred (PaneOverride.star)
     interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
+    lifecycle: Optional[Dict[str, Any]] = None # additive server lifecycle v1
+    workspace: Optional[Dict[str, Any]] = None # additive repository/worktree identity
 
     def preview(self, n: int = 6) -> List[str]:
         """Last n non-empty-ish lines, for the grid card snippet."""
@@ -85,4 +87,6 @@ class PaneState:
             "window": self.window,
             "starred": self.starred,
             "interacted": self.interacted,
+            "lifecycle": self.lifecycle,
+            "workspace": self.workspace,
         }

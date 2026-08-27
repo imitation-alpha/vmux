@@ -253,6 +253,7 @@ Returns the live-editable fields plus:
         "enabled": true,
         "version": 1,
         "scheduling": true,
+        "finish_batch": true,
         "min_interval_minutes": 5,
         "max_interval_minutes": 1440
       },
@@ -273,7 +274,7 @@ oldest iOS marketing version supported by this server. `targets` contains
 currently represented tmux targets. Push and usage info report
 capability/availability without exposing credentials.
 
-`capabilities.agent_context_v1` gates the independent agent workspace, and
+`capabilities.agent_context_v1` gates the independent agent context, and
 `capabilities.agent_review_v1` gates the cross-client Review workflow. Clients
 must fall back to the terminal workspace when it is absent or disabled.
 `experimental_agent_workspace_enabled` is the authoritative server-persisted
@@ -400,7 +401,36 @@ remain available to older clients.
 | --- | --- |
 | `GET /api/review` | Settings, due state, counts, ranked structured groups, and privacy-minimized terminal references |
 | `PATCH /api/review/settings` | Set `interval_minutes` to `null` or 5–1440, and optionally set `urgent_pane_errors`; returns the updated settings object |
+| `PUT /api/review/finish` | Atomically acknowledge 1–10 unique `{"agent_id":"...","snapshot_id":"..."}` targets |
 | `PUT /api/agents/{id}/review` | Monotonically acknowledge `{"snapshot_id":"..."}` and return the effective `snapshot_id`, `snapshot_sequence`, `snapshot_at`, `reviewed_at`, and `advanced` state; an advance resets an enabled timer |
+
+`PUT /api/review/finish` accepts `{"targets":[...]}` and returns
+`{"requested":2,"advanced":2,"unchanged":0,"processed_at":...,"next_due_at":...}`.
+The server validates every target before writing. A missing snapshot or a
+snapshot belonging to another agent returns `409` with no baseline advances.
+Valid targets advance together in one transaction, and the shared Review timer
+is reset once when at least one baseline advances. Replaying the same batch is
+a no-op. Clients must derive targets from an immutable displayed manifest;
+Watch clients send only their opaque run id to the iPhone companion, never
+server targets.
+
+### Apple Watch relay v2
+
+The Watch relay schema is version 2 while the server Review payload remains
+version 1. Its public state contracts are `WatchRelayReviewStatus`,
+`WatchRelayReviewRun`, and `WatchRelayFinishSummary`. Commands are
+`beginReview`, run-bound structured decision replies, `finishReview`, and
+`setReviewSchedule`; incompatible schemas and unexpected kind-specific fields
+are rejected without downgrade. `finishReview` carries only `reviewRunID`.
+
+The iPhone keeps each exact ordered run manifest in memory for 15 minutes and
+clears it on expiry, disconnect, server replacement, capability change, or
+phone restart. Finish is available only when every frozen decision has final
+delivery and all original Review work was representable on Watch. Delivery
+uncertainty stops the sprint and requires an authoritative iPhone refresh;
+mutations are never retried automatically. Schedule changes are limited to
+Off plus the presets advertised by `GET /api/review`; cached Watch state is
+read-only.
 
 `GET /api/review` returns:
 
@@ -537,6 +567,12 @@ Accepts a partial object from the
 [live-editable schema](https://imitation-alpha.github.io/vmux/configuration/#live-editable-schema). Values are
 validated, applied immediately, and persisted to `vmux-settings.json`. Bad
 values return `400`; persistence failure returns `500`.
+
+The editable usage visibility fields are
+`usage_hidden_quota_providers: string[]` and
+`usage_hidden_quota_metrics: {provider: string, label: string}[]`. They match
+tokscale's normalized names exactly and affect only quota cards and meter rows
+on Stats. `GET /api/usage`, warning counts, and alerting remain unfiltered.
 
 `_info`, `version`, and `compatibility` are server-owned and read-only. A
 `PATCH` body cannot override them. Older vmux servers may omit `compatibility`;

@@ -101,6 +101,13 @@ export function attentionNotificationIDs(panes, review, alertErrors = false) {
   const ids = new Set(
     panes.filter((pane) => statuses.includes(pane.status)).map((pane) => `pane:${pane.id}`),
   );
+  if (!batching) {
+    for (const pane of panes) {
+      if (pane?.lifecycle?.state === "done") {
+        ids.add(`done:${pane.id}:${pane.lifecycle.revision || 0}`);
+      }
+    }
+  }
   for (const group of review?.groups || []) {
     for (const decision of group?.decisions || []) {
       const priority = String(decision?.priority || "").toLowerCase();
@@ -117,7 +124,9 @@ function useAttentionNotifications(panes, review) {
   const previous = useRef(null);
   useEffect(() => {
     const current = attentionNotificationIDs(panes, review, prefs.alertErrors);
-    const fresh = previous.current && [...current].some((id) => !previous.current.has(id));
+    const freshIDs = previous.current ? [...current].filter((id) => !previous.current.has(id)) : [];
+    const fresh = freshIDs.length > 0;
+    const completion = freshIDs.some((id) => id.startsWith("done:"));
     if (fresh && prefs.sound) {
       try {
         const Context = window.AudioContext || window.webkitAudioContext;
@@ -140,12 +149,12 @@ function useAttentionNotifications(panes, review) {
       try {
         // Deliberately generic: pane names, prompts, output, usage, and tokens
         // never enter OS notification history.
-        new Notification("vmux", { body: "An agent needs your attention." });
+        new Notification("vmux", { body: completion ? "An agent completed its work." : "An agent needs your attention." });
       } catch (err) {
         console.warn("[vmux] notification failed", err instanceof Error ? err.name : "error");
       }
     }
-    const needs = panes.filter((pane) => pane.status === "needs_input").length;
+    const needs = panes.filter((pane) => pane?.lifecycle?.state === "blocked" || pane.status === "needs_input").length;
     document.title = needs ? `(${needs}) vmux` : "vmux";
     previous.current = current;
   }, [panes, prefs.alertErrors, prefs.notify, prefs.sound, review]);
@@ -323,7 +332,11 @@ function App() {
   if (state.connection.mode === "unauthorized") {
     return html`<${TokenGate} onSubmit=${submitToken} />`;
   }
-  return html`<${UsageProvider} threshold=${config?.usage_alert_threshold ?? 20}>
+  return html`<${UsageProvider}
+    threshold=${config?.usage_alert_threshold ?? 20}
+    hiddenProviders=${config?.usage_hidden_quota_providers || []}
+    hiddenMetrics=${config?.usage_hidden_quota_metrics || []}
+  >
     <${AgentWorkspace}
       layout=${layout}
       panes=${state.panes}

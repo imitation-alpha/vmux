@@ -2,12 +2,12 @@
 
 Agent Context turns a supported Codex or Claude Code session into a resumable
 workspace. It is separate from `PaneState`: terminal capture remains available
-as a fallback, while the agent workspace is built from runtime-owned session
+as a fallback, while the agent context is built from runtime-owned session
 logs and a small local SQLite database beside the settings overlay (by default,
 `~/.vmux/vmux-agents.sqlite3`).
 
 The complete experimental workspace is off by default. Enable it under
-**Settings → Experimental → Enable Agent Workspace** in the PWA. That
+**Settings → Experimental → Enable Agent Context** in the PWA. That
 server-persisted switch takes effect without restarting and controls Agent
 Context, Review, Timeline, structured decisions/chat, runtime-log observation,
 review scheduling, agent WebSockets, and agent database writes as one bundle.

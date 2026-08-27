@@ -312,7 +312,7 @@ because report scanning is CPU-heavy; pane monitoring remains independent.
 First inspect `GET /api/config` →
 `_info.capabilities.agent_context_v1`. If it is absent, use the terminal
 workspace; if `enabled` is false, turn on **Settings → Experimental → Enable
-Agent Workspace**. YAML `agents.enabled` values are not activation controls.
+Agent Context**. YAML `agents.enabled` values are not activation controls.
 
 Structured context currently requires a Codex or Claude Code pane whose
 runtime-owned session log reports the same working directory. Confirm vmux runs

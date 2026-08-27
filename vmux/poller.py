@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import re
 import time
 from typing import Dict, List, Optional
@@ -18,18 +19,19 @@ from .agents.models import PaneObservation, fingerprint_terminal
 from .agents.observers import runtime_from_command
 from .agents.service import AgentService
 from .config import Config, save_overlay
-from .detectors import classify_kind, detect, is_spinner
+from .detectors import agent_kind_from_cmd, classify_kind, detect, is_spinner
+from .lifecycle import LifecycleEvidence, LifecycleKernel, project_legacy_status
 from .models import (
     KIND_CLAUDE,
     KIND_CODEX,
     KIND_GENERIC,
     STATUS_IDLE,
     STATUS_WORKING,
-    STATUS_OFFLINE,
     PaneState,
 )
 from .naming import SmartNamer
 from .push import PushManager
+from .workspaces import WorkspaceResolver
 
 
 def _strip_spinner(s: str) -> str:
@@ -95,7 +97,15 @@ class Hub:
         # discovery is disabled, so clients can open the successful result.
         self.created_panes = set()
         self.push = PushManager(cfg)
-        self.agents = AgentService(cfg, push=self.push, kick=self.kick)
+        self.workspaces = WorkspaceResolver(
+            cfg.creation_roots,
+            creation_enabled=cfg.creation_configured,
+            creation_unavailable_reason=cfg.creation_setup_reason,
+        )
+        self.creation_workspace_resolver = self.workspaces
+        self.agents = AgentService(
+            cfg, push=self.push, kick=self.kick, workspace_resolver=self.workspaces
+        )
         # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
         self._wake: Optional[asyncio.Event] = None
@@ -104,6 +114,7 @@ class Hub:
         self.namer = SmartNamer(cfg, on_update=self.kick)
         self._snapshot_revision = 0
         self._snapshot_signature: Optional[tuple] = None
+        self.lifecycle = LifecycleKernel()
 
     def mark_interaction(self, pane_id: str) -> None:
         """Record that the user just sent input to this pane (for the 'recently sent' sort)."""
@@ -111,6 +122,30 @@ class Hub:
 
     def mark_created(self, pane_id: str) -> None:
         self.created_panes.add(pane_id)
+
+    def lifecycle_diagnostics(self, pane_id: str, limit: int = 32) -> dict:
+        if pane_id not in self.states:
+            raise KeyError(pane_id)
+        return self.lifecycle.diagnostics(pane_id, limit)
+
+    def acknowledge_lifecycle(self, pane_id: str, expected_revision: int) -> dict:
+        if pane_id not in self.states:
+            raise KeyError(pane_id)
+        summary = self.lifecycle.acknowledge(pane_id, expected_revision, now=time.time())
+        state = self.states[pane_id]
+        state.lifecycle = summary.to_dict()
+        state.status = project_legacy_status(summary.state)
+        self._update_snapshot_revision()
+        self.kick()
+        return self.lifecycle.diagnostics(pane_id)
+
+    def acknowledge_done_after_action(self, pane_id: str) -> None:
+        summary = self.lifecycle.acknowledge_current_done(pane_id, now=time.time())
+        if summary is None or pane_id not in self.states:
+            return
+        self.states[pane_id].lifecycle = summary.to_dict()
+        self.states[pane_id].status = project_legacy_status(summary.state)
+        self._update_snapshot_revision()
 
     # -- selection of which panes to show ---------------------------------- #
     def _included(self, pane: dict, kind: str) -> bool:
@@ -135,6 +170,13 @@ class Hub:
         captures = await asyncio.gather(
             *[asyncio.to_thread(tmux.capture, p["id"], self.cfg.capture_lines) for p in panes]
         )
+        resolved_workspaces = await self.workspaces.resolve_active(
+            pane.get("path", "") for pane in panes
+        )
+        workspace_by_path = {
+            path: (value.identity if value else None)
+            for path, value in resolved_workspaces.items()
+        }
 
         now = time.time()
         new_states: Dict[str, PaneState] = {}
@@ -170,6 +212,15 @@ class Hub:
                 and now - previous_state.updated < ACTIVITY_GRACE_SECONDS
             ):
                 res.status = STATUS_WORKING
+                res.reason = "activity_grace"
+                res.authority = "terminal_activity"
+                res.confidence = "medium"
+            try:
+                pane_created = float(pane.get("created") or 0)
+            except (TypeError, ValueError):
+                pane_created = 0.0
+            incarnation_raw = "%s\0%s\0%s" % (pid, str(pane.get("pid", "")), pane_created)
+            incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
             # Runtime-log observation is part of the opt-in experimental
             # workspace. Do not even construct observations while it is off.
             if self.agents.runtime_active:
@@ -182,10 +233,6 @@ class Hub:
             else:
                 runtime = None
             if self.agents.runtime_active and runtime in ("codex", "claude"):
-                try:
-                    pane_created = float(pane.get("created") or 0)
-                except (TypeError, ValueError):
-                    pane_created = 0.0
                 agent_observations.append(PaneObservation(
                     pane_id=pid,
                     target=target,
@@ -207,6 +254,30 @@ class Hub:
             if not self._included(pane, kind):
                 continue
 
+            lifecycle_evidence = [LifecycleEvidence(
+                state={
+                    "needs_input": "blocked", "error": "error",
+                    "working": "working", "idle": "idle",
+                }.get(res.status, "unknown"),
+                reason=res.reason, authority=res.authority,
+                confidence=res.confidence, observed_at=now,
+            )]
+            structured = self.agents.lifecycle_evidence(pid, incarnation)
+            if structured:
+                lifecycle_evidence.append(LifecycleEvidence(**structured))
+            if override:
+                identity = ({"reason": "configuration_override", "authority": "user", "confidence": "high"},)
+            elif agent_kind_from_cmd(pane["cmd"]):
+                identity = ({"reason": "recognized_process_command", "authority": "process", "confidence": "high"},)
+            elif kind not in (KIND_GENERIC, "shell"):
+                identity = ({"reason": "strong_screen_signature", "authority": "terminal_ui", "confidence": "medium"},)
+            else:
+                identity = ({"reason": "generic_fallback", "authority": "fallback", "confidence": "low"},)
+            lifecycle = self.lifecycle.observe(
+                pid, incarnation, lifecycle_evidence, identity=identity,
+                process_present=True, now=now,
+            )
+
             override_name = override.name if override else None
             smart_name = None
             if self.cfg.naming_mode == "smart" and not override_name:
@@ -224,7 +295,7 @@ class Hub:
                 target=target,
                 name=name,
                 kind=kind,
-                status=res.status,
+                status=project_legacy_status(lifecycle.state),
                 title=pane["title"],
                 question=res.question,
                 menu=res.menu_list(),
@@ -234,6 +305,12 @@ class Hub:
                 window=pane.get("window", ""),
                 starred=bool(override and override.star),
                 interacted=self.interactions.get(pid, 0.0),
+                lifecycle=lifecycle.to_dict(),
+                workspace=(
+                    workspace_by_path.get(os.path.realpath(pane.get("path", ""))).to_dict()
+                    if workspace_by_path.get(os.path.realpath(pane.get("path", "")))
+                    else None
+                ),
             )
             new_states[pid] = st
             new_order.append(pid)
@@ -243,17 +320,24 @@ class Hub:
             if target in present_targets:
                 continue
             pid = "cfg:" + target
+            lifecycle = self.lifecycle.observe(
+                pid, pid, (),
+                identity=({"reason": "configuration_override", "authority": "user", "confidence": "high"},),
+                process_present=False, now=now,
+            )
             new_states[pid] = PaneState(
                 id=pid,
                 target=target,
                 name=ov.name or target,
                 kind=ov.kind or "generic",
-                status=STATUS_OFFLINE,
+                status=project_legacy_status(lifecycle.state),
                 starred=ov.star,
+                lifecycle=lifecycle.to_dict(),
             )
             new_order.append(pid)
 
         review_policy = self.agents.review_notification_policy()
+        self.push.suppress_done_alerts = review_policy["batching_enabled"]
         alerts = self.push.collect(
             self.states,
             new_states,
@@ -262,6 +346,7 @@ class Hub:
         )
         self.states = new_states
         self.order = new_order
+        self.lifecycle.prune(new_states)
         self._update_snapshot_revision()
         schedule_now = time.time()
         if self.agents.runtime_active:
@@ -436,6 +521,7 @@ class Hub:
         else:
             tmux.send_literal(real, key, enter=True)
         self.mark_interaction(real)
+        self.acknowledge_done_after_action(real)
 
     def kick(self) -> None:
         if self._wake is not None:

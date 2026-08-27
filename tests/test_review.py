@@ -592,6 +592,7 @@ def test_api_review_is_read_only_settings_are_partial_and_ack_is_explicit(tmp_pa
         "enabled": True,
         "version": 1,
         "scheduling": True,
+        "finish_batch": True,
         "min_interval_minutes": 5,
         "max_interval_minutes": 1440,
     }
@@ -682,6 +683,145 @@ def test_api_review_is_read_only_settings_are_partial_and_ack_is_explicit(tmp_pa
     assert disabled["interval_minutes"] is None
     assert disabled["next_due_at"] is None
     client.__exit__(None, None, None)
+
+
+def test_finish_review_is_atomic_monotonic_and_resets_timer_once(tmp_path, monkeypatch):
+    store = AgentStore(str(tmp_path / "agents.sqlite3"))
+    first_agent = store.upsert_session(
+        "codex", "batch-first", "/private/first", "/project", "v1"
+    )
+    second_agent = store.upsert_session(
+        "claude", "batch-second", "/private/second", "/project", "v1"
+    )
+    first_snapshot = add_snapshot(store, first_agent["id"], goal="First")
+    second_snapshot = add_snapshot(store, second_agent["id"], goal="Second")
+    store.update_review_settings(interval_present=True, interval_minutes=30, now=100)
+
+    monkeypatch.setattr("vmux.agents.store.time.time", lambda: 2_000)
+    finished = store.finish_review(
+        [
+            {"agent_id": first_agent["id"], "snapshot_id": first_snapshot["id"]},
+            {"agent_id": second_agent["id"], "snapshot_id": second_snapshot["id"]},
+        ]
+    )
+    assert finished == {
+        "requested": 2,
+        "advanced": 2,
+        "unchanged": 0,
+        "processed_at": 2_000,
+        "next_due_at": 3_800,
+    }
+    assert {
+        row["session_id"]: row["snapshot_id"]
+        for row in store.conn.execute("SELECT * FROM session_reviews")
+    } == {
+        first_agent["id"]: first_snapshot["id"],
+        second_agent["id"]: second_snapshot["id"],
+    }
+
+    monkeypatch.setattr("vmux.agents.store.time.time", lambda: 3_000)
+    replay = store.finish_review(
+        [
+            {"agent_id": first_agent["id"], "snapshot_id": first_snapshot["id"]},
+            {"agent_id": second_agent["id"], "snapshot_id": second_snapshot["id"]},
+        ]
+    )
+    assert replay["advanced"] == 0
+    assert replay["unchanged"] == 2
+    assert replay["next_due_at"] == 3_800
+
+
+def test_finish_review_invalid_target_rolls_back_every_baseline(tmp_path):
+    store = AgentStore(str(tmp_path / "agents.sqlite3"))
+    first_agent = store.upsert_session(
+        "codex", "rollback-first", "/private/first", "/project", "v1"
+    )
+    second_agent = store.upsert_session(
+        "claude", "rollback-second", "/private/second", "/project", "v1"
+    )
+    first_snapshot = add_snapshot(store, first_agent["id"], goal="First")
+    second_snapshot = add_snapshot(store, second_agent["id"], goal="Second")
+
+    with pytest.raises(KeyError):
+        store.finish_review(
+            [
+                {
+                    "agent_id": first_agent["id"],
+                    "snapshot_id": first_snapshot["id"],
+                },
+                {
+                    "agent_id": first_agent["id"],
+                    "snapshot_id": second_snapshot["id"],
+                },
+            ]
+        )
+    assert store.conn.execute("SELECT COUNT(*) AS n FROM session_reviews").fetchone()[
+        "n"
+    ] == 0
+
+
+def test_finish_review_api_validation_auth_and_event(tmp_path):
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    cfg = config(tmp_path)
+    cfg.token = "secret"
+    app = create_app(cfg)
+    store = app.state.hub.agents.store
+    first_agent = store.upsert_session(
+        "codex", "api-batch-first", "/private/first", "/project", "v1"
+    )
+    second_agent = store.upsert_session(
+        "claude", "api-batch-second", "/private/second", "/project", "v1"
+    )
+    first_snapshot = add_snapshot(store, first_agent["id"], goal="First")
+    second_snapshot = add_snapshot(store, second_agent["id"], goal="Second")
+    targets = [
+        {"agent_id": first_agent["id"], "snapshot_id": first_snapshot["id"]},
+        {"agent_id": second_agent["id"], "snapshot_id": second_snapshot["id"]},
+    ]
+
+    with TestClient(app) as client:
+        assert client.put("/api/review/finish", json={"targets": targets}).status_code == 401
+        duplicate = client.put(
+            "/api/review/finish",
+            headers={"Authorization": "Bearer secret"},
+            json={"targets": [targets[0], targets[0]]},
+        )
+        assert duplicate.status_code == 422
+        oversized = client.put(
+            "/api/review/finish",
+            headers={"Authorization": "Bearer secret"},
+            json={"targets": [
+                {"agent_id": "agent-%d" % index, "snapshot_id": "snapshot"}
+                for index in range(11)
+            ]},
+        )
+        assert oversized.status_code == 422
+        mismatched = client.put(
+            "/api/review/finish",
+            headers={"Authorization": "Bearer secret"},
+            json={"targets": [targets[0], {
+                "agent_id": second_agent["id"],
+                "snapshot_id": first_snapshot["id"],
+            }]},
+        )
+        assert mismatched.status_code == 409
+        assert store.conn.execute(
+            "SELECT COUNT(*) AS n FROM session_reviews"
+        ).fetchone()["n"] == 0
+
+        finished = client.put(
+            "/api/review/finish",
+            headers={"Authorization": "Bearer secret"},
+            json={"targets": targets},
+        )
+        assert finished.status_code == 200
+        assert finished.json()["advanced"] == 2
+        assert any(
+            item["event"]["kind"] == "review_finished"
+            for item in app.state.hub.agents._history
+        )
 
 
 def test_priority_is_only_explicit_runtime_metadata():

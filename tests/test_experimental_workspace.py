@@ -1,4 +1,4 @@
-"""Opt-in Agent Workspace configuration and live runtime lifecycle."""
+"""Opt-in Agent Context configuration and live runtime lifecycle."""
 
 from __future__ import annotations
 
@@ -140,7 +140,11 @@ def test_successful_switch_change_invalidates_other_pwa_config_clients(
                 json={"experimental_agent_workspace_enabled": True},
             )
             assert response.status_code == 200
-            messages = [websocket.receive_json() for _ in range(3)]
+            messages = []
+            for _ in range(2):
+                messages.append(websocket.receive_json())
+                if messages[-1]["type"] == "config_changed":
+                    break
             assert "config_changed" in {message["type"] for message in messages}
 
 

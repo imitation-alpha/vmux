@@ -86,6 +86,9 @@ export const CONNECTION_LABELS = Object.freeze({
 export const KNOWN_STATUSES = Object.freeze([
   "needs_input", "error", "working", "idle", "offline",
 ]);
+export const KNOWN_LIFECYCLE_STATES = Object.freeze([
+  "blocked", "error", "working", "done", "idle", "offline", "unknown",
+]);
 export const KNOWN_KINDS = Object.freeze([
   "claude-code", "codex", "grok", "opencode", "antigravity", "generic", "shell",
 ]);
@@ -324,6 +327,29 @@ export function usePrefs() {
 export function normalizeStatus(value) {
   const raw = typeof value === "string" ? value : (isObject(value) ? value.status : "");
   return KNOWN_STATUSES.includes(raw) ? raw : "unknown";
+}
+
+export function normalizeLifecycle(value, legacyStatus = "unknown") {
+  const source = isObject(value) ? value : {};
+  const fallback = {
+    needs_input: "blocked", error: "error", working: "working",
+    idle: "idle", offline: "offline", unknown: "unknown",
+  }[normalizeStatus(legacyStatus)] || "unknown";
+  const state = KNOWN_LIFECYCLE_STATES.includes(source.state) ? source.state : fallback;
+  const authorities = ["process", "structured_log", "terminal_ui", "terminal_activity", "fallback", "user"];
+  const confidences = ["high", "medium", "low"];
+  const freshnesses = ["fresh", "aging", "stale"];
+  return {
+    version: Number(source.version) === 1 ? 1 : 0,
+    state,
+    reason: textValue(source.reason, source.state ? "unknown_reason" : "legacy_status"),
+    authority: authorities.includes(source.authority) ? source.authority : "fallback",
+    confidence: confidences.includes(source.confidence) ? source.confidence : "low",
+    freshness: freshnesses.includes(source.freshness) ? source.freshness : "stale",
+    transitioned_at: finiteNumber(source.transitioned_at, 0),
+    revision: Math.max(0, Math.trunc(finiteNumber(source.revision, 0))),
+    conflicted: source.conflicted === true,
+  };
 }
 
 export function actionsAllowed(connection, pane = null) {
@@ -843,7 +869,8 @@ function panesEqual(left, right) {
   return primitives.every((key) => left[key] === right[key])
     && arraysEqual(left.preview, right.preview)
     && arraysEqual(left.lines, right.lines)
-    && menuEqual(left.menu, right.menu);
+    && menuEqual(left.menu, right.menu)
+    && JSON.stringify(left.lifecycle) === JSON.stringify(right.lifecycle);
 }
 
 /** Normalize one untrusted PaneState-shaped JSON object for safe rendering. */
@@ -862,6 +889,7 @@ export function normalizePane(raw, index = 0) {
     ? suppliedPreview
     : lines.filter((line) => line.trim()).slice(-6);
   const configuredOffline = id.startsWith("cfg:") || status === "offline";
+  const lifecycle = normalizeLifecycle(source.lifecycle, status);
   return {
     id,
     target,
@@ -884,6 +912,7 @@ export function normalizePane(raw, index = 0) {
     interacted: finiteNumber(source.interacted, 0),
     configuredOffline,
     actionable: Boolean(suppliedId) && !configuredOffline,
+    lifecycle,
   };
 }
 

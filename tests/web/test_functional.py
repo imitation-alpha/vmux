@@ -23,6 +23,39 @@ def wait_for_connection(page, label: str = "Live") -> None:
     ).wait_for(state="visible", timeout=15_000)
 
 
+def test_done_queue_order_and_direct_open_acknowledgment(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    panes = fixture_panes()
+    panes[3]["lifecycle"] = {
+        **panes[3]["lifecycle"], "state": "done", "reason": "work_became_idle",
+    }
+    fixture_server.set_panes(panes)
+    page = page_factory(browser_runtime, viewport=(1024, 768))
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+
+    cards = page.locator(".attention-card .attention-heading strong")
+    assert cards.all_text_contents()[:3] == [
+        "Release captain", "API investigator", "Test watcher",
+    ]
+    assert not any(
+        row["endpoint"] == "/api/panes/lifecycle/acknowledge"
+        for row in fixture_server.action_requests()
+    )
+
+    done_card = page.locator(".attention-card").filter(has_text="Test watcher")
+    done_card.get_by_role("button", name="Inspect").click()
+    page.wait_for_timeout(500)
+    acknowledgments = [
+        row for row in fixture_server.action_requests()
+        if row["endpoint"] == "/api/panes/lifecycle/acknowledge"
+    ]
+    assert acknowledgments[-1]["body"] == {"id": "%4", "expected_revision": 8}
+
+
 def test_live_sort_order_is_coalesced_but_urgent_attention_moves_immediately(
     browser_runtime: BrowserRuntime,
     fixture_server: FixtureServer,
@@ -60,6 +93,11 @@ def test_live_sort_order_is_coalesced_but_urgent_attention_moves_immediately(
     assert rows.all_text_contents()[0] == "Test watcher"
 
     panes[2]["status"] = "needs_input"
+    panes[2]["lifecycle"] = {
+        **panes[2]["lifecycle"], "state": "blocked", "reason": "configured_prompt_visible",
+        "authority": "terminal_ui", "confidence": "high",
+        "revision": panes[2]["lifecycle"]["revision"] + 1,
+    }
     panes[2]["updated"] = 400
     fixture_server.set_panes(panes)
     page.wait_for_timeout(1000)
@@ -171,7 +209,7 @@ def test_width_breakpoints_ignore_pointer_type_and_reflow_at_320(
         "Queue2",
         "Active1",
         "All5",
-        "Stats1",
+        "Stats2",
     ]
 
     page.set_viewport_size({"width": 819, "height": 768})
@@ -558,8 +596,14 @@ def test_review_quick_deep_link_context_skip_and_explicit_acknowledgement(
     open_pane.click()
     terminal = page.get_by_role("dialog", name=re.compile("Release captain"))
     terminal.get_by_text("Ship the reviewed change to production?", exact=True).wait_for()
-    page.keyboard.press("Escape")
-    terminal.wait_for(state="detached")
+    # A lifecycle acknowledgment can replace the compact detail dialog as the
+    # fresh frame arrives. Close either generation before using navigation.
+    for _ in range(2):
+        if not page.locator(".dialog-scrim").count():
+            break
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+    page.locator(".dialog-scrim").wait_for(state="detached")
     workspace_nav.get_by_role("button", name=re.compile("^Review")).click()
     page.get_by_role("heading", name="Review", exact=True).wait_for()
     page.get_by_text("Review schedule", exact=True).click()
@@ -991,7 +1035,7 @@ def test_stats_settings_and_partial_broadcast_use_real_fixture_endpoints(
     settings = page.get_by_role("dialog", name=re.compile("Settings"))
     settings.get_by_role("button", name="Experimental", exact=True).click()
     workspace_switch = settings.get_by_role(
-        "checkbox", name="Enable Agent Workspace", exact=True
+        "checkbox", name="Enable Agent Context", exact=True
     )
     assert not workspace_switch.is_checked()
     workspace_switch.click()
@@ -1034,6 +1078,111 @@ def test_stats_settings_and_partial_broadcast_use_real_fixture_endpoints(
     broadcast.get_by_text("Broadcast partially completed", exact=True).wait_for(timeout=10_000)
     assert "Sent to 3 of 4" in broadcast.text_content()
     assert broadcast.get_by_role("button", name="Retry 1 failed").count() == 1
+
+
+def test_quota_visibility_persists_and_hidden_warnings_still_count(
+    chromium_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    page = page_factory(chromium_runtime, viewport=(1024, 768), touch=True)
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+    page.get_by_role("group", name="Pane filter").get_by_role(
+        "button", name=re.compile("^Stats")
+    ).click()
+    page.get_by_role("heading", name="Stats", exact=True).wait_for()
+
+    page.get_by_role("button", name="Settings").click()
+    settings = page.get_by_role("dialog", name=re.compile("Settings"))
+    settings.get_by_role("button", name="Usage", exact=True).click()
+    copilot = settings.get_by_role("checkbox", name="Show Copilot quotas", exact=True)
+    copilot_chat = settings.get_by_role(
+        "checkbox", name="Show Copilot Chat quota", exact=True
+    )
+    claude_low = settings.get_by_role(
+        "checkbox", name="Show Claude Five-hour window quota", exact=True
+    )
+    assert copilot.is_checked() and copilot_chat.is_checked() and claude_low.is_checked()
+    copilot.click()
+    assert copilot_chat.is_disabled()
+    assert copilot_chat.is_checked()  # parent hiding preserves the child choice
+    claude_low.click()
+    settings.get_by_role("button", name="Save", exact=True).click()
+    settings.get_by_text("Saved", exact=True).wait_for()
+    page.keyboard.press("Escape")
+    settings.wait_for(state="detached")
+
+    assert page.get_by_role("heading", name="Copilot", exact=True).count() == 0
+    assert page.get_by_role(
+        "progressbar", name="Claude Five-hour window remaining"
+    ).count() == 0
+    page.get_by_role("heading", name="Antigravity", exact=True).wait_for()
+    assert "includes 2 hidden meters" in page.locator(".inline-notice").filter(
+        has_text="provider quota"
+    ).text_content().lower()
+    stats_tab = page.get_by_role("group", name="Pane filter").get_by_role(
+        "button", name=re.compile("^Stats")
+    )
+    assert stats_tab.locator(".tab-count").text_content() == "2"
+
+    fixture_server.scenario("usage_new_quota")
+    page.get_by_role("button", name="Refresh", exact=True).click()
+    page.get_by_role("heading", name="NewVendor", exact=True).wait_for(timeout=10_000)
+
+    # A newly opened client reads the same server-wide visibility settings.
+    other = page_factory(chromium_runtime, viewport=(1024, 768), touch=True)
+    open_app(other, fixture_server)
+    wait_for_connection(other)
+    other.get_by_role("group", name="Pane filter").get_by_role(
+        "button", name=re.compile("^Stats")
+    ).click()
+    other.get_by_role("heading", name="Stats", exact=True).wait_for()
+    assert other.get_by_role("heading", name="Copilot", exact=True).count() == 0
+    other.get_by_role("heading", name="NewVendor", exact=True).wait_for()
+
+    other.get_by_role("button", name="Settings").click()
+    other_settings = other.get_by_role("dialog", name=re.compile("Settings"))
+    other_settings.get_by_role("button", name="Usage", exact=True).click()
+    other_settings.get_by_role("button", name="Show all", exact=True).click()
+    other_settings.get_by_role("button", name="Save", exact=True).click()
+    other_settings.get_by_text("Saved", exact=True).wait_for()
+    other.keyboard.press("Escape")
+    other_settings.wait_for(state="detached")
+    other.get_by_role("heading", name="Copilot", exact=True).wait_for()
+    other.get_by_role("progressbar", name="Claude Five-hour window remaining").wait_for()
+
+
+def test_all_hidden_quota_state_is_accessible_on_compact_layout(
+    chromium_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+) -> None:
+    page = page_factory(chromium_runtime, viewport=(390, 844), touch=True)
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+    page.get_by_role("button", name="Settings").click()
+    settings = page.get_by_role("dialog", name=re.compile("Settings"))
+    settings.get_by_role("button", name="Usage", exact=True).click()
+    for provider in ("Claude", "OpenAI", "Antigravity", "Copilot"):
+        settings.get_by_role(
+            "checkbox", name=f"Show {provider} quotas", exact=True
+        ).click()
+    settings.get_by_role("button", name="Save", exact=True).click()
+    settings.get_by_text("Saved", exact=True).wait_for()
+    page.keyboard.press("Escape")
+    settings.wait_for(state="detached")
+
+    page.locator(".compact-dock").get_by_role(
+        "button", name=re.compile("^Stats")
+    ).click()
+    page.get_by_text("All provider quotas are hidden", exact=True).wait_for()
+    assert "Settings → Usage" in page.get_by_text(
+        "Choose displayed quotas", exact=False
+    ).text_content()
+    assert page.locator(".compact-dock").get_by_role(
+        "button", name=re.compile("^Stats")
+    ).locator("b").text_content() == "2"
 
 
 def test_degraded_and_incompatible_connection_modes_are_explicit(

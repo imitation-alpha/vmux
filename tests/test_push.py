@@ -81,6 +81,27 @@ def test_last_alert_pruned_for_vanished_panes():
     assert "%dead" not in last
 
 
+def test_done_revision_alerts_once_and_uses_privacy_minimized_payload(tmp_path):
+    before = pane("%1", STATUS_WORKING)
+    completed = pane("%1", STATUS_IDLE)
+    completed.lifecycle = {
+        "version": 1, "state": "done", "revision": 4,
+        "reason": "work_became_idle", "authority": "terminal_ui",
+        "confidence": "high", "freshness": "fresh",
+        "transitioned_at": 1000.0, "conflicted": False,
+    }
+    last = {}
+    assert collect_alerts({"%1": before}, {"%1": completed}, last, now=1000.0) == [completed]
+    assert collect_alerts({"%1": completed}, {"%1": completed}, last, now=1001.0) == []
+
+    cfg = Config(apns_key_path="k", apns_key_id="K", apns_team_id="T", apns_topic="b")
+    cfg.push_store_path = str(tmp_path / "push.json")
+    payload = PushManager(cfg)._payload(completed)
+    assert payload["aps"]["alert"] == {"title": "vmux", "body": "An agent completed its work."}
+    assert payload["vmux"] == {"type": "pane_done"}
+    assert "%1" not in json.dumps(payload)
+
+
 # -- DeviceRegistry --------------------------------------------------------- #
 
 def test_registry_roundtrip(tmp_path):

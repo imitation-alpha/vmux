@@ -34,6 +34,14 @@ def _totals(cost: float, total: int, messages: int) -> dict[str, Any]:
     }
 
 
+def lifecycle(state: str, revision: int, *, reason: str, authority: str = "terminal_ui", confidence: str = "high") -> dict[str, Any]:
+    return {
+        "version": 1, "state": state, "reason": reason,
+        "authority": authority, "confidence": confidence, "freshness": "fresh",
+        "transitioned_at": FIXED_NOW - 60, "revision": revision, "conflicted": False,
+    }
+
+
 def fixture_panes() -> list[dict[str, Any]]:
     common = {"changed": False, "interacted": FIXED_NOW - 600}
     return [
@@ -44,6 +52,7 @@ def fixture_panes() -> list[dict[str, Any]]:
             "name": "Release captain",
             "kind": "claude-code",
             "status": "needs_input",
+            "lifecycle": lifecycle("blocked", 3, reason="claude_menu_visible"),
             "title": "Claude Code",
             "question": "Ship the reviewed change to production?",
             "menu": [
@@ -71,6 +80,7 @@ def fixture_panes() -> list[dict[str, Any]]:
             "name": "API investigator",
             "kind": "codex",
             "status": "error",
+            "lifecycle": lifecycle("error", 4, reason="terminal_error_match", confidence="medium"),
             "title": "Codex",
             "question": None,
             "menu": [],
@@ -87,6 +97,7 @@ def fixture_panes() -> list[dict[str, Any]]:
             "name": "Docs researcher",
             "kind": "gemini",
             "status": "working",
+            "lifecycle": lifecycle("working", 7, reason="terminal_output_changed", authority="terminal_activity", confidence="medium"),
             "title": "Gemini CLI",
             "question": None,
             "menu": [],
@@ -103,6 +114,7 @@ def fixture_panes() -> list[dict[str, Any]]:
             "name": "Test watcher",
             "kind": "opencode",
             "status": "idle",
+            "lifecycle": lifecycle("idle", 8, reason="quiet_fallback", authority="fallback", confidence="low"),
             "title": "OpenCode",
             "question": None,
             "menu": [],
@@ -119,6 +131,7 @@ def fixture_panes() -> list[dict[str, Any]]:
             "name": "Archived worker",
             "kind": "future-agent",
             "status": "offline",
+            "lifecycle": lifecycle("offline", 1, reason="process_missing", authority="process"),
             "title": "",
             "question": None,
             "menu": [],
@@ -145,6 +158,8 @@ def fixture_config() -> dict[str, Any]:
         "usage_quota_refresh": 180,
         "usage_report_refresh": 300,
         "usage_alert_threshold": 20,
+        "usage_hidden_quota_providers": [],
+        "usage_hidden_quota_metrics": [],
         "experimental_agent_workspace_enabled": False,
         "_info": {
             "host": "127.0.0.1",
@@ -166,6 +181,7 @@ def fixture_config() -> dict[str, Any]:
             "capabilities": {
                 "agent_context_v1": {"enabled": False, "mode": "disabled"},
                 "agent_review_v1": {"enabled": False, "scheduling": False},
+                "pane_lifecycle_v1": {"version": 1, "history_limit": 32},
             },
         },
     }
@@ -261,6 +277,52 @@ def fixture_usage(*, stale: bool = False, empty: bool = False) -> dict[str, Any]
                         "resets_at": None,
                         "resets_at_raw": "Friday",
                     }
+                ],
+            },
+            {
+                "provider": "Antigravity",
+                "plan": "Pro",
+                "account": "Fixture account",
+                "metrics": [
+                    {
+                        "label": "Daily requests",
+                        "used_percent": 24,
+                        "remaining_percent": 76,
+                        "remaining_label": "76% remaining",
+                        "resets_at": None,
+                        "resets_at_raw": "midnight",
+                    },
+                    {
+                        "label": "Monthly tokens",
+                        "used_percent": 40,
+                        "remaining_percent": 60,
+                        "remaining_label": "60% remaining",
+                        "resets_at": None,
+                        "resets_at_raw": "next month",
+                    },
+                ],
+            },
+            {
+                "provider": "Copilot",
+                "plan": "Business",
+                "account": "Fixture account",
+                "metrics": [
+                    {
+                        "label": "Premium requests",
+                        "used_percent": 91,
+                        "remaining_percent": 9,
+                        "remaining_label": "9% remaining",
+                        "resets_at": None,
+                        "resets_at_raw": "next month",
+                    },
+                    {
+                        "label": "Chat",
+                        "used_percent": 5,
+                        "remaining_percent": 95,
+                        "remaining_label": "95% remaining",
+                        "resets_at": None,
+                        "resets_at_raw": "tomorrow",
+                    },
                 ],
             },
         ],
@@ -575,6 +637,7 @@ class FixtureState:
             "usage_error",
             "usage_stale",
             "usage_empty",
+            "usage_new_quota",
             "agent_workspace",
             "agent_safety_locked",
             "agent_pagination",
@@ -662,6 +725,25 @@ def create_fixture_app() -> FastAPI:
         with state.lock:
             state.panes = copy.deepcopy(panes)
         return {"ok": True}
+
+    @app.put("/api/panes/lifecycle/acknowledge")
+    async def acknowledge_pane_lifecycle(payload: dict[str, Any]) -> dict[str, Any]:
+        state.record("/api/panes/lifecycle/acknowledge", payload)
+        pane_id = str(payload.get("id") or "")
+        expected = int(payload.get("expected_revision") or 0)
+        with state.lock:
+            pane = next((item for item in state.panes if item.get("id") == pane_id), None)
+            if not pane:
+                raise HTTPException(status_code=404, detail="unknown pane")
+            current = pane.get("lifecycle") or {}
+            if int(current.get("revision") or 0) != expected:
+                raise HTTPException(status_code=409, detail={"current": current})
+            if current.get("state") == "done":
+                pane["lifecycle"] = {
+                    **current, "state": "idle", "reason": "done_acknowledged",
+                    "authority": "user", "revision": expected + 1,
+                }
+        return {"id": pane_id, "current": copy.deepcopy(pane["lifecycle"])}
 
     @app.get("/api/config")
     async def get_config() -> dict[str, Any]:
@@ -1298,7 +1380,22 @@ def create_fixture_app() -> FastAPI:
             return unavailable_usage("timeout", "fixture collection timed out")
         if current == "usage_error":
             return unavailable_usage("error", "fixture collection failed")
-        return fixture_usage(stale=current == "usage_stale", empty=current == "usage_empty")
+        result = fixture_usage(stale=current == "usage_stale", empty=current == "usage_empty")
+        if current == "usage_new_quota":
+            result["quotas"].append({
+                "provider": "NewVendor",
+                "plan": "Preview",
+                "account": "Fixture account",
+                "metrics": [{
+                    "label": "New allowance",
+                    "used_percent": 10,
+                    "remaining_percent": 90,
+                    "remaining_label": "90% remaining",
+                    "resets_at": None,
+                    "resets_at_raw": "tomorrow",
+                }],
+            })
+        return result
 
     @app.get("/api/usage")
     async def get_usage() -> dict[str, Any]:

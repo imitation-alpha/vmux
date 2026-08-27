@@ -7,6 +7,16 @@ the documentation.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-27
+
+### Added
+
+- Always-on pane lifecycle v1, sanitized diagnostics, revision-safe completion
+  acknowledgments, and done-aware Queue, Review, and notifications while
+  preserving the legacy pane status contract.
+- Workspace metadata and indexing for grouping panes and agents by repository
+  and worktree, plus guarded project-root-aware tmux creation.
+
 ## [0.1.1] - 2026-07-31
 
 ### Fixed
@@ -135,6 +145,7 @@ the documentation.
 - Starlette is constrained to 1.3.1 or newer to exclude
   GHSA-82w8-qh3p-5jfq, a denial-of-service flaw in URL-encoded form parsing.
 
-[Unreleased]: https://github.com/imitation-alpha/vmux/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/imitation-alpha/vmux/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/imitation-alpha/vmux/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/imitation-alpha/vmux/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/imitation-alpha/vmux/releases/tag/v0.1.0

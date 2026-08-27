@@ -525,3 +525,49 @@ def test_usage_endpoints():
     assert refreshed["available"] is False
     cfg_payload = client.get("/api/config", headers=auth).json()
     assert cfg_payload["_info"]["usage"]["enabled"] is False
+    updated = client.patch("/api/config", headers=auth, json={
+        "usage_hidden_quota_providers": [" Copilot ", "Copilot"],
+        "usage_hidden_quota_metrics": [
+            {"provider": "Antigravity", "label": " Daily requests "},
+        ],
+    })
+    assert updated.status_code == 200
+    assert updated.json()["usage_hidden_quota_providers"] == ["Copilot"]
+    assert updated.json()["usage_hidden_quota_metrics"] == [
+        {"provider": "Antigravity", "label": "Daily requests"},
+    ]
+
+    invalid = client.patch("/api/config", headers=auth, json={
+        "usage_enabled": True,
+        "usage_hidden_quota_metrics": [{"provider": "Copilot"}],
+    })
+    assert invalid.status_code == 400
+    rolled_back = client.get("/api/config", headers=auth).json()
+    assert rolled_back["usage_enabled"] is False
+    assert rolled_back["usage_hidden_quota_providers"] == ["Copilot"]
+
+
+def test_usage_endpoint_is_not_filtered_by_visibility_settings():
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    from vmux.server import create_app
+
+    cfg = Config(
+        usage_enabled=True,
+        usage_command=sys.executable,
+        usage_hidden_quota_providers=["Copilot"],
+        usage_hidden_quota_metrics=[{"provider": "Antigravity", "label": "Daily"}],
+    )
+    app = create_app(cfg)
+    app.state.usage.slots["quota"].update({
+        "data": [
+            {"provider": "Copilot", "metrics": [{"label": "Chat", "remaining_percent": 10}]},
+            {"provider": "Antigravity", "metrics": [{"label": "Daily", "remaining_percent": 15}]},
+        ],
+        "fetched_at": 100.0,
+    })
+
+    body = TestClient(app).get("/api/usage").json()
+    assert [quota["provider"] for quota in body["quotas"]] == ["Copilot", "Antigravity"]
+    assert body["quotas"][1]["metrics"][0]["label"] == "Daily"

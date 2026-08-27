@@ -155,6 +155,9 @@ class DetectResult:
     status: str
     question: Optional[str] = None
     menu: Optional[List[MenuOption]] = None
+    reason: str = "quiet_fallback"
+    authority: str = "fallback"
+    confidence: str = "low"
 
     def menu_list(self) -> List[MenuOption]:
         return self.menu or []
@@ -604,7 +607,7 @@ def detect(text: str, kind: str, changed: bool, cfg, title: str = "") -> DetectR
     blocked agent is the whole reason this tool exists.
     """
     if text is None:
-        return DetectResult(status=STATUS_IDLE)
+        return DetectResult(status=STATUS_IDLE, reason="capture_unavailable")
 
     lines = _last_lines(text, 40)
     low = text.lower()
@@ -612,42 +615,42 @@ def detect(text: str, kind: str, changed: bool, cfg, title: str = "") -> DetectR
     if kind == KIND_CLAUDE:
         question, options = parse_claude_menu(lines)
         if options:
-            return DetectResult(STATUS_NEEDS_INPUT, question, options)
+            return DetectResult(STATUS_NEEDS_INPUT, question, options, "claude_menu_visible", "terminal_ui", "high")
         # working: an explicit interrupt line or the live "Verbing… (12s …)" spinner
         if "esc to interrupt" in low or _CLAUDE_WORKING_RE.search(text):
-            return DetectResult(STATUS_WORKING)
+            return DetectResult(STATUS_WORKING, reason="claude_working_ui", authority="terminal_ui", confidence="high")
         # composer/prompt visible -> Claude is waiting for a new instruction (idle).
         # Checked before error/title-spinner so a ready prompt never reads as either.
         if _CLAUDE_IDLE_RE.search(text):
-            return DetectResult(STATUS_IDLE)
+            return DetectResult(STATUS_IDLE, reason="claude_composer_visible", authority="terminal_ui", confidence="high")
         if _has_error(text, cfg):
-            return DetectResult(STATUS_ERROR)
+            return DetectResult(STATUS_ERROR, reason="terminal_error_match", authority="terminal_ui", confidence="medium")
         # last resort: an *animated* braille spinner in the title with fresh output
         # (the static ✳ brand glyph is intentionally excluded — see _is_braille)
         if changed and _is_braille(title.strip()[:1]):
-            return DetectResult(STATUS_WORKING)
-        return DetectResult(STATUS_IDLE)
+            return DetectResult(STATUS_WORKING, reason="title_spinner_active", authority="terminal_activity", confidence="medium")
+        return DetectResult(STATUS_IDLE, reason="quiet_fallback")
 
     if kind == KIND_CODEX:
         question, options = parse_codex_questionnaire(lines)
         if question is not None:
-            return DetectResult(STATUS_NEEDS_INPUT, question, options)
+            return DetectResult(STATUS_NEEDS_INPUT, question, options, "codex_question_visible", "terminal_ui", "high")
 
     # Generic agents, shells, and legacy Codex approval prompts: selection box,
     # then cursor-less numbered dialogs, then configured prompts.
     question, options = parse_claude_menu(lines)
     if options:
-        return DetectResult(STATUS_NEEDS_INPUT, question, options)
+        return DetectResult(STATUS_NEEDS_INPUT, question, options, "selection_menu_visible", "terminal_ui", "high")
     question, options = parse_question_menu(lines)
     if options:
-        return DetectResult(STATUS_NEEDS_INPUT, question, options)
+        return DetectResult(STATUS_NEEDS_INPUT, question, options, "numbered_menu_visible", "terminal_ui", "high")
     question, options = _generic_needs_input(lines, cfg)
     if question is not None:
-        return DetectResult(STATUS_NEEDS_INPUT, question, options)
+        return DetectResult(STATUS_NEEDS_INPUT, question, options, "configured_prompt_visible", "terminal_ui", "high")
     if "esc to interrupt" in low:
-        return DetectResult(STATUS_WORKING)
+        return DetectResult(STATUS_WORKING, reason="interrupt_ui_visible", authority="terminal_ui", confidence="high")
     if _has_error(text, cfg):
-        return DetectResult(STATUS_ERROR)
+        return DetectResult(STATUS_ERROR, reason="terminal_error_match", authority="terminal_ui", confidence="medium")
     if changed:
-        return DetectResult(STATUS_WORKING)
+        return DetectResult(STATUS_WORKING, reason="terminal_output_changed", authority="terminal_activity", confidence="medium")
     return DetectResult(STATUS_IDLE)

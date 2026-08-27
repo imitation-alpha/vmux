@@ -81,7 +81,7 @@ def test_responsive_visual_baseline(
     page.wait_for_function(
         """() => [...document.querySelectorAll('button')].some((button) =>
           button.textContent.includes('Stats') &&
-          ['1'].includes((button.querySelector('.tab-count, b')?.textContent || '').trim()))"""
+          ['2'].includes((button.querySelector('.tab-count, b')?.textContent || '').trim()))"""
     )
     page.evaluate(
         "navigator.serviceWorker ? navigator.serviceWorker.ready : Promise.resolve()"

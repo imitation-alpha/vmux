@@ -216,14 +216,24 @@ timeout. Details and testing advice are in [Agent detectors](guides/agent-detect
 into an argument list and is never passed to a shell. See
 [Usage tracking](guides/usage-tracking.md).
 
-The four live-editable fields appear under **Settings → Usage**. Enabling the
+The usage controls appear under **Settings → Usage**. Enabling the
 collector saves immediately; quota/report intervals and the warning threshold
-are drafted and saved together. The section also reports whether the configured
-collector is installed. The Stats destination represents disabled,
+are drafted and saved together. **Displayed quotas** adds server-wide provider
+and meter switches backed by `usage_hidden_quota_providers` and
+`usage_hidden_quota_metrics` in `vmux-settings.json`. Names are trimmed,
+deduplicated, bounded, and matched exactly against tokscale's normalized
+provider and label names. Newly discovered entries are visible by default;
+saved choices for temporarily absent entries are retained. Hiding a provider
+preserves its meter choices, and **Show all** clears both hidden lists.
+
+Visibility changes only the provider cards and meters on Stats. Cost summaries,
+history, activity breakdowns, `/api/usage`, the Stats warning badge, warning
+notices, and APNs alerts continue to use the complete quota snapshot. The
+section also reports whether the configured collector is installed. The Stats destination represents disabled,
 not-installed, timeout, error, stale, empty, loading, and refresh states without
 disabling pane monitoring.
 
-## Experimental Agent Workspace
+## Experimental Agent Context
 
 Agent Context, Review, Timeline, structured decisions/chat, observation, and
 their local database writes are one server-wide experimental bundle. It is off
@@ -303,6 +313,8 @@ object. `PATCH /api/config` accepts a partial object containing:
 - `usage_quota_refresh`
 - `usage_report_refresh`
 - `usage_alert_threshold`
+- `usage_hidden_quota_providers` (array of exact provider names)
+- `usage_hidden_quota_metrics` (array of `{provider, label}` objects)
 - `experimental_agent_workspace_enabled`
 
 The bearer token, bind, tmux auto-rename choice, push credentials,

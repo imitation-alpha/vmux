@@ -14,6 +14,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 from .. import tmux
 from ..detectors import classify_kind
 from ..models import KIND_CLAUDE, KIND_CODEX
+from ..workspaces import WorkspaceResolver
 from .controllers import TmuxRuntimeController
 from .models import (
     PaneObservation,
@@ -84,8 +85,16 @@ def _prompt_matches(structured: str, visible: str) -> bool:
 class AgentService:
     """Owns adapter polling, normalized storage, live invalidations, and control."""
 
-    def __init__(self, cfg, *, push=None, kick: Optional[Callable[[], None]] = None):
+    def __init__(
+        self, cfg, *, push=None, kick: Optional[Callable[[], None]] = None,
+        workspace_resolver: Optional[WorkspaceResolver] = None,
+    ):
         self.cfg = cfg
+        self.workspace_resolver = workspace_resolver or WorkspaceResolver(
+            cfg.creation_roots,
+            creation_enabled=cfg.creation_configured,
+            creation_unavailable_reason=cfg.creation_setup_reason,
+        )
         path = cfg.agent_store_path or os.path.expanduser("~/.vmux/vmux-agents.sqlite3")
         self.store = AgentStore(path, cfg.agent_retention_days)
         self.observers = built_in_observers(cfg.agent_codex_home, cfg.agent_claude_home)
@@ -149,6 +158,7 @@ class AgentService:
             "enabled": enabled,
             "version": 1,
             "scheduling": enabled,
+            "finish_batch": True,
             "min_interval_minutes": MIN_REVIEW_INTERVAL_MINUTES,
             "max_interval_minutes": MAX_REVIEW_INTERVAL_MINUTES,
         }
@@ -406,6 +416,7 @@ class AgentService:
             if not cursor:
                 break
             agents, cursor = self.store.list_agents(cursor=cursor, limit=100)
+        self._refresh_workspace_registry()
 
     def _invalidate_other_bindings(self, keep_agent_id: str, pane_id: str,
                                    pane_incarnation: str) -> None:
@@ -581,12 +592,32 @@ class AgentService:
         return obs
 
     # -- public query/control surface ------------------------------------ #
+    def _refresh_workspace_registry(self) -> None:
+        active_cwds = []
+        agents, cursor = self.store.list_agents(limit=100)
+        while True:
+            for agent in agents:
+                if str(agent.get("lifecycle") or "") in ("completed", "done", "offline"):
+                    continue
+                internal = self.store.get_agent(agent["id"], internal=True)
+                if internal and internal.get("_source_cwd"):
+                    active_cwds.append(internal["_source_cwd"])
+            if not cursor:
+                break
+            agents, cursor = self.store.list_agents(cursor=cursor, limit=100)
+        self.workspace_resolver.refresh_active(active_cwds)
+
     def _decorate_agent(self, agent: Dict[str, Any]) -> Dict[str, Any]:
         value = dict(agent)
         value["binding_candidates"] = []
+        internal = self.store.get_agent(agent["id"], internal=True)
+        identity = (
+            self.workspace_resolver.resolve(internal.get("_source_cwd"))
+            if internal else None
+        )
+        value["workspace"] = identity.to_dict() if identity else None
         if agent.get("association") == "confirmed":
             return value
-        internal = self.store.get_agent(agent["id"], internal=True)
         if not internal:
             return value
         with self._latest_lock:
@@ -606,11 +637,56 @@ class AgentService:
         agent = self.store.get_agent(session_id)
         if not agent:
             raise AgentNotFound(session_id)
+        self._refresh_workspace_registry()
         return self._decorate_agent(agent)
 
     def list_agents(self, cursor=None, limit=50):
         agents, next_cursor = self.store.list_agents(cursor, limit)
+        self._refresh_workspace_registry()
         return [self._decorate_agent(agent) for agent in agents], next_cursor
+
+    def lifecycle_evidence(self, pane_id: str, pane_incarnation: str) -> Optional[Dict[str, Any]]:
+        """Return sanitized structured state for one confirmed live binding.
+
+        The lifecycle kernel must not learn a session id, transcript path, cwd,
+        prompt, or other workspace content.  This method is unavailable unless
+        the opt-in runtime is active and fails closed on any binding/health gap.
+        """
+        if not self.runtime_active:
+            return None
+        with self._api_lock:
+            agents, cursor = self.store.list_agents(limit=100)
+            while True:
+                for public in agents:
+                    if public.get("pane_id") != pane_id or public.get("association") != "confirmed":
+                        continue
+                    internal = self.store.get_agent(public["id"], internal=True)
+                    if not internal or internal.get("_pane_incarnation") != pane_incarnation:
+                        continue
+                    context = internal.get("context") or {}
+                    health = str(internal.get("extraction_health") or context.get("extraction_health") or "")
+                    if health != "ok" or str(context.get("extraction_health") or "ok") != "ok":
+                        return None
+                    semantic = str(context.get("lifecycle") or "")
+                    mapped = {"working": "working", "idle": "idle", "completed": "idle", "error": "error"}.get(semantic)
+                    if not mapped:
+                        # In particular, structured waiting can never author a
+                        # pane-level blocked state without a live terminal prompt.
+                        return None
+                    observed_at = float(context.get("last_updated") or internal.get("last_event_at") or 0)
+                    if observed_at <= 0:
+                        return None
+                    return {
+                        "state": mapped,
+                        "reason": "structured_" + semantic,
+                        "authority": "structured_log",
+                        "confidence": "high",
+                        "observed_at": observed_at,
+                    }
+                if not cursor:
+                    break
+                agents, cursor = self.store.list_agents(cursor=cursor, limit=100)
+        return None
 
     def resume(self, session_id: str):
         value = self.store.resume(session_id)
@@ -714,6 +790,10 @@ class AgentService:
         """Build the server-wide Review queue without acknowledging any work."""
         generated_at = float(now if now is not None else time.time())
         groups = self.store.review_groups()
+        for group in groups:
+            agent = group.get("agent")
+            if isinstance(agent, dict):
+                group["agent"] = self._decorate_agent(agent)
         raw_settings = self.store.get_review_settings()
         settings = self._public_review_settings(raw_settings)
 
@@ -742,8 +822,9 @@ class AgentService:
 
         terminal_items: List[Dict[str, Any]] = []
         for pane_id, pane in panes_by_id.items():
-            status = str(getattr(pane, "status", ""))
-            if status not in ("needs_input", "error") or pane_id in represented:
+            lifecycle = getattr(pane, "lifecycle", None) or {}
+            status = str(lifecycle.get("state") or getattr(pane, "status", ""))
+            if status not in ("blocked", "needs_input", "error", "done") or pane_id in represented:
                 continue
             terminal_items.append(
                 {
@@ -752,12 +833,12 @@ class AgentService:
                     "status": status,
                     "kind": str(getattr(pane, "kind", "") or "generic"),
                     "updated_at": float(getattr(pane, "updated", 0.0) or 0.0),
-                    "acknowledgeable": False,
+                    "acknowledgeable": status == "done",
                 }
             )
         terminal_items.sort(
             key=lambda item: (
-                0 if item["status"] == "error" else 1,
+                {"error": 0, "blocked": 1, "needs_input": 1, "done": 2}.get(item["status"], 3),
                 item["updated_at"],
                 item["pane_id"],
             )
@@ -898,6 +979,23 @@ class AgentService:
         self.kick()
         return value
 
+    def finish_review(self, targets: List[Dict[str, str]]) -> Dict[str, Any]:
+        try:
+            value = self.store.finish_review(targets)
+        except KeyError:
+            raise AgentConflict(
+                "one or more review targets are missing or mismatched"
+            )
+        if value["advanced"]:
+            self.publish(
+                "review_finished",
+                "",
+                0,
+                resources=["review", "agents"],
+            )
+            self.kick()
+        return value
+
     def list_decisions(self, cursor=None, limit=50, status=None, session_id=None):
         return self.store.list_decisions(cursor, limit, status, session_id)
 
@@ -1016,7 +1114,7 @@ class AgentService:
                 source="manual", capabilities=caps,
             )
         self.publish("agent_updated", session_id, result["context"].get("revision", 0))
-        return self.store.get_agent(session_id)
+        return self._decorate_agent(self.store.get_agent(session_id))
 
     def unbind(self, session_id: str, expected_binding_revision: int) -> Dict[str, Any]:
         with self._control_lock:
@@ -1031,7 +1129,7 @@ class AgentService:
                 capabilities=default_capabilities("unavailable"),
             )
         self.publish("agent_updated", session_id, result["context"].get("revision", 0))
-        return self.store.get_agent(session_id)
+        return self._decorate_agent(self.store.get_agent(session_id))
 
     def delete_history(self, session_id: str) -> None:
         with self._control_lock:

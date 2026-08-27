@@ -113,7 +113,7 @@ def test_experimental_settings_switch_is_server_persisted_and_explains_retention
     state = source("js/state.js")
 
     assert '["experimental", "shield-question", "Experimental"]' in settings
-    assert 'label="Enable Agent Workspace"' in settings
+    assert 'label="Enable Agent Context"' in settings
     assert 'const key = "experimental_agent_workspace_enabled"' in settings
     assert "patch({ [key]: value }, key, false)" in settings
     assert "local Codex and Claude runtime logs" in settings
