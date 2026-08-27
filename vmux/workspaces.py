@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Optional, Sequence, Tuple
 
@@ -124,12 +125,22 @@ class WorkspaceResolver:
         return result
 
     def refresh_active(self, raw_paths: Iterable[object]) -> None:
-        resolved = []
+        paths = []
+        seen = set()
         for raw in raw_paths:
-            value = self._resolve_private(raw)
-            if value is not None:
-                resolved.append(value)
-        self._replace_agent_active(resolved)
+            canonical = self._canonical(raw)
+            if canonical and canonical not in seen:
+                seen.add(canonical)
+                paths.append(canonical)
+        if not paths:
+            self._replace_agent_active(())
+            return
+        with ThreadPoolExecutor(max_workers=min(16, len(paths))) as executor:
+            values = [
+                value for value in executor.map(self._resolve_private, paths)
+                if value is not None
+            ]
+        self._replace_agent_active(values)
 
     def replace_active(self, identities: Iterable[WorkspaceIdentity]) -> None:
         """Test/support hook: retain matching previously resolved private entries."""

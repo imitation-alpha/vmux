@@ -88,6 +88,7 @@ class AgentService:
     def __init__(
         self, cfg, *, push=None, kick: Optional[Callable[[], None]] = None,
         workspace_resolver: Optional[WorkspaceResolver] = None,
+        controller: Optional[TmuxRuntimeController] = None,
     ):
         self.cfg = cfg
         self.workspace_resolver = workspace_resolver or WorkspaceResolver(
@@ -98,7 +99,7 @@ class AgentService:
         path = cfg.agent_store_path or os.path.expanduser("~/.vmux/vmux-agents.sqlite3")
         self.store = AgentStore(path, cfg.agent_retention_days)
         self.observers = built_in_observers(cfg.agent_codex_home, cfg.agent_claude_home)
-        self.controller = TmuxRuntimeController()
+        self.controller = controller if controller is not None else TmuxRuntimeController()
         self.push = push
         self.kick = kick or (lambda: None)
         self._latest: Dict[str, PaneObservation] = {}

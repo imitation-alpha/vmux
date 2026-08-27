@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -252,6 +253,29 @@ def test_agent_only_worktree_is_registered_for_launch(tmp_path):
     assert identity is not None
     resolver.refresh_active([str(repo)])
     assert resolver.active_path(identity.worktree_id) == str(repo.resolve())
+
+
+def test_agent_workspace_refresh_deduplicates_and_resolves_concurrently(
+    tmp_path, monkeypatch,
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    resolver = WorkspaceResolver([str(tmp_path)])
+    barrier = threading.Barrier(2)
+    calls = []
+
+    def resolve(path):
+        calls.append(path)
+        barrier.wait(timeout=2)
+        return None
+
+    monkeypatch.setattr(resolver, "_resolve_private", resolve)
+
+    resolver.refresh_active([str(first), str(first), str(second)])
+
+    assert set(calls) == {str(first.resolve()), str(second.resolve())}
 
 
 def test_resolver_single_flight_deduplicates_concurrent_canonical_paths(tmp_path, monkeypatch):

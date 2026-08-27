@@ -16,6 +16,7 @@ import time
 from typing import Callable, Dict, List, Optional
 
 from . import tmux
+from .agents.controllers import TmuxRuntimeController
 from .agents.models import PaneObservation, fingerprint_terminal
 from .agents.observers import runtime_from_command
 from .agents.service import AgentService
@@ -106,7 +107,11 @@ class Hub:
         )
         self.creation_workspace_resolver = self.workspaces
         self.agents = AgentService(
-            cfg, push=self.push, kick=self.kick, workspace_resolver=self.workspaces
+            cfg,
+            push=self.push,
+            kick=self.kick,
+            workspace_resolver=self.workspaces,
+            controller=TmuxRuntimeController(action_runner=self._perform_pane_action),
         )
         # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
