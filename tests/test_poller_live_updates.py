@@ -203,3 +203,49 @@ def test_action_invalidates_capture_taken_before_interaction(monkeypatch):
     assert not poll_thread.is_alive()
     assert hub.states["%1"].lifecycle["state"] == "unknown"
     assert hub.states["%1"].lifecycle["reason"] == "capture_precedes_interaction"
+
+
+def test_action_send_is_serialized_with_stale_capture_publication(monkeypatch):
+    pane = {**PANE, "cmd": "claude", "title": "Claude Code"}
+    captures = iter(["Claude Code\n⠋ Working… (1s)", "Claude Code\n? for shortcuts"])
+    monkeypatch.setattr(tmux, "list_panes", lambda: [pane])
+    monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
+    hub = Hub(Config())
+    asyncio.run(hub.poll_once())
+
+    capture_finished = threading.Event()
+    release_poll = threading.Event()
+    send_started = threading.Event()
+    release_send = threading.Event()
+    original_resolve = hub.workspaces.resolve_active
+
+    async def paused_resolve(paths):
+        capture_finished.set()
+        release_poll.wait(2)
+        return await original_resolve(paths)
+
+    def paused_send(*_args, **_kwargs):
+        send_started.set()
+        release_send.wait(2)
+
+    monkeypatch.setattr(hub.workspaces, "resolve_active", paused_resolve)
+    monkeypatch.setattr(tmux, "send_literal", paused_send)
+    poll_thread = threading.Thread(target=lambda: asyncio.run(hub.poll_once()))
+    poll_thread.start()
+    assert capture_finished.wait(2)
+
+    action_thread = threading.Thread(
+        target=lambda: hub.send_text("%1", "continue", True)
+    )
+    action_thread.start()
+    assert send_started.wait(2)
+    release_poll.set()
+    assert poll_thread.is_alive()
+    release_send.set()
+    action_thread.join(2)
+    poll_thread.join(2)
+
+    assert not action_thread.is_alive()
+    assert not poll_thread.is_alive()
+    assert hub.states["%1"].lifecycle["state"] == "unknown"
+    assert hub.states["%1"].lifecycle["reason"] == "capture_precedes_interaction"

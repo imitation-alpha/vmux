@@ -13,7 +13,7 @@ import os
 import re
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from . import tmux
 from .agents.models import PaneObservation, fingerprint_terminal
@@ -555,31 +555,52 @@ class Hub:
             return pane_id
         return None
 
+    def _perform_pane_action(
+        self, pane_id: str, sender: Callable[[str], None]
+    ) -> str:
+        with self._lifecycle_lock:
+            real = self.resolve_id(pane_id)
+            if real is None:
+                raise tmux.TmuxError("unknown pane")
+            self._interaction_generations[real] = (
+                self._interaction_generations.get(real, 0) + 1
+            )
+            sender(real)
+            self.interactions[real] = time.time()
+            self.acknowledge_done_after_action(real)
+            return real
+
+    def send_key(self, pane_id: str, key: str) -> None:
+        self._perform_pane_action(
+            pane_id, lambda real: tmux.send_key(real, key)
+        )
+
+    def send_text(self, pane_id: str, text: str, enter: bool) -> None:
+        self._perform_pane_action(
+            pane_id, lambda real: tmux.send_literal(real, text, enter=enter)
+        )
+
     def do_select(self, pane_id: str, key: str) -> None:
-        st = self.states.get(pane_id)
-        real = self.resolve_id(pane_id)
-        if real is None:
-            raise tmux.TmuxError("unknown pane")
-        kind = st.kind if st else "generic"
-        if kind == KIND_CLAUDE:
-            tmux.send_chars(real, key)            # digit press selects the option
-        elif kind == KIND_CODEX:
-            option = next((item for item in (st.menu if st else []) if item.key == key), None)
-            if key == "enter":
-                tmux.send_key(real, "Enter")
-            elif option is not None and option.freeform:
-                # Stage "None of the above" without submitting so the web
-                # composer can collect notes for the selected Codex answer.
+        def send(real: str) -> None:
+            st = self.states.get(pane_id)
+            kind = st.kind if st else "generic"
+            if kind == KIND_CLAUDE:
                 tmux.send_chars(real, key)
+            elif kind == KIND_CODEX:
+                option = next((item for item in (st.menu if st else []) if item.key == key), None)
+                if key == "enter":
+                    tmux.send_key(real, "Enter")
+                elif option is not None and option.freeform:
+                    tmux.send_chars(real, key)
+                else:
+                    tmux.send_chars(real, key)
+                    tmux.send_key(real, "Enter")
+            elif key == "enter":
+                tmux.send_key(real, "Enter")
             else:
-                tmux.send_chars(real, key)
-                tmux.send_key(real, "Enter")
-        elif key == "enter":
-            tmux.send_key(real, "Enter")
-        else:
-            tmux.send_literal(real, key, enter=True)
-        self.mark_interaction(real)
-        self.acknowledge_done_after_action(real)
+                tmux.send_literal(real, key, enter=True)
+
+        self._perform_pane_action(pane_id, send)
 
     def kick(self) -> None:
         if self._wake is not None:

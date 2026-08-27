@@ -302,11 +302,9 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     def post_key(req: KeyReq, _=Depends(require_auth)):
         real = _resolve(req.id)
         try:
-            tmux.send_key(real, req.key)
+            hub.send_key(real, req.key)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
-        hub.acknowledge_done_after_action(real)
         hub.kick()
         return {"ok": True}
 
@@ -314,11 +312,9 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     def post_text(req: TextReq, _=Depends(require_auth)):
         real = _resolve(req.id)
         try:
-            tmux.send_literal(real, req.text, enter=req.enter)
+            hub.send_text(real, req.text, req.enter)
         except tmux.TmuxError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
-        hub.acknowledge_done_after_action(real)
         hub.kick()
         return {"ok": True}
 
@@ -340,9 +336,7 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
                 errors.append(pid)
                 continue
             try:
-                tmux.send_literal(real, req.text, enter=req.enter)
-                hub.mark_interaction(real)
-                hub.acknowledge_done_after_action(real)
+                hub.send_text(real, req.text, req.enter)
                 sent += 1
             except tmux.TmuxError as exc:
                 errors.append("%s: %s" % (pid, exc))
