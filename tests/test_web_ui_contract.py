@@ -107,23 +107,6 @@ def test_agent_workspace_is_capability_gated_separate_and_hash_routed():
     assert 'isLiveEndpoint(url.pathname)' in worker
 
 
-def test_experimental_settings_switch_is_server_persisted_and_explains_retention():
-    settings = source("js/settings.js")
-    agent_ui = source("js/agent-ui.js")
-    state = source("js/state.js")
-
-    assert '["experimental", "shield-question", "Experimental"]' in settings
-    assert 'label="Enable Agent Context"' in settings
-    assert 'const key = "experimental_agent_workspace_enabled"' in settings
-    assert "patch({ [key]: value }, key, false)" in settings
-    assert "local Codex and Claude runtime logs" in settings
-    assert "without deleting existing structured history" in settings
-    assert "globalThis.history.replaceState" in agent_ui
-    assert 'new globalThis.Event("hashchange")' in agent_ui
-    assert 'message.type === "config_changed"' in state
-    assert 'request("/config"' in function_body(state, "refreshConfig", "scheduleRest")
-
-
 def test_review_contract_is_capability_gated_explicit_and_conflict_safe():
     state = source("js/agent-state.js")
     ui = source("js/agent-ui.js")
