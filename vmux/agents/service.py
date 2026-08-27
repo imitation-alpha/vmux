@@ -646,38 +646,61 @@ class AgentService:
         self._refresh_workspace_registry()
         return [self._decorate_agent(agent) for agent in agents], next_cursor
 
-    def lifecycle_evidence(self, pane_id: str, pane_incarnation: str) -> Optional[Dict[str, Any]]:
-        """Return sanitized structured state for one confirmed live binding.
+    def lifecycle_evidence_many(
+        self, pane_incarnations: Dict[str, str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return sanitized structured state for confirmed live bindings.
 
         The lifecycle kernel must not learn a session id, transcript path, cwd,
         prompt, or other workspace content.  This method is unavailable unless
         the opt-in runtime is active and fails closed on any binding/health gap.
         """
-        if not self.runtime_active:
-            return None
+        requested = {
+            str(pane_id): str(incarnation)
+            for pane_id, incarnation in pane_incarnations.items()
+            if pane_id and incarnation
+        }
+        if not self.runtime_active or not requested:
+            return {}
+        evidence: Dict[str, Dict[str, Any]] = {}
+        rejected: set[str] = set()
         with self._api_lock:
             agents, cursor = self.store.list_agents(limit=100)
             while True:
                 for public in agents:
-                    if public.get("pane_id") != pane_id or public.get("association") != "confirmed":
+                    pane_id = str(public.get("pane_id") or "")
+                    if (
+                        pane_id not in requested
+                        or pane_id in rejected
+                        or public.get("association") != "confirmed"
+                    ):
                         continue
                     internal = self.store.get_agent(public["id"], internal=True)
-                    if not internal or internal.get("_pane_incarnation") != pane_incarnation:
+                    if (
+                        not internal
+                        or internal.get("_pane_incarnation") != requested[pane_id]
+                    ):
                         continue
                     context = internal.get("context") or {}
                     health = str(internal.get("extraction_health") or context.get("extraction_health") or "")
                     if health != "ok" or str(context.get("extraction_health") or "ok") != "ok":
-                        return None
+                        rejected.add(pane_id)
+                        evidence.pop(pane_id, None)
+                        continue
                     semantic = str(context.get("lifecycle") or "")
                     mapped = {"working": "working", "idle": "idle", "completed": "idle", "error": "error"}.get(semantic)
                     if not mapped:
                         # In particular, structured waiting can never author a
                         # pane-level blocked state without a live terminal prompt.
-                        return None
+                        rejected.add(pane_id)
+                        evidence.pop(pane_id, None)
+                        continue
                     observed_at = float(context.get("last_updated") or internal.get("last_event_at") or 0)
                     if observed_at <= 0:
-                        return None
-                    return {
+                        rejected.add(pane_id)
+                        evidence.pop(pane_id, None)
+                        continue
+                    evidence[pane_id] = {
                         "state": mapped,
                         "reason": "structured_" + semantic,
                         "authority": "structured_log",
@@ -687,7 +710,12 @@ class AgentService:
                 if not cursor:
                     break
                 agents, cursor = self.store.list_agents(cursor=cursor, limit=100)
-        return None
+        return evidence
+
+    def lifecycle_evidence(
+        self, pane_id: str, pane_incarnation: str
+    ) -> Optional[Dict[str, Any]]:
+        return self.lifecycle_evidence_many({pane_id: pane_incarnation}).get(pane_id)
 
     def resume(self, session_id: str):
         value = self.store.resume(session_id)

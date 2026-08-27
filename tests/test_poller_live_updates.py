@@ -274,14 +274,14 @@ def test_structured_evidence_wait_does_not_hold_lifecycle_lock(tmp_path, monkeyp
             hub.send_text("%1", "continue", True)
         action_done.set()
 
-    def lifecycle_evidence(*_args):
+    def lifecycle_evidence_many(*_args):
         evidence_started.set()
         acquired = hub.agents._api_lock.acquire(timeout=0.5)
         if acquired:
             hub.agents._api_lock.release()
-        return None
+        return {}
 
-    monkeypatch.setattr(hub.agents, "lifecycle_evidence", lifecycle_evidence)
+    monkeypatch.setattr(hub.agents, "lifecycle_evidence_many", lifecycle_evidence_many)
     action_thread = threading.Thread(target=guarded_action)
     action_thread.start()
     assert api_held.wait(2)
@@ -296,3 +296,29 @@ def test_structured_evidence_wait_does_not_hold_lifecycle_lock(tmp_path, monkeyp
     assert action_completed_without_waiting
     assert not action_thread.is_alive()
     assert not poll_thread.is_alive()
+
+
+def test_poll_batches_structured_evidence_for_all_panes(tmp_path, monkeypatch):
+    panes = [
+        {**PANE, "id": "%%%d" % index, "target": "work:1.%d" % index}
+        for index in range(1, 5)
+    ]
+    monkeypatch.setattr(tmux, "list_panes", lambda: panes)
+    monkeypatch.setattr(tmux, "capture", lambda *_: "Codex prompt")
+    hub = Hub(Config(
+        experimental_agent_workspace_enabled=True,
+        agent_store_path=str(tmp_path / "agents.sqlite3"),
+    ))
+    hub.agents._runtime_active = True
+    calls = []
+
+    def lifecycle_evidence_many(values):
+        calls.append(dict(values))
+        return {}
+
+    monkeypatch.setattr(hub.agents, "lifecycle_evidence_many", lifecycle_evidence_many)
+
+    asyncio.run(hub.poll_once())
+
+    assert len(calls) == 1
+    assert set(calls[0]) == {pane["id"] for pane in panes}

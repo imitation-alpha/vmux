@@ -200,7 +200,6 @@ class Hub:
         }
         pane_created_by_id: Dict[str, float] = {}
         pane_incarnation_by_id: Dict[str, str] = {}
-        structured_by_id: Dict[str, Optional[dict]] = {}
         for pane in panes:
             pid = pane["id"]
             try:
@@ -213,8 +212,10 @@ class Hub:
             incarnation = hashlib.sha256(incarnation_raw.encode()).hexdigest()[:24]
             pane_created_by_id[pid] = pane_created
             pane_incarnation_by_id[pid] = incarnation
-            if self.agents.runtime_active:
-                structured_by_id[pid] = self.agents.lifecycle_evidence(pid, incarnation)
+        structured_by_id = (
+            self.agents.lifecycle_evidence_many(pane_incarnation_by_id)
+            if self.agents.runtime_active else {}
+        )
 
         with self._lifecycle_lock:
             now = time.time()
