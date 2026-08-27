@@ -195,6 +195,18 @@ Accepted bodies are exact and type-specific:
 {"type":"pane","parent_pane_id":"%4","cwd":"/path","runtime":"claude","split":"side_by_side","size_percent":50}
 ~~~
 
+Each body must contain exactly one location selector: either `cwd`, as above,
+or an opaque `worktree_id` from a currently represented pane or agent's
+[`workspace` identity](#workspace-identity). For example:
+
+~~~json
+{"type":"session","worktree_id":"wt_0123456789abcdef01234567","runtime":"codex","name":null}
+~~~
+
+The server resolves the id from its current in-memory registry and repeats the
+same canonical creation-root check used for `cwd`; clients must not persist or
+derive worktree ids.
+
 Pane split direction is `side_by_side` or `stacked`; size is an integer from
 10 through 90 and defaults to 50. Session/window names are 1–64 ASCII letters,
 numbers, underscores, or hyphens. `null` asks the server to slugify the working
@@ -209,8 +221,9 @@ Success is `201` after the returned pane is verified live:
 
 New targets are detached and do not change an attached host client. Errors are
 sanitized: `400` invalid shape/value, `403` outside configured roots, `404`
-missing directory or vanished parent, `409` name/tmux conflict, and `503`
-disabled creation, unavailable tmux/runtime, or an immediately exited pane.
+missing or stale worktree/directory or vanished parent, `409` name/tmux
+conflict, and `503` disabled creation, unavailable tmux/runtime, or an
+immediately exited pane.
 Responses never expose subprocess arguments, environment, or stderr.
 
 ## Configuration
@@ -226,7 +239,7 @@ Returns the live-editable fields plus:
     "host": "127.0.0.1",
     "port": 8787,
     "token_set": false,
-    "version": "0.1.0",
+    "version": "0.1.2",
     "compatibility": {
       "protocol_version": 1,
       "minimum_ios_version": "1.0.0"
@@ -257,6 +270,13 @@ Returns the live-editable fields plus:
         "min_interval_minutes": 5,
         "max_interval_minutes": 1440
       },
+      "pane_lifecycle_v1": {"version": 1, "history_limit": 32},
+      "workspaces_v1": {
+        "version": 1,
+        "supported": true,
+        "enabled": true,
+        "reason": null
+      },
       "tmux_create_v1": {
         "version": 1,
         "supported": true,
@@ -280,12 +300,42 @@ must fall back to the terminal workspace when it is absent or disabled.
 `experimental_agent_workspace_enabled` is the authoritative server-persisted
 switch; clients must not hydrate agent REST resources or open `/ws/agents`
 unless it is `true` and the corresponding capability is enabled.
+`capabilities.pane_lifecycle_v1` gates the additive lifecycle summary and
+diagnostics, while `capabilities.workspaces_v1` gates workspace identities.
 `capabilities.tmux_create_v1` independently gates all creation entry points;
 older clients ignore it and updated clients hide creation when it is absent. The
 opaque `server_instance_id` lets a native client reject a notification route
 created by a different vmux server. Capability names and string values are an
 allowlist: an unknown future value must remain read-only until the client
 understands its safety rules.
+
+### Workspace identity
+
+When `workspaces_v1.enabled` is true, a live `PaneState` or `AgentSession` may
+contain this additive `workspace` object:
+
+~~~json
+{
+  "workspace_id": "ws_0123456789abcdef01234567",
+  "workspace_name": "vmux",
+  "worktree_id": "wt_0123456789abcdef01234567",
+  "worktree_name": "vmux-feature",
+  "branch": "feature/lifecycle",
+  "detached_commit": null,
+  "is_primary": false,
+  "launchable": true,
+  "launch_unavailable_reason": null
+}
+~~~
+
+`workspace_id` groups checkouts from the same Git repository;
+`worktree_id` identifies one checkout. Exactly one of `branch` and
+`detached_commit` is normally non-null. Names and branch/commit labels are for
+display only. Paths and Git-directory metadata never cross the API. The object
+is `null` when Git is unavailable, the working directory is not a resolvable
+checkout, or identity resolution fails. `launchable` reflects current tmux
+creation setup and root authorization; clients must still handle a stale id or
+changed launch status when they submit a creation request.
 
 ## Agent context workspace
 
@@ -314,7 +364,8 @@ accepts `status` and `agent_id` filters.
 
 An `AgentSession` contains identity/runtime fields, lifecycle and association,
 `binding_revision`, reported capabilities, extraction health, and a canonical
-`context`:
+`context`. It also carries the additive [`workspace`](#workspace-identity)
+identity when one can be resolved:
 
 ~~~json
 {

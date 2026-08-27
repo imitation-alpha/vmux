@@ -164,9 +164,11 @@ creation:
 
 Root paths expand `~` and are resolved canonically at startup. Invalid roots
 are excluded; if none remain, creation is disabled with a setup reason. Every
-typed, recent, or browsed working directory is canonicalized again for each
-request and must stay inside a configured root. A symlink that escapes a root
-is therefore neither browsable nor usable for creation.
+typed, recent, browsed, or active-worktree working directory is canonicalized
+again for each request and must stay inside a configured root. Active
+worktrees may be selected through their server-issued opaque identity, but the
+same root authorization applies. A symlink that escapes a root is therefore
+neither browsable nor usable for creation.
 
 `shell` is implicit and launches tmux's default shell. The `agy` wire/config ID
 is retained and displayed as **Antigravity**; `grok` is displayed as **Grok

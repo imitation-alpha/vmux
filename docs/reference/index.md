@@ -1,6 +1,6 @@
 # Reference
 
-These pages describe the compatibility surface for v0.1.0 client and
+These pages describe the public compatibility surface for client and
 configuration work:
 
 - [Architecture](architecture.md): components, trust boundaries, and invariants

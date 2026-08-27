@@ -69,11 +69,19 @@ def test_each_client_receives_a_revision_once_and_new_clients_get_state():
 
 
 def test_generic_working_has_a_short_quiet_grace_and_attention_overrides(monkeypatch):
-    captures = iter(["running", "running", "Continue? (y/n)", "Traceback (most recent call last):"])
+    captures = iter([
+        "ready",
+        "running",
+        "running",
+        "Continue? (y/n)",
+        "Traceback (most recent call last):",
+    ])
     monkeypatch.setattr(tmux, "list_panes", lambda: [PANE])
     monkeypatch.setattr(tmux, "capture", lambda *_: next(captures))
     hub = Hub(Config())
 
+    asyncio.run(hub.poll_once())
+    assert hub.states["%1"].status == "idle"
     asyncio.run(hub.poll_once())
     assert hub.states["%1"].status == "working"
     asyncio.run(hub.poll_once())

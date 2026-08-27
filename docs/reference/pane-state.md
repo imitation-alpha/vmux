@@ -40,7 +40,8 @@ state frames.
     "transitioned_at": 1720000000.0,
     "revision": 2,
     "conflicted": false
-  }
+  },
+  "workspace": null
 }
 ~~~
 
@@ -64,6 +65,7 @@ state frames.
 | `starred` | boolean | Current per-target star override. |
 | `interacted` | number | Unix epoch seconds of the last action vmux sent to this live pane, or 0. |
 | `lifecycle` | object | Additive lifecycle v1 summary. See [pane lifecycle](pane-lifecycle.md). |
+| `workspace` | object or null | Additive repository/worktree identity. See [Workspace identity](client-api.md#workspace-identity). |
 
 `updated` is not the snapshot time. It stays constant while output is unchanged.
 `changed` is a transient hint and may become false on the next snapshot.

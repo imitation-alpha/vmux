@@ -156,7 +156,7 @@ also asks Tokscale to synchronize usage from a locally running Antigravity
 language server; failures retain Tokscale's cached data and do not stop other
 provider scans.
 
-The server's experimental Agent Workspace is off by default. If you enable it
+The server's experimental Agent Context is off by default. If you enable it
 in the PWA's server-persisted Experimental setting, it reads supported Codex
 and Claude Code local session logs and stores a
 normalized current context, user-visible chat messages, explicit plan/task

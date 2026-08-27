@@ -112,7 +112,7 @@ The implementation is designed so that:
   Hidden reasoning, arbitrary tool arguments/results, terminal scrollback, log
   paths, and unverified decisions are not exposed by agent APIs.
 
-The experimental Agent Workspace is disabled by default. When enabled from the
+The experimental Agent Context is disabled by default. When enabled from the
 PWA it retains normalized history locally for 30 days by default in a
 permission-restricted SQLite database. Turning it off stops observation,
 structured access, review scheduling, agent sockets, and database writes but

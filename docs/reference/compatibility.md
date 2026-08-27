@@ -91,7 +91,16 @@ protocol 1 surfaces. Updated clients hide creation when the capability is
 absent; older clients ignore the unknown capability and continue monitoring and
 acting on panes. Adding `grok` to the server-owned runtime allowlist is additive:
 the existing `agy` ID still means Antigravity, while clients display the new
-entry as Grok Build. No existing request, pane, or WebSocket frame changed.
+entry as Grok Build. That runtime-list addition changed no existing request,
+pane, or WebSocket frame.
+
+`pane_lifecycle_v1` and `workspaces_v1` are additive protocol 1 capabilities.
+Lifecycle and workspace objects are additive `PaneState` fields, and workspace
+identity is also additive on agent resources. Older clients ignore them and
+continue using legacy pane status. Updated clients must gate the new semantics
+on their respective capability and tolerate a missing or null workspace.
+`POST /api/tmux/create` additionally accepts an opaque active `worktree_id` in
+place of `cwd`; existing path-based bodies are unchanged.
 
 The bundled web client expects protocol 1 and a compatible server version of
 0.1.0 or newer. Missing server version or compatibility metadata is a legacy,

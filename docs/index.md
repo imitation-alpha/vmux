@@ -8,7 +8,7 @@ attention to the top, and turns supported terminal prompts into responses you
 can tap from the built-in PWA.
 </p>
 
-<span class="vmux-status">Available now · v0.1.0</span>
+<span class="vmux-status">Available now</span>
 
 [Install vmux](getting-started.md){ .md-button .md-button--primary }
 [Choose remote access](remote-access.md){ .md-button }
