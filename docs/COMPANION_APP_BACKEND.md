@@ -487,9 +487,15 @@ refetch and compare every guard and option set. They must never use broadcast
 or automatically retry a conflict.
 
 Terminal items deliberately contain only `id`, `pane_id`, `status`, `kind`,
-`updated_at`, and `acknowledgeable:false`. They never contain pane names,
-targets, paths, prompts, menus, previews, or terminal capture. They remain in
-Review until the live pane state clears.
+`updated_at`, and `acknowledgeable`. The field is `true` only when `status` is
+`done`; it is `false` for blocked, needs-input, and error items. They never
+contain pane names, targets, paths, prompts, menus, previews, or terminal
+capture. Reading Review never acknowledges an item. When a client directly
+opens an acknowledgeable done pane, it matches `pane_id` to the current
+`PaneState` and sends that lifecycle revision to
+`PUT /api/panes/lifecycle/acknowledge`. Done items then leave Review after the
+refreshed pane state arrives. Other terminal items remain until the live pane
+state clears through an applicable pane action or terminal-side change.
 
 Batching is off by default. Enabling or changing the interval schedules the
 next window at `now + interval`; disabling clears it. At a due window, vmux
