@@ -312,6 +312,28 @@ def test_recovery_reports_message_and_semantic_gaps_independently(tmp_path):
     assert limited["recent_messages"]["coverage"]["unavailable_reason"] == "expired_or_deleted"
 
 
+def test_old_session_age_does_not_claim_visible_message_loss(tmp_path):
+    store = AgentStore(str(tmp_path / "agents.sqlite3"), retention_days=1)
+    empty = _agent(store, native="old-empty")
+    recent = _agent(store, native="old-recent")
+    old_created_at = time.time() - 2 * 86400
+    with store.transaction() as conn:
+        conn.execute(
+            "UPDATE agent_sessions SET created_at=? WHERE id IN (?,?)",
+            (old_created_at, empty["id"], recent["id"]),
+        )
+    _project(store, recent["id"], 1, message_time=time.time())
+
+    for agent_id in (empty["id"], recent["id"]):
+        recovery_coverage = store.recovery(agent_id)["recent_messages"]["coverage"]
+        assert recovery_coverage["history_truncated"] is False
+        assert recovery_coverage["unavailable_reason"] is None
+        _, _, message_metadata = store.list_messages(
+            agent_id, with_metadata=True
+        )
+        assert message_metadata["history_truncated"] is False
+
+
 def test_observer_to_recovery_excludes_hidden_tool_terminal_and_path_data(tmp_path):
     from vmux.agents.models import PaneObservation
     from vmux.agents.service import AgentService
@@ -387,7 +409,10 @@ def test_observer_to_recovery_excludes_hidden_tool_terminal_and_path_data(tmp_pa
     )
     asyncio.run(service.process_now([observation]))
     agent = service.list_agents()[0][0]
-    encoded = json.dumps(service.recovery(agent["id"]), sort_keys=True)
+    recovery = service.recovery(agent["id"])
+    assert recovery["freshness"]["observed_at"] == observation.observed_at
+    assert recovery["freshness"]["runtime_session"] == "live_bound"
+    encoded = json.dumps(recovery, sort_keys=True)
     assert "Visible recovery request" in encoded
     assert "Visible recovery answer" in encoded
     for prohibited in (
@@ -400,6 +425,26 @@ def test_observer_to_recovery_excludes_hidden_tool_terminal_and_path_data(tmp_pa
         "TERMINAL_PROMPT_CANARY",
     ):
         assert prohibited not in encoded
+
+    newer_raw_observation = PaneObservation(
+        pane_id=observation.pane_id,
+        target=observation.target,
+        command=observation.command,
+        title=observation.title,
+        cwd=observation.cwd,
+        pid=observation.pid,
+        pane_created=observation.pane_created,
+        runtime=observation.runtime,
+        status=observation.status,
+        question=observation.question,
+        menu=observation.menu,
+        prompt_fingerprint=observation.prompt_fingerprint,
+        observed_at=observation.observed_at + 1,
+    )
+    service.submit([newer_raw_observation])
+    unverified = service.recovery(agent["id"])["freshness"]
+    assert unverified["observed_at"] is None
+    assert unverified["runtime_session"] == "unknown"
 
 
 def test_deleted_cursor_never_projects_future_history_and_private_metadata_is_absent(tmp_path):
@@ -498,7 +543,7 @@ def test_recovery_api_is_authenticated_advertised_no_store_and_clamps_limits(tmp
         assert malformed.headers["cache-control"] == "no-store, max-age=0"
 
 
-def test_recovery_freshness_requires_a_matching_current_process_observation(tmp_path):
+def test_recovery_freshness_rejects_uncorrelated_and_previous_process_observations(tmp_path):
     from vmux.agents.models import PaneObservation, default_capabilities
     from vmux.agents.service import AgentService
     from vmux.config import Config
@@ -542,10 +587,9 @@ def test_recovery_freshness_requires_a_matching_current_process_observation(tmp_
     assert before_observation["runtime_session"] == "unknown"
 
     service.submit([observation])
-    observed = service.recovery(agent["id"])["freshness"]
-    assert observed["observed_at"] == observed_at
-    assert observed["runtime_session"] == "live_bound"
-    assert observed["observed_at"] != service.recovery(agent["id"])["generated_at"]
+    uncorrelated = service.recovery(agent["id"])["freshness"]
+    assert uncorrelated["observed_at"] is None
+    assert uncorrelated["runtime_session"] == "unknown"
 
     restarted = AgentService(cfg)
     after_restart = restarted.recovery(agent["id"])["freshness"]

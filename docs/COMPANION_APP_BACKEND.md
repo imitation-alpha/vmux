@@ -469,11 +469,12 @@ never "load more" states. Message and semantic coverage are deliberately
 separate. Empty history is valid and has empty arrays plus null cursors.
 Unknown/pruned agents return `404`; disabled Agent Context returns `503`.
 
-Freshness reports the latest matching pane observation time, last projection
-time, and last runtime event time. Request generation time remains separate in
-`generated_at`. Until this server instance has a matching pane observation,
-`observed_at` is null and `runtime_session` is `unknown`; persisted association
-alone never establishes liveness after a restart. `runtime_session` is only
+Freshness reports the latest pane observation correlated with the discovered
+native session after projection, last projection time, and last runtime event
+time. Request generation time remains separate in `generated_at`. Until this
+server instance completes that correlation, `observed_at` is null and
+`runtime_session` is `unknown`; a raw pane observation or persisted association
+alone never establishes liveness. `runtime_session` is only
 `live_bound`, `observed_unbound`, `offline`, or `unknown` and describes
 association to the native runtime session. `model_context` is always
 `runtime_owned_unverified` in v1. A client must never say vmux restored or

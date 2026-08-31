@@ -93,6 +93,7 @@ class AgentService:
         self.push = push
         self.kick = kick or (lambda: None)
         self._latest: Dict[str, PaneObservation] = {}
+        self._verified_observations: Dict[str, PaneObservation] = {}
         self._latest_lock = threading.RLock()
         self._process_lock = threading.Lock()
         self._api_lock = threading.RLock()
@@ -230,6 +231,7 @@ class AgentService:
         self._loop = None
         with self._latest_lock:
             self._latest = {}
+            self._verified_observations = {}
         await asyncio.to_thread(self._close_store)
 
     async def aclose(self) -> None:
@@ -241,6 +243,7 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._verified_observations = {}
         if self._queue is None:
             return
         now = time.monotonic()
@@ -267,6 +270,7 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._verified_observations = {}
         # Drop an older queued batch before yielding to the worker. If the
         # worker already owns one, _process_lock orders this current batch
         # after it; a stale queued batch can therefore never run afterward.
@@ -389,6 +393,10 @@ class AgentService:
                         source="manual" if manual_obs else "automatic", capabilities=capabilities,
                     )
                 self._ingest_candidate(observer, candidate, agent, bound_obs, capabilities)
+                if bound_obs:
+                    with self._latest_lock:
+                        if self._latest.get(bound_obs.pane_id) == bound_obs:
+                            self._verified_observations[agent["id"]] = bound_obs
 
         agents, cursor = self.store.list_agents(limit=100)
         while True:
@@ -634,15 +642,17 @@ class AgentService:
 
     def recovery(self, session_id: str, **kwargs):
         with self._latest_lock:
-            runtime_observations = {
-                pane_id: {
+            observation = self._verified_observations.get(session_id)
+            runtime_observation = (
+                {
                     "incarnation": observation.incarnation,
                     "observed_at": observation.observed_at,
                 }
-                for pane_id, observation in self._latest.items()
-            }
+                if observation
+                else None
+            )
         value = self.store.recovery(
-            session_id, runtime_observations=runtime_observations, **kwargs
+            session_id, runtime_observation=runtime_observation, **kwargs
         )
         if not value:
             raise AgentNotFound(session_id)

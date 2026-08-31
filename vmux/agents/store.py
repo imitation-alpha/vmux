@@ -991,7 +991,6 @@ class AgentStore:
         next_cursor = str(offset + limit) if len(rows) > limit else None
         if not with_metadata:
             return values, next_cursor
-        cutoff = time.time() - self.retention_days * 86400
         metadata = {
             "retained_from": bounds["retained_from"] if bounds else None,
             "retained_to": bounds["retained_to"] if bounds else None,
@@ -1011,12 +1010,9 @@ class AgentStore:
             "reviewed_at": session["reviewed_at"] if session else None,
             "history_truncated": bool(
                 session
-                and (
-                    float(session["created_at"]) < cutoff
-                    or bool(
-                        self._loads(session["context_json"], {}).get(
-                            "message_history_truncated"
-                        )
+                and bool(
+                    self._loads(session["context_json"], {}).get(
+                        "message_history_truncated"
                     )
                 )
             ),
@@ -1270,7 +1266,7 @@ class AgentStore:
         message_cursor: Optional[str] = None,
         timeline_cursor: Optional[str] = None,
         activity_cursor: Optional[str] = None,
-        runtime_observations: Optional[Dict[str, Dict[str, Any]]] = None,
+        runtime_observation: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Return one bounded, non-mutating SQLite view of recovery state."""
         with self.read_transaction() as conn:
@@ -1285,10 +1281,13 @@ class AgentStore:
                 (session_id,),
             ).fetchone()
             observation = None
-            if agent.get("pane_id") and runtime_observations:
-                candidate = runtime_observations.get(str(agent["pane_id"]))
-                if candidate and candidate.get("incarnation") == context_row["pane_incarnation"]:
-                    observation = candidate
+            if (
+                agent.get("pane_id")
+                and runtime_observation
+                and runtime_observation.get("incarnation")
+                == context_row["pane_incarnation"]
+            ):
+                observation = runtime_observation
             anchors = conn.execute(
                 """SELECT
                        COALESCE((SELECT MAX(rowid) FROM chat_messages WHERE session_id=?),0)
@@ -1412,10 +1411,8 @@ class AgentStore:
                    FROM chat_messages WHERE session_id=?""",
                 (session_id,),
             ).fetchone()
-            cutoff = generated_at - self.retention_days * 86400
             message_history_truncated = bool(
-                float(agent["created_at"]) < cutoff
-                or agent["context"].get("message_history_truncated")
+                agent["context"].get("message_history_truncated")
             )
             timeline_bounds = {
                 "retained_from": oldest["created_at"] if oldest else None,
