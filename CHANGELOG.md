@@ -7,6 +7,13 @@ the documentation.
 
 ## [Unreleased]
 
+### Added
+
+- Additive authenticated recovery-v1 reads now return one bounded current
+  session brief, based changes, source-specific retention coverage, and
+  deterministic bidirectional traversal of recent visible and semantic
+  activity. Structured context GET responses are explicitly non-cacheable.
+
 ## [0.1.1] - 2026-07-31
 
 ### Fixed

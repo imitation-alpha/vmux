@@ -130,7 +130,7 @@ class AgentService:
 
     def info(self) -> Dict[str, Any]:
         enabled = self.runtime_active
-        return {
+        value = {
             "enabled": enabled,
             "runtimes": ["codex", "claude"],
             "websocket": enabled,
@@ -142,6 +142,19 @@ class AgentService:
             "decisions": "verified_structured_only",
             "degraded_reason": self._disabled_reason,
         }
+        if enabled:
+            value["recovery"] = {
+                "version": 1,
+                "path_template": "/api/agents/{id}/recovery",
+                "default_recent_messages": 20,
+                "default_recent_timeline": 20,
+                "default_recent_activity": 20,
+                "max_recent_messages": 50,
+                "max_recent_timeline": 50,
+                "max_recent_activity": 50,
+                "activity_order": "oldest_to_newest",
+            }
+        return value
 
     def review_info(self) -> Dict[str, Any]:
         enabled = self.runtime_active
@@ -617,6 +630,12 @@ class AgentService:
         if not value:
             raise AgentNotFound(session_id)
         value["agent"] = self._decorate_agent(value["agent"])
+        return value
+
+    def recovery(self, session_id: str, **kwargs):
+        value = self.store.recovery(session_id, **kwargs)
+        if not value:
+            raise AgentNotFound(session_id)
         return value
 
     def visit(self, session_id: str, snapshot_id: str):

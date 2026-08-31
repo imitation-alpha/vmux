@@ -82,6 +82,33 @@ remaining snapshot. The exact response and mutation schemas are in the
 **Resume** is deliberately non-mutating: it opens and focuses chat but never
 sends a message or resumes terminal execution on its own.
 
+## Session recovery and recent activity
+
+Recovery-capable clients use the advertised authenticated
+`GET /api/agents/{id}/recovery` resource. It returns one bounded SQLite read of
+the current brief, explicitly based changes, retained visible conversation,
+semantic snapshots, freshness, and a typed activity sequence that can be paged
+older or newer. Opening or traversing recovery is non-mutating: it does not
+send, resume, bind, observe, or advance visit/Review/read state.
+
+Visible-message and semantic-history gaps are reported separately. A cursor or
+`more_retained_*` value means retained data can still be loaded; it never means
+history was lost. `history_truncated` with `expired_or_deleted` means earlier
+data in that specific source is unavailable. Opaque recovery cursors pin the
+first page's high-water marks, remain valid across process restarts while data
+is retained, and prevent concurrent or out-of-order projection from entering an
+in-progress traversal.
+
+The activity page is always chronological. Timestamp ties use resource kind,
+then retained source order, then resource id, so a client can render the same
+sequence without inventing prose. See the complete contract and canonical JSON
+fixture in [the companion API](../reference/client-api.md#recovery-v1).
+
+Recovery can restore only vmux's retained structured resources. Its model
+context state is always `runtime_owned_unverified` in v1: vmux cannot verify
+that Codex or Claude restored, retained, compacted, or forgot its model context
+window.
+
 ## Review sessions
 
 Review combines changes across structured sessions with privacy-minimized

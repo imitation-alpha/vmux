@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "generated_at": 1788040800.0,
+  "server_instance_id": "server-fixture",
+  "consistency": "single_read",
+  "agent": {
+    "id": "agent-fixture",
+    "runtime": "codex",
+    "native_session_id": "native-session-fixture",
+    "title": "Recovery API",
+    "lifecycle": "working",
+    "association": "confirmed",
+    "pane_id": "%7",
+    "target": "work:1.0",
+    "binding_revision": 4,
+    "revision": 12,
+    "capabilities": {
+      "association": "confirmed",
+      "context": "structured",
+      "chat_send": "idle_only",
+      "decision_reply": "verified_terminal",
+      "delivery_ack": "log_observed"
+    },
+    "extraction_health": "ok",
+    "last_event_at": 1788040797.0,
+    "created_at": 1788030000.0,
+    "updated_at": 1788040798.0,
+    "context": {
+      "session_id": "agent-fixture",
+      "runtime": "codex",
+      "goal": "Ship recovery",
+      "current_task": "Validate deterministic traversal",
+      "progress_summary": "The bounded backend contract is implemented.",
+      "completed_items": [],
+      "decisions": [],
+      "blockers": [],
+      "next_action": "Review the iOS integration",
+      "progress": null,
+      "estimated_completion": null,
+      "lifecycle": "working",
+      "extraction_health": "ok",
+      "revision": 12,
+      "last_updated": 1788040797.0,
+      "provenance": {}
+    },
+    "pending_decisions_count": 0
+  },
+  "changes": {
+    "basis": "shared_review",
+    "baseline_snapshot_id": "snapshot-10",
+    "as_of_snapshot_id": "snapshot-12",
+    "history_truncated": false,
+    "unavailable_reason": null,
+    "delta": {
+      "current_task_changed": {
+        "from": "Implement recovery",
+        "to": "Validate deterministic traversal"
+      }
+    }
+  },
+  "recent_messages": {
+    "order": "oldest_to_newest",
+    "messages": [
+      {
+        "id": "message-12",
+        "agent_id": "agent-fixture",
+        "role": "assistant",
+        "content": "The bounded backend contract is implemented.",
+        "status": "observed",
+        "native_event_id": "visible-12",
+        "client_message_id": null,
+        "created_at": 1788040796.0,
+        "updated_at": 1788040798.0
+      }
+    ],
+    "next_cursor": "rc1.opaque-older-message-cursor",
+    "previous_cursor": null,
+    "cursor_status": "current",
+    "coverage": {
+      "retained_from": 1788030001.0,
+      "retained_to": 1788040796.0,
+      "history_truncated": false,
+      "unavailable_reason": null,
+      "more_retained_older": true,
+      "more_retained_newer": false
+    }
+  },
+  "recent_timeline": {
+    "order": "oldest_to_newest",
+    "events": [
+      {
+        "id": "snapshot-12",
+        "agent_id": "agent-fixture",
+        "sequence": 12,
+        "created_at": 1788040798.0,
+        "occurred_at": 1788040798.0,
+        "delta": {
+          "current_task_changed": {
+            "from": "Implement recovery",
+            "to": "Validate deterministic traversal"
+          }
+        },
+        "context": {
+          "session_id": "agent-fixture",
+          "runtime": "codex",
+          "goal": "Ship recovery",
+          "current_task": "Validate deterministic traversal",
+          "progress_summary": "The bounded backend contract is implemented.",
+          "completed_items": [],
+          "decisions": [],
+          "blockers": [],
+          "next_action": "Review the iOS integration",
+          "progress": null,
+          "estimated_completion": null,
+          "lifecycle": "working",
+          "extraction_health": "ok",
+          "revision": 12,
+          "last_updated": 1788040797.0,
+          "provenance": {}
+        },
+        "type": "context",
+        "title": "Agent context changed"
+      }
+    ],
+    "next_cursor": "rc1.opaque-older-timeline-cursor",
+    "previous_cursor": null,
+    "cursor_status": "current",
+    "coverage": {
+      "retained_from": 1788030002.0,
+      "retained_to": 1788040798.0,
+      "history_truncated": false,
+      "unavailable_reason": null,
+      "more_retained_older": true,
+      "more_retained_newer": false
+    }
+  },
+  "recent_activity": {
+    "order": "oldest_to_newest",
+    "tie_break": "occurred_at_kind_source_order_resource_id",
+    "entries": [
+      {
+        "id": "visible_message:message-12",
+        "kind": "visible_message",
+        "occurred_at": 1788040796.0,
+        "resource_id": "message-12",
+        "resource": {
+          "id": "message-12",
+          "agent_id": "agent-fixture",
+          "role": "assistant",
+          "content": "The bounded backend contract is implemented.",
+          "status": "observed",
+          "native_event_id": "visible-12",
+          "client_message_id": null,
+          "created_at": 1788040796.0,
+          "updated_at": 1788040798.0
+        }
+      },
+      {
+        "id": "semantic_event:snapshot-12",
+        "kind": "semantic_event",
+        "occurred_at": 1788040798.0,
+        "resource_id": "snapshot-12",
+        "resource": {
+          "id": "snapshot-12",
+          "agent_id": "agent-fixture",
+          "sequence": 12,
+          "created_at": 1788040798.0,
+          "occurred_at": 1788040798.0,
+          "delta": {
+            "current_task_changed": {
+              "from": "Implement recovery",
+              "to": "Validate deterministic traversal"
+            }
+          },
+          "context": {
+            "session_id": "agent-fixture",
+            "runtime": "codex",
+            "goal": "Ship recovery",
+            "current_task": "Validate deterministic traversal",
+            "progress_summary": "The bounded backend contract is implemented.",
+            "completed_items": [],
+            "decisions": [],
+            "blockers": [],
+            "next_action": "Review the iOS integration",
+            "progress": null,
+            "estimated_completion": null,
+            "lifecycle": "working",
+            "extraction_health": "ok",
+            "revision": 12,
+            "last_updated": 1788040797.0,
+            "provenance": {}
+          },
+          "type": "context",
+          "title": "Agent context changed"
+        }
+      }
+    ],
+    "older_cursor": "rc1.opaque-older-activity-cursor",
+    "newer_cursor": null,
+    "cursor_status": "current",
+    "coverage": {
+      "visible_messages": {
+        "retained_from": 1788030001.0,
+        "retained_to": 1788040796.0,
+        "history_truncated": false,
+        "unavailable_reason": null,
+        "more_retained_older": true,
+        "more_retained_newer": false
+      },
+      "semantic_history": {
+        "retained_from": 1788030002.0,
+        "retained_to": 1788040798.0,
+        "history_truncated": false,
+        "unavailable_reason": null,
+        "more_retained_older": true,
+        "more_retained_newer": false
+      }
+    }
+  },
+  "freshness": {
+    "observed_at": 1788040800.0,
+    "projected_at": 1788040798.0,
+    "last_runtime_event_at": 1788040797.0,
+    "runtime_session": "live_bound",
+    "model_context": "runtime_owned_unverified"
+  }
+}
