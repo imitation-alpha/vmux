@@ -578,6 +578,15 @@ class AgentService:
         with self._latest_lock:
             return self._latest.get(pane_id)
 
+    def _observation_is_fresh(
+        self, observation: Optional[PaneObservation]
+    ) -> bool:
+        return bool(
+            observation
+            and time.time() - observation.observed_at
+            <= max(10.0, self.cfg.poll_interval * 4)
+        )
+
     def _validate_live(self, agent: Dict[str, Any], expected_binding_revision: int,
                        *, require_idle: bool, prompt_fingerprint: Optional[str] = None) -> PaneObservation:
         if int(agent["binding_revision"]) != int(expected_binding_revision):
@@ -585,8 +594,9 @@ class AgentService:
         if agent.get("association") != "confirmed" or not agent.get("pane_id"):
             raise AgentUnavailable("agent session is read-only until its pane binding is confirmed")
         obs = self._latest_observation(agent["pane_id"])
-        if not obs or time.time() - obs.observed_at > max(10.0, self.cfg.poll_interval * 4):
+        if not self._observation_is_fresh(obs):
             raise AgentConflict("pane observation is stale", self.store.get_agent(agent["id"]))
+        assert obs is not None
         if require_idle and obs.status != "idle":
             raise AgentConflict("agent is not at an idle prompt", self.store.get_agent(agent["id"]))
         panes = tmux.list_panes()
@@ -651,6 +661,8 @@ class AgentService:
         with self._latest_lock:
             verified_observation = self._verified_observations.get(session_id)
             observation = verified_observation[1] if verified_observation else None
+            if not self._observation_is_fresh(observation):
+                observation = None
             runtime_observation = (
                 {
                     "incarnation": observation.incarnation,
@@ -665,7 +677,10 @@ class AgentService:
         if not value:
             raise AgentNotFound(session_id)
         with self._latest_lock:
-            if self._verified_observations.get(session_id) != verified_observation:
+            if (
+                self._verified_observations.get(session_id) != verified_observation
+                or not self._observation_is_fresh(observation)
+            ):
                 value["freshness"]["observed_at"] = None
                 value["freshness"]["runtime_session"] = "unknown"
         return value
@@ -733,10 +748,8 @@ class AgentService:
             return False
         observation = self._latest_observation(pane_id)
         if (
-            observation is None
+            not self._observation_is_fresh(observation)
             or observation.status != "needs_input"
-            or time.time() - observation.observed_at
-            > max(10.0, self.cfg.poll_interval * 4)
         ):
             return False
         for public_decision in group.get("decisions", []):

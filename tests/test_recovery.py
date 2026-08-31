@@ -426,6 +426,27 @@ def test_observer_to_recovery_excludes_hidden_tool_terminal_and_path_data(tmp_pa
     ):
         assert prohibited not in encoded
 
+    stale_observation = PaneObservation(
+        pane_id=observation.pane_id,
+        target=observation.target,
+        command=observation.command,
+        title=observation.title,
+        cwd=observation.cwd,
+        pid=observation.pid,
+        pane_created=observation.pane_created,
+        runtime=observation.runtime,
+        status=observation.status,
+        question=observation.question,
+        menu=observation.menu,
+        prompt_fingerprint=observation.prompt_fingerprint,
+        observed_at=time.time() - 11,
+    )
+    asyncio.run(service.process_now([stale_observation]))
+    stale = service.recovery(agent["id"])["freshness"]
+    assert stale["observed_at"] is None
+    assert stale["runtime_session"] == "unknown"
+    asyncio.run(service.process_now([observation]))
+
     newer_raw_observation = PaneObservation(
         pane_id=observation.pane_id,
         target=observation.target,

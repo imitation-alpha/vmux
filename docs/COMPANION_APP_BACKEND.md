@@ -475,7 +475,8 @@ time. Request generation time remains separate in `generated_at`. Until this
 server instance completes that correlation, `observed_at` is null and
 `runtime_session` is `unknown`; a raw pane observation or persisted association
 alone never establishes liveness. If the observation generation changes during
-the consistent store read, freshness is downgraded to unknown.
+the consistent store read, or its age exceeds the poll-relative liveness
+boundary, freshness is downgraded to unknown.
 `runtime_session` is only `live_bound`, `observed_unbound`, `offline`, or
 `unknown` and describes association to the native runtime session.
 `model_context` is always
