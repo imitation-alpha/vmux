@@ -93,7 +93,8 @@ class AgentService:
         self.push = push
         self.kick = kick or (lambda: None)
         self._latest: Dict[str, PaneObservation] = {}
-        self._verified_observations: Dict[str, PaneObservation] = {}
+        self._observation_generation = 0
+        self._verified_observations: Dict[str, Tuple[int, PaneObservation]] = {}
         self._latest_lock = threading.RLock()
         self._process_lock = threading.Lock()
         self._api_lock = threading.RLock()
@@ -231,6 +232,7 @@ class AgentService:
         self._loop = None
         with self._latest_lock:
             self._latest = {}
+            self._observation_generation += 1
             self._verified_observations = {}
         await asyncio.to_thread(self._close_store)
 
@@ -243,6 +245,7 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._observation_generation += 1
             self._verified_observations = {}
         if self._queue is None:
             return
@@ -270,6 +273,7 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._observation_generation += 1
             self._verified_observations = {}
         # Drop an older queued batch before yielding to the worker. If the
         # worker already owns one, _process_lock orders this current batch
@@ -396,7 +400,10 @@ class AgentService:
                 if bound_obs:
                     with self._latest_lock:
                         if self._latest.get(bound_obs.pane_id) == bound_obs:
-                            self._verified_observations[agent["id"]] = bound_obs
+                            self._verified_observations[agent["id"]] = (
+                                self._observation_generation,
+                                bound_obs,
+                            )
 
         agents, cursor = self.store.list_agents(limit=100)
         while True:
@@ -642,7 +649,8 @@ class AgentService:
 
     def recovery(self, session_id: str, **kwargs):
         with self._latest_lock:
-            observation = self._verified_observations.get(session_id)
+            verified_observation = self._verified_observations.get(session_id)
+            observation = verified_observation[1] if verified_observation else None
             runtime_observation = (
                 {
                     "incarnation": observation.incarnation,
@@ -656,6 +664,10 @@ class AgentService:
         )
         if not value:
             raise AgentNotFound(session_id)
+        with self._latest_lock:
+            if self._verified_observations.get(session_id) != verified_observation:
+                value["freshness"]["observed_at"] = None
+                value["freshness"]["runtime_session"] = "unknown"
         return value
 
     def visit(self, session_id: str, snapshot_id: str):

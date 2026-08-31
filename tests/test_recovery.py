@@ -441,8 +441,28 @@ def test_observer_to_recovery_excludes_hidden_tool_terminal_and_path_data(tmp_pa
         prompt_fingerprint=observation.prompt_fingerprint,
         observed_at=observation.observed_at + 1,
     )
+    entered = threading.Event()
+    release = threading.Event()
+    original_recovery = service.store.recovery
+
+    def paused_recovery(*args, **kwargs):
+        value = original_recovery(*args, **kwargs)
+        entered.set()
+        assert release.wait(1)
+        return value
+
+    service.store.recovery = paused_recovery
+    raced_recoveries = []
+    thread = threading.Thread(
+        target=lambda: raced_recoveries.append(service.recovery(agent["id"]))
+    )
+    thread.start()
+    assert entered.wait(1)
     service.submit([newer_raw_observation])
-    unverified = service.recovery(agent["id"])["freshness"]
+    release.set()
+    thread.join(1)
+    assert not thread.is_alive()
+    unverified = raced_recoveries[0]["freshness"]
     assert unverified["observed_at"] is None
     assert unverified["runtime_session"] == "unknown"
 
