@@ -24,8 +24,8 @@ from .models import (
     KIND_CODEX,
     KIND_GENERIC,
     STATUS_IDLE,
-    STATUS_WORKING,
     STATUS_OFFLINE,
+    STATUS_WORKING,
     PaneState,
 )
 from .naming import SmartNamer
