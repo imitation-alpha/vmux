@@ -491,9 +491,9 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
         message_limit: int = 20,
         timeline_limit: int = 20,
         activity_limit: int = 20,
-        message_cursor: Optional[str] = Query(default=None, max_length=1000),
-        timeline_cursor: Optional[str] = Query(default=None, max_length=1000),
-        activity_cursor: Optional[str] = Query(default=None, max_length=1000),
+        message_cursor: Optional[str] = None,
+        timeline_cursor: Optional[str] = None,
+        activity_cursor: Optional[str] = None,
         _=Depends(require_auth),
     ):
         value = _agent_call(

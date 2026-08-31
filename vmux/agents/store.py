@@ -1245,7 +1245,11 @@ class AgentStore:
         }
 
     @staticmethod
-    def _runtime_session_state(agent: Dict[str, Any]) -> str:
+    def _runtime_session_state(
+        agent: Dict[str, Any], observation: Optional[Dict[str, Any]]
+    ) -> str:
+        if observation is None:
+            return "unknown"
         lifecycle = str(agent.get("lifecycle") or agent.get("context", {}).get("lifecycle") or "")
         association = str(agent.get("association") or "")
         if association == "confirmed" and lifecycle not in ("offline", "completed"):
@@ -1266,6 +1270,7 @@ class AgentStore:
         message_cursor: Optional[str] = None,
         timeline_cursor: Optional[str] = None,
         activity_cursor: Optional[str] = None,
+        runtime_observations: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Return one bounded, non-mutating SQLite view of recovery state."""
         with self.read_transaction() as conn:
@@ -1274,9 +1279,16 @@ class AgentStore:
             if not agent:
                 return None
             context_row = conn.execute(
-                "SELECT revision,updated_at FROM agent_contexts WHERE session_id=?",
+                """SELECT c.revision,c.updated_at,s.pane_incarnation
+                   FROM agent_contexts c JOIN agent_sessions s ON s.id=c.session_id
+                   WHERE c.session_id=?""",
                 (session_id,),
             ).fetchone()
+            observation = None
+            if agent.get("pane_id") and runtime_observations:
+                candidate = runtime_observations.get(str(agent["pane_id"]))
+                if candidate and candidate.get("incarnation") == context_row["pane_incarnation"]:
+                    observation = candidate
             anchors = conn.execute(
                 """SELECT
                        COALESCE((SELECT MAX(rowid) FROM chat_messages WHERE session_id=?),0)
@@ -1476,10 +1488,10 @@ class AgentStore:
                     },
                 },
                 "freshness": {
-                    "observed_at": generated_at,
+                    "observed_at": observation.get("observed_at") if observation else None,
                     "projected_at": context_row["updated_at"],
                     "last_runtime_event_at": agent.get("last_event_at"),
-                    "runtime_session": self._runtime_session_state(agent),
+                    "runtime_session": self._runtime_session_state(agent, observation),
                     "model_context": "runtime_owned_unverified",
                 },
             }

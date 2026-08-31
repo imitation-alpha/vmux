@@ -492,10 +492,65 @@ def test_recovery_api_is_authenticated_advertised_no_store_and_clamps_limits(tmp
         malformed = client.get(
             "/api/agents/%s/recovery" % agent["id"],
             headers=auth,
-            params={"activity_cursor": "bad"},
+            params={"activity_cursor": "rc1." + "a" * 1001},
         )
         assert malformed.status_code == 400
         assert malformed.headers["cache-control"] == "no-store, max-age=0"
+
+
+def test_recovery_freshness_requires_a_matching_current_process_observation(tmp_path):
+    from vmux.agents.models import PaneObservation, default_capabilities
+    from vmux.agents.service import AgentService
+    from vmux.config import Config
+
+    cfg = Config(
+        experimental_agent_workspace_enabled=True,
+        agent_store_path=str(tmp_path / "freshness.sqlite3"),
+    )
+    service = AgentService(cfg)
+    agent = _agent(service.store, native="freshness")
+    observed_at = time.time() - 5
+    observation = PaneObservation(
+        pane_id="%9",
+        target="work:1.0",
+        command="codex",
+        title="private terminal title",
+        cwd="/private/worktree/SECRET-cwd",
+        pid="9",
+        pane_created=observed_at - 10,
+        runtime="codex",
+        status="idle",
+        question=None,
+        menu=(),
+        prompt_fingerprint="private-fingerprint",
+        observed_at=observed_at,
+    )
+    service.store.update_binding(
+        agent["id"],
+        association="confirmed",
+        pane_id=observation.pane_id,
+        target=observation.target,
+        pane_pid=observation.pid,
+        pane_created=observation.pane_created,
+        pane_incarnation=observation.incarnation,
+        source="automatic",
+        capabilities=default_capabilities("confirmed"),
+    )
+
+    before_observation = service.recovery(agent["id"])["freshness"]
+    assert before_observation["observed_at"] is None
+    assert before_observation["runtime_session"] == "unknown"
+
+    service.submit([observation])
+    observed = service.recovery(agent["id"])["freshness"]
+    assert observed["observed_at"] == observed_at
+    assert observed["runtime_session"] == "live_bound"
+    assert observed["observed_at"] != service.recovery(agent["id"])["generated_at"]
+
+    restarted = AgentService(cfg)
+    after_restart = restarted.recovery(agent["id"])["freshness"]
+    assert after_restart["observed_at"] is None
+    assert after_restart["runtime_session"] == "unknown"
 
 
 def test_canonical_recovery_fixture_tracks_the_discriminated_contract():

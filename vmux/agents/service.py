@@ -633,7 +633,17 @@ class AgentService:
         return value
 
     def recovery(self, session_id: str, **kwargs):
-        value = self.store.recovery(session_id, **kwargs)
+        with self._latest_lock:
+            runtime_observations = {
+                pane_id: {
+                    "incarnation": observation.incarnation,
+                    "observed_at": observation.observed_at,
+                }
+                for pane_id, observation in self._latest.items()
+            }
+        value = self.store.recovery(
+            session_id, runtime_observations=runtime_observations, **kwargs
+        )
         if not value:
             raise AgentNotFound(session_id)
         return value
