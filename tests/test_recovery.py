@@ -312,6 +312,33 @@ def test_recovery_reports_message_and_semantic_gaps_independently(tmp_path):
     assert limited["recent_messages"]["coverage"]["unavailable_reason"] == "expired_or_deleted"
 
 
+def test_truncated_available_history_uses_oldest_retained_change_baseline(tmp_path):
+    store = AgentStore(str(tmp_path / "agents.sqlite3"))
+    agent = _agent(store)
+    now = time.time()
+    first = _project(store, agent["id"], 1, message_time=now)
+    _project(store, agent["id"], 2, message_time=now + 1)
+    _project(store, agent["id"], 3, message_time=now + 2)
+    with store.transaction() as conn:
+        conn.execute("DELETE FROM agent_snapshots WHERE id=?", (first["id"],))
+
+    changes = store.recovery(agent["id"])["changes"]
+    assert changes["basis"] == "available_history"
+    assert changes["history_truncated"] is True
+    assert changes["unavailable_reason"] == "expired_or_deleted"
+    assert "goal_changed" not in changes["delta"]
+    assert changes["delta"]["current_task_changed"] == {
+        "from": "step-2",
+        "to": "step-3",
+    }
+
+    with store.transaction() as conn:
+        conn.execute("DELETE FROM agent_snapshots WHERE session_id=?", (agent["id"],))
+    no_history = store.recovery(agent["id"])["changes"]
+    assert no_history["history_truncated"] is True
+    assert no_history["delta"] == {}
+
+
 def test_old_session_age_does_not_claim_visible_message_loss(tmp_path):
     store = AgentStore(str(tmp_path / "agents.sqlite3"), retention_days=1)
     empty = _agent(store, native="old-empty")

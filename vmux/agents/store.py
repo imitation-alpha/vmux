@@ -1333,8 +1333,6 @@ class AgentStore:
             baseline_sequence = int(
                 baseline_record["snapshot_sequence"] if baseline_record else 0
             )
-            if changes_truncated and oldest:
-                baseline = oldest
             if baseline_record and oldest:
                 changes_truncated = changes_truncated or bool(
                     baseline_sequence < int(oldest["sequence"]) - 1
@@ -1352,7 +1350,15 @@ class AgentStore:
             )
             if not baseline_record:
                 changes_truncated = semantic_earlier_unavailable
-            baseline_context = self._loads(baseline["context_json"], {}) if baseline else {}
+            if changes_truncated and baseline is None:
+                baseline = oldest
+            baseline_context = (
+                self._loads(baseline["context_json"], {})
+                if baseline
+                else agent["context"]
+                if changes_truncated
+                else {}
+            )
 
             message_page = self._recovery_page(
                 conn,

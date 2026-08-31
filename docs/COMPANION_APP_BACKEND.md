@@ -428,7 +428,10 @@ normalized data, not a server-authored narrative. `changes.basis` is
 `shared_review` when that baseline exists, otherwise `legacy_shared_visit`,
 otherwise `available_history`. `changes.history_truncated` and
 `changes.unavailable_reason: "expired_or_deleted"` describe a missing semantic
-change basis; they do not describe visible-message retention.
+change basis; they do not describe visible-message retention. A truncated
+`available_history` delta begins at the oldest retained snapshot. If no
+snapshot remains, the delta is empty rather than inferred from an invented
+empty context.
 
 The two source pages remain independently useful:
 
