@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -18,6 +20,8 @@ from .models import default_capabilities, empty_context, semantic_delta
 SCHEMA_VERSION = 2
 MIN_REVIEW_INTERVAL_MINUTES = 5
 MAX_REVIEW_INTERVAL_MINUTES = 1440
+MAX_RECOVERY_ITEMS = 50
+RECOVERY_CURSOR_VERSION = 1
 
 
 class AgentStore:
@@ -86,6 +90,22 @@ class AgentStore:
             conn = self.conn
             try:
                 conn.execute("BEGIN IMMEDIATE")
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    @contextmanager
+    def read_transaction(self):
+        """Hold one SQLite snapshot without acquiring a write reservation."""
+        with self._lock:
+            conn = self.conn
+            try:
+                conn.execute("BEGIN")
+                # Establish the snapshot before any response timestamp or
+                # section query can observe a later projection.
+                conn.execute("SELECT 1 FROM schema_migrations LIMIT 1").fetchone()
                 yield conn
                 conn.commit()
             except Exception:
@@ -314,6 +334,97 @@ class AgentStore:
         if result < 0:
             raise ValueError("bad cursor")
         return result
+
+    @classmethod
+    def _encode_recovery_cursor(
+        cls,
+        *,
+        kind: str,
+        session_id: str,
+        anchor_at: float,
+        message_anchor: int,
+        snapshot_anchor: int,
+        direction: str,
+        boundary: Tuple[float, int, int, str],
+    ) -> str:
+        payload = {
+            "v": RECOVERY_CURSOR_VERSION,
+            "k": kind,
+            "s": session_id,
+            "a": anchor_at,
+            "m": message_anchor,
+            "p": snapshot_anchor,
+            "d": direction,
+            "b": list(boundary),
+        }
+        raw = cls._canonical_dumps(payload).encode("utf-8")
+        # The checksum catches accidental corruption. Cursors confer no extra
+        # authority: authentication and the session id are still enforced.
+        checksum = hashlib.sha256(b"vmux-recovery-v1\0" + raw).digest()[:12]
+        token = base64.urlsafe_b64encode(checksum + raw).decode("ascii").rstrip("=")
+        return "rc1." + token
+
+    @classmethod
+    def _decode_recovery_cursor(
+        cls, value: Optional[str], *, kind: str, session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        if value in (None, ""):
+            return None
+        text = str(value)
+        if not text.startswith("rc1.") or len(text) > 1000:
+            raise ValueError("bad recovery cursor")
+        encoded = text[4:]
+        try:
+            decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            checksum, raw = decoded[:12], decoded[12:]
+            if len(checksum) != 12 or not hashlib.sha256(
+                b"vmux-recovery-v1\0" + raw
+            ).digest()[:12] == checksum:
+                raise ValueError
+            payload = json.loads(raw)
+            boundary = payload.get("b")
+            if (
+                payload.get("v") != RECOVERY_CURSOR_VERSION
+                or payload.get("k") != kind
+                or payload.get("s") != session_id
+                or payload.get("d") not in ("older", "newer")
+                or not isinstance(boundary, list)
+                or len(boundary) != 4
+            ):
+                raise ValueError
+            anchor_at = float(payload["a"])
+            message_anchor = int(payload["m"])
+            snapshot_anchor = int(payload["p"])
+            normalized_boundary = (
+                float(boundary[0]), int(boundary[1]), int(boundary[2]), str(boundary[3])
+            )
+            if (
+                not math.isfinite(anchor_at)
+                or not math.isfinite(normalized_boundary[0])
+                or not 0 <= message_anchor <= 2**63 - 1
+                or not 0 <= snapshot_anchor <= 2**63 - 1
+                or normalized_boundary[1] not in (0, 1)
+                or not 0 <= normalized_boundary[2] <= 2**63 - 1
+                or not normalized_boundary[3]
+                or len(normalized_boundary[3]) > 160
+            ):
+                raise ValueError
+        except (
+            binascii.Error,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ):
+            raise ValueError("bad recovery cursor")
+        return {
+            "anchor_at": anchor_at,
+            "message_anchor": message_anchor,
+            "snapshot_anchor": snapshot_anchor,
+            "direction": payload["d"],
+            "boundary": normalized_boundary,
+        }
 
     def upsert_session(self, runtime: str, native_session_id: str, source_path: str,
                        source_cwd: str, parser_version: str) -> Dict[str, Any]:
@@ -880,7 +991,6 @@ class AgentStore:
         next_cursor = str(offset + limit) if len(rows) > limit else None
         if not with_metadata:
             return values, next_cursor
-        cutoff = time.time() - self.retention_days * 86400
         metadata = {
             "retained_from": bounds["retained_from"] if bounds else None,
             "retained_to": bounds["retained_to"] if bounds else None,
@@ -900,12 +1010,9 @@ class AgentStore:
             "reviewed_at": session["reviewed_at"] if session else None,
             "history_truncated": bool(
                 session
-                and (
-                    float(session["created_at"]) < cutoff
-                    or bool(
-                        self._loads(session["context_json"], {}).get(
-                            "message_history_truncated"
-                        )
+                and bool(
+                    self._loads(session["context_json"], {}).get(
+                        "message_history_truncated"
                     )
                 )
             ),
@@ -917,6 +1024,39 @@ class AgentStore:
             },
         }
         return values, next_cursor, metadata
+
+    @classmethod
+    def _public_timeline_event(
+        cls, row: sqlite3.Row, *, include_context: bool = True
+    ) -> Dict[str, Any]:
+        event = {
+            "id": row["id"],
+            "agent_id": row["session_id"],
+            "sequence": row["sequence"],
+            "created_at": row["created_at"],
+            "occurred_at": row["created_at"],
+            "delta": cls._loads(row["delta_json"], {}),
+            "context": cls._loads(row["context_json"], {}) if include_context else None,
+        }
+        delta = event["delta"]
+        lifecycle = delta.get("lifecycle_changed", {}).get("to")
+        if lifecycle == "waiting":
+            event.update({"type": "decision", "title": "Agent is waiting for a decision"})
+        elif lifecycle == "completed":
+            event.update({"type": "completed", "title": "Agent completed its work"})
+        elif delta.get("new_blockers"):
+            event.update({"type": "blocker", "title": "A new blocker was reported"})
+        elif delta.get("completed"):
+            count = len(delta["completed"])
+            event.update({
+                "type": "progress",
+                "title": "%d item%s completed" % (count, "" if count == 1 else "s"),
+            })
+        elif delta.get("goal_changed") or delta.get("current_task_changed"):
+            event.update({"type": "context", "title": "Agent context changed"})
+        else:
+            event.update({"type": "activity", "title": "Agent activity updated"})
+        return event
 
     def timeline(self, session_id: Optional[str], cursor: Optional[str] = None, limit: int = 50):
         offset = self._cursor(cursor)
@@ -933,29 +1073,431 @@ class AgentStore:
                     "SELECT * FROM agent_snapshots ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
                     (limit + 1, offset),
                 ).fetchall()
-        events = [{
-            "id": row["id"], "agent_id": row["session_id"], "sequence": row["sequence"],
-            "created_at": row["created_at"], "occurred_at": row["created_at"],
-            "delta": self._loads(row["delta_json"], {}),
-            "context": self._loads(row["context_json"], {}) if session_id else None,
-        } for row in rows[:limit]]
-        for event in events:
-            delta = event["delta"]
-            lifecycle = delta.get("lifecycle_changed", {}).get("to")
-            if lifecycle == "waiting":
-                event.update({"type": "decision", "title": "Agent is waiting for a decision"})
-            elif lifecycle == "completed":
-                event.update({"type": "completed", "title": "Agent completed its work"})
-            elif delta.get("new_blockers"):
-                event.update({"type": "blocker", "title": "A new blocker was reported"})
-            elif delta.get("completed"):
-                count = len(delta["completed"])
-                event.update({"type": "progress", "title": "%d item%s completed" % (count, "" if count == 1 else "s")})
-            elif delta.get("goal_changed") or delta.get("current_task_changed"):
-                event.update({"type": "context", "title": "Agent context changed"})
-            else:
-                event.update({"type": "activity", "title": "Agent activity updated"})
+        events = [
+            self._public_timeline_event(row, include_context=bool(session_id))
+            for row in rows[:limit]
+        ]
         return events, str(offset + limit) if len(rows) > limit else None
+
+    @staticmethod
+    def _recovery_order_predicate(
+        relation: str, boundary: Tuple[float, int, int, str]
+    ) -> Tuple[str, Tuple[Any, ...]]:
+        if relation not in ("<", ">"):
+            raise ValueError("bad recovery cursor direction")
+        occurred_at, kind_rank, source_order, resource_id = boundary
+        sql = (
+            "(occurred_at {r} ? OR (occurred_at=? AND "
+            "(kind_rank {r} ? OR (kind_rank=? AND "
+            "(source_order {r} ? OR (source_order=? AND resource_id {r} ?))))))"
+        ).format(r=relation)
+        return sql, (
+            occurred_at,
+            occurred_at,
+            kind_rank,
+            kind_rank,
+            source_order,
+            source_order,
+            resource_id,
+        )
+
+    def _recovery_page(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        cursor_kind: str,
+        cursor: Optional[str],
+        limit: int,
+        generated_at: float,
+        message_anchor: int,
+        snapshot_anchor: int,
+        only_kind_rank: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        parsed = self._decode_recovery_cursor(
+            cursor, kind=cursor_kind, session_id=session_id
+        )
+        anchor_at = parsed["anchor_at"] if parsed else generated_at
+        message_anchor = parsed["message_anchor"] if parsed else message_anchor
+        snapshot_anchor = parsed["snapshot_anchor"] if parsed else snapshot_anchor
+        direction = parsed["direction"] if parsed else "older"
+        boundary = parsed["boundary"] if parsed else None
+        limit = max(1, min(MAX_RECOVERY_ITEMS, int(limit)))
+
+        cte = """WITH activity AS (
+            SELECT 'visible_message' AS activity_kind,0 AS kind_rank,
+                   m.rowid AS source_order,m.id AS resource_id,
+                   m.created_at AS occurred_at,m.*,
+                   NULL AS sequence,NULL AS delta_json,NULL AS context_json
+            FROM chat_messages m
+            WHERE m.session_id=? AND m.rowid<=? AND m.updated_at<=?
+            UNION ALL
+            SELECT 'semantic_event' AS activity_kind,1 AS kind_rank,
+                   s.sequence AS source_order,s.id AS resource_id,
+                   s.created_at AS occurred_at,
+                   s.id AS id,NULL AS conversation_id,s.session_id,
+                   NULL AS native_event_id,NULL AS client_message_id,
+                   NULL AS role,NULL AS content,NULL AS status,
+                   s.created_at,s.created_at AS updated_at,
+                   s.sequence,s.delta_json,s.context_json
+            FROM agent_snapshots s
+            WHERE s.session_id=? AND s.sequence<=? AND s.created_at<=?
+        )"""
+        cte_args: Tuple[Any, ...] = (
+            session_id,
+            message_anchor,
+            anchor_at,
+            session_id,
+            snapshot_anchor,
+            anchor_at,
+        )
+
+        def where_for(
+            relation: Optional[str], key: Optional[Tuple[float, int, int, str]]
+        ) -> Tuple[str, Tuple[Any, ...]]:
+            clauses: List[str] = []
+            args: Tuple[Any, ...] = ()
+            if only_kind_rank is not None:
+                clauses.append("kind_rank=?")
+                args += (only_kind_rank,)
+            if relation and key:
+                predicate, predicate_args = self._recovery_order_predicate(
+                    relation, key
+                )
+                clauses.append(predicate)
+                args += predicate_args
+            return (" WHERE " + " AND ".join(clauses) if clauses else ""), args
+
+        relation = ">" if direction == "newer" else "<"
+        page_where, page_args = where_for(relation if boundary else None, boundary)
+        sql_order = "ASC" if direction == "newer" else "DESC"
+        rows = conn.execute(
+            cte
+            + " SELECT * FROM activity"
+            + page_where
+            + " ORDER BY occurred_at %s,kind_rank %s,source_order %s,resource_id %s LIMIT ?"
+            % ((sql_order,) * 4),
+            cte_args + page_args + (limit,),
+        ).fetchall()
+        if direction != "newer":
+            rows = list(reversed(rows))
+
+        def key(row: sqlite3.Row) -> Tuple[float, int, int, str]:
+            return (
+                float(row["occurred_at"]),
+                int(row["kind_rank"]),
+                int(row["source_order"]),
+                str(row["resource_id"]),
+            )
+
+        low = key(rows[0]) if rows else boundary
+        high = key(rows[-1]) if rows else boundary
+
+        def exists(relation: str, edge: Optional[Tuple[float, int, int, str]]) -> bool:
+            if edge is None:
+                return False
+            where, args = where_for(relation, edge)
+            return conn.execute(
+                cte + " SELECT 1 FROM activity" + where + " LIMIT 1",
+                cte_args + args,
+            ).fetchone() is not None
+
+        has_older = exists("<", low)
+        has_newer = exists(">", high)
+
+        def encoded(
+            requested_direction: str,
+            edge: Optional[Tuple[float, int, int, str]],
+            available: bool,
+        ) -> Optional[str]:
+            if not available or edge is None:
+                return None
+            return self._encode_recovery_cursor(
+                kind=cursor_kind,
+                session_id=session_id,
+                anchor_at=anchor_at,
+                message_anchor=message_anchor,
+                snapshot_anchor=snapshot_anchor,
+                direction=requested_direction,
+                boundary=edge,
+            )
+
+        if parsed is None:
+            cursor_status = "current"
+        elif rows:
+            cursor_status = "valid"
+        elif has_older or has_newer:
+            cursor_status = "data_unavailable"
+        else:
+            cursor_status = "exhausted"
+        return {
+            "rows": rows,
+            "older_cursor": encoded("older", low, has_older),
+            "newer_cursor": encoded("newer", high, has_newer),
+            "cursor_status": cursor_status,
+            "anchor_at": anchor_at,
+            "message_anchor": message_anchor,
+            "snapshot_anchor": snapshot_anchor,
+        }
+
+    @staticmethod
+    def _runtime_session_state(
+        agent: Dict[str, Any], observation: Optional[Dict[str, Any]]
+    ) -> str:
+        if observation is None:
+            return "unknown"
+        lifecycle = str(agent.get("lifecycle") or agent.get("context", {}).get("lifecycle") or "")
+        association = str(agent.get("association") or "")
+        if association == "confirmed" and lifecycle not in ("offline", "completed"):
+            return "live_bound"
+        if lifecycle in ("offline", "completed") or association == "unavailable":
+            return "offline"
+        if association in ("probable", "ambiguous") and agent.get("last_event_at") is not None:
+            return "observed_unbound"
+        return "unknown"
+
+    def recovery(
+        self,
+        session_id: str,
+        *,
+        message_limit: int = 20,
+        timeline_limit: int = 20,
+        activity_limit: int = 20,
+        message_cursor: Optional[str] = None,
+        timeline_cursor: Optional[str] = None,
+        activity_cursor: Optional[str] = None,
+        runtime_observation: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return one bounded, non-mutating SQLite view of recovery state."""
+        with self.read_transaction() as conn:
+            generated_at = time.time()
+            agent = self.get_agent(session_id)
+            if not agent:
+                return None
+            context_row = conn.execute(
+                """SELECT c.revision,c.updated_at,s.pane_incarnation
+                   FROM agent_contexts c JOIN agent_sessions s ON s.id=c.session_id
+                   WHERE c.session_id=?""",
+                (session_id,),
+            ).fetchone()
+            observation = None
+            if (
+                agent.get("pane_id")
+                and runtime_observation
+                and runtime_observation.get("incarnation")
+                == context_row["pane_incarnation"]
+            ):
+                observation = runtime_observation
+            anchors = conn.execute(
+                """SELECT
+                       COALESCE((SELECT MAX(rowid) FROM chat_messages WHERE session_id=?),0)
+                           AS message_anchor,
+                       COALESCE((SELECT MAX(sequence) FROM agent_snapshots WHERE session_id=?),0)
+                           AS snapshot_anchor""",
+                (session_id, session_id),
+            ).fetchone()
+            message_anchor = int(anchors["message_anchor"])
+            snapshot_anchor = int(anchors["snapshot_anchor"])
+
+            newest = conn.execute(
+                "SELECT * FROM agent_snapshots WHERE session_id=? ORDER BY sequence DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            oldest = conn.execute(
+                "SELECT * FROM agent_snapshots WHERE session_id=? ORDER BY sequence LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            review = conn.execute(
+                "SELECT * FROM session_reviews WHERE session_id=?", (session_id,)
+            ).fetchone()
+            visit = conn.execute(
+                "SELECT * FROM session_visits WHERE session_id=?", (session_id,)
+            ).fetchone()
+            baseline_record = review or visit
+            basis = (
+                "shared_review"
+                if review
+                else "legacy_shared_visit"
+                if visit
+                else "available_history"
+            )
+            baseline = None
+            if baseline_record and baseline_record["snapshot_id"]:
+                baseline = conn.execute(
+                    "SELECT * FROM agent_snapshots WHERE id=? AND session_id=?",
+                    (baseline_record["snapshot_id"], session_id),
+                ).fetchone()
+            changes_truncated = bool(
+                baseline_record and baseline_record["snapshot_id"] and baseline is None
+            )
+            baseline_sequence = int(
+                baseline_record["snapshot_sequence"] if baseline_record else 0
+            )
+            if baseline_record and oldest:
+                changes_truncated = changes_truncated or bool(
+                    baseline_sequence < int(oldest["sequence"]) - 1
+                )
+            semantic_earlier_unavailable = bool(
+                (
+                    oldest
+                    and (
+                        int(oldest["sequence"]) > 1
+                        or int(context_row["revision"])
+                        > int(newest["sequence"] if newest else 0)
+                    )
+                )
+                or (oldest is None and int(context_row["revision"]) > 0)
+            )
+            if not baseline_record:
+                changes_truncated = semantic_earlier_unavailable
+            if changes_truncated and baseline is None:
+                baseline = oldest
+            baseline_context = (
+                self._loads(baseline["context_json"], {})
+                if baseline
+                else agent["context"]
+                if changes_truncated
+                else {}
+            )
+
+            message_page = self._recovery_page(
+                conn,
+                session_id=session_id,
+                cursor_kind="messages",
+                cursor=message_cursor,
+                limit=message_limit,
+                generated_at=generated_at,
+                message_anchor=message_anchor,
+                snapshot_anchor=snapshot_anchor,
+                only_kind_rank=0,
+            )
+            timeline_page = self._recovery_page(
+                conn,
+                session_id=session_id,
+                cursor_kind="timeline",
+                cursor=timeline_cursor,
+                limit=timeline_limit,
+                generated_at=generated_at,
+                message_anchor=message_anchor,
+                snapshot_anchor=snapshot_anchor,
+                only_kind_rank=1,
+            )
+            activity_page = self._recovery_page(
+                conn,
+                session_id=session_id,
+                cursor_kind="activity",
+                cursor=activity_cursor,
+                limit=activity_limit,
+                generated_at=generated_at,
+                message_anchor=message_anchor,
+                snapshot_anchor=snapshot_anchor,
+            )
+
+            message_rows = message_page.pop("rows")
+            timeline_rows = timeline_page.pop("rows")
+            activity_rows = activity_page.pop("rows")
+            messages = [self._public_message(row) for row in message_rows]
+            timeline = [self._public_timeline_event(row) for row in timeline_rows]
+            entries = []
+            for row in activity_rows:
+                if row["activity_kind"] == "visible_message":
+                    resource = self._public_message(row)
+                else:
+                    resource = self._public_timeline_event(row)
+                entries.append({
+                    "id": "%s:%s" % (row["activity_kind"], row["resource_id"]),
+                    "kind": row["activity_kind"],
+                    "occurred_at": row["occurred_at"],
+                    "resource_id": row["resource_id"],
+                    "resource": resource,
+                })
+
+            message_bounds = conn.execute(
+                """SELECT MIN(created_at) AS retained_from,MAX(created_at) AS retained_to
+                   FROM chat_messages WHERE session_id=?""",
+                (session_id,),
+            ).fetchone()
+            message_history_truncated = bool(
+                agent["context"].get("message_history_truncated")
+            )
+            timeline_bounds = {
+                "retained_from": oldest["created_at"] if oldest else None,
+                "retained_to": newest["created_at"] if newest else None,
+            }
+
+            message_coverage = {
+                "retained_from": message_bounds["retained_from"],
+                "retained_to": message_bounds["retained_to"],
+                "history_truncated": message_history_truncated,
+                "unavailable_reason": (
+                    "expired_or_deleted" if message_history_truncated else None
+                ),
+                "more_retained_older": message_page["older_cursor"] is not None,
+                "more_retained_newer": message_page["newer_cursor"] is not None,
+            }
+            timeline_coverage = {
+                **timeline_bounds,
+                "history_truncated": semantic_earlier_unavailable,
+                "unavailable_reason": (
+                    "expired_or_deleted" if semantic_earlier_unavailable else None
+                ),
+                "more_retained_older": timeline_page["older_cursor"] is not None,
+                "more_retained_newer": timeline_page["newer_cursor"] is not None,
+            }
+            changes = {
+                "basis": basis,
+                "baseline_snapshot_id": (
+                    baseline_record["snapshot_id"] if baseline_record else None
+                ),
+                "as_of_snapshot_id": newest["id"] if newest else None,
+                "history_truncated": changes_truncated,
+                "unavailable_reason": (
+                    "expired_or_deleted" if changes_truncated else None
+                ),
+                "delta": semantic_delta(baseline_context, agent["context"]),
+            }
+            return {
+                "version": 1,
+                "generated_at": generated_at,
+                "consistency": "single_read",
+                "agent": agent,
+                "changes": changes,
+                "recent_messages": {
+                    "order": "oldest_to_newest",
+                    "messages": messages,
+                    "next_cursor": message_page["older_cursor"],
+                    "previous_cursor": message_page["newer_cursor"],
+                    "cursor_status": message_page["cursor_status"],
+                    "coverage": message_coverage,
+                },
+                "recent_timeline": {
+                    "order": "oldest_to_newest",
+                    "events": timeline,
+                    "next_cursor": timeline_page["older_cursor"],
+                    "previous_cursor": timeline_page["newer_cursor"],
+                    "cursor_status": timeline_page["cursor_status"],
+                    "coverage": timeline_coverage,
+                },
+                "recent_activity": {
+                    "order": "oldest_to_newest",
+                    "tie_break": "occurred_at_kind_source_order_resource_id",
+                    "entries": entries,
+                    "older_cursor": activity_page["older_cursor"],
+                    "newer_cursor": activity_page["newer_cursor"],
+                    "cursor_status": activity_page["cursor_status"],
+                    "coverage": {
+                        "visible_messages": message_coverage,
+                        "semantic_history": timeline_coverage,
+                    },
+                },
+                "freshness": {
+                    "observed_at": observation.get("observed_at") if observation else None,
+                    "projected_at": context_row["updated_at"],
+                    "last_runtime_event_at": agent.get("last_event_at"),
+                    "runtime_session": self._runtime_session_state(agent, observation),
+                    "model_context": "runtime_owned_unverified",
+                },
+            }
 
     def resume(self, session_id: str) -> Optional[Dict[str, Any]]:
         agent = self.get_agent(session_id)

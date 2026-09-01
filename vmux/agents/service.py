@@ -93,6 +93,8 @@ class AgentService:
         self.push = push
         self.kick = kick or (lambda: None)
         self._latest: Dict[str, PaneObservation] = {}
+        self._observation_generation = 0
+        self._verified_observations: Dict[str, Tuple[int, PaneObservation]] = {}
         self._latest_lock = threading.RLock()
         self._process_lock = threading.Lock()
         self._api_lock = threading.RLock()
@@ -130,7 +132,7 @@ class AgentService:
 
     def info(self) -> Dict[str, Any]:
         enabled = self.runtime_active
-        return {
+        value = {
             "enabled": enabled,
             "runtimes": ["codex", "claude"],
             "websocket": enabled,
@@ -142,6 +144,19 @@ class AgentService:
             "decisions": "verified_structured_only",
             "degraded_reason": self._disabled_reason,
         }
+        if enabled:
+            value["recovery"] = {
+                "version": 1,
+                "path_template": "/api/agents/{id}/recovery",
+                "default_recent_messages": 20,
+                "default_recent_timeline": 20,
+                "default_recent_activity": 20,
+                "max_recent_messages": 50,
+                "max_recent_timeline": 50,
+                "max_recent_activity": 50,
+                "activity_order": "oldest_to_newest",
+            }
+        return value
 
     def review_info(self) -> Dict[str, Any]:
         enabled = self.runtime_active
@@ -217,6 +232,8 @@ class AgentService:
         self._loop = None
         with self._latest_lock:
             self._latest = {}
+            self._observation_generation += 1
+            self._verified_observations = {}
         await asyncio.to_thread(self._close_store)
 
     async def aclose(self) -> None:
@@ -228,6 +245,8 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._observation_generation += 1
+            self._verified_observations = {}
         if self._queue is None:
             return
         now = time.monotonic()
@@ -254,6 +273,8 @@ class AgentService:
             return
         with self._latest_lock:
             self._latest = {obs.pane_id: obs for obs in observations}
+            self._observation_generation += 1
+            self._verified_observations = {}
         # Drop an older queued batch before yielding to the worker. If the
         # worker already owns one, _process_lock orders this current batch
         # after it; a stale queued batch can therefore never run afterward.
@@ -376,6 +397,13 @@ class AgentService:
                         source="manual" if manual_obs else "automatic", capabilities=capabilities,
                     )
                 self._ingest_candidate(observer, candidate, agent, bound_obs, capabilities)
+                if bound_obs:
+                    with self._latest_lock:
+                        if self._latest.get(bound_obs.pane_id) == bound_obs:
+                            self._verified_observations[agent["id"]] = (
+                                self._observation_generation,
+                                bound_obs,
+                            )
 
         agents, cursor = self.store.list_agents(limit=100)
         while True:
@@ -550,6 +578,15 @@ class AgentService:
         with self._latest_lock:
             return self._latest.get(pane_id)
 
+    def _observation_is_fresh(
+        self, observation: Optional[PaneObservation]
+    ) -> bool:
+        return bool(
+            observation
+            and time.time() - observation.observed_at
+            <= max(10.0, self.cfg.poll_interval * 4)
+        )
+
     def _validate_live(self, agent: Dict[str, Any], expected_binding_revision: int,
                        *, require_idle: bool, prompt_fingerprint: Optional[str] = None) -> PaneObservation:
         if int(agent["binding_revision"]) != int(expected_binding_revision):
@@ -557,8 +594,9 @@ class AgentService:
         if agent.get("association") != "confirmed" or not agent.get("pane_id"):
             raise AgentUnavailable("agent session is read-only until its pane binding is confirmed")
         obs = self._latest_observation(agent["pane_id"])
-        if not obs or time.time() - obs.observed_at > max(10.0, self.cfg.poll_interval * 4):
+        if not self._observation_is_fresh(obs):
             raise AgentConflict("pane observation is stale", self.store.get_agent(agent["id"]))
+        assert obs is not None
         if require_idle and obs.status != "idle":
             raise AgentConflict("agent is not at an idle prompt", self.store.get_agent(agent["id"]))
         panes = tmux.list_panes()
@@ -617,6 +655,34 @@ class AgentService:
         if not value:
             raise AgentNotFound(session_id)
         value["agent"] = self._decorate_agent(value["agent"])
+        return value
+
+    def recovery(self, session_id: str, **kwargs):
+        with self._latest_lock:
+            verified_observation = self._verified_observations.get(session_id)
+            observation = verified_observation[1] if verified_observation else None
+            if not self._observation_is_fresh(observation):
+                observation = None
+            runtime_observation = (
+                {
+                    "incarnation": observation.incarnation,
+                    "observed_at": observation.observed_at,
+                }
+                if observation
+                else None
+            )
+        value = self.store.recovery(
+            session_id, runtime_observation=runtime_observation, **kwargs
+        )
+        if not value:
+            raise AgentNotFound(session_id)
+        with self._latest_lock:
+            if (
+                self._verified_observations.get(session_id) != verified_observation
+                or not self._observation_is_fresh(observation)
+            ):
+                value["freshness"]["observed_at"] = None
+                value["freshness"]["runtime_session"] = "unknown"
         return value
 
     def visit(self, session_id: str, snapshot_id: str):
@@ -682,10 +748,8 @@ class AgentService:
             return False
         observation = self._latest_observation(pane_id)
         if (
-            observation is None
+            not self._observation_is_fresh(observation)
             or observation.status != "needs_input"
-            or time.time() - observation.observed_at
-            > max(10.0, self.cfg.poll_interval * 4)
         ):
             return False
         for public_decision in group.get("decisions", []):

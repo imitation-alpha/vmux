@@ -169,6 +169,20 @@ working-directory and source-log metadata are retained locally to associate and
 incrementally read sessions; those internal paths are not returned by the
 public API.
 
+Authenticated recovery reads can combine the current structured brief,
+explicitly based changes, recent visible messages, and recent semantic
+snapshots into one bounded response. The typed activity sequence is assembled
+from those existing normalized records; vmux does not create a second history
+store or a generated account of what happened. Recovery never includes source
+paths or working directories, terminal capture, hidden/encrypted reasoning,
+tool arguments/results, commands, compact summaries, or arbitrary runtime
+records. It does not send chat, resume execution, bind a pane, or acknowledge a
+visit or Review baseline. The response states that model context is owned by
+the runtime and unverified by vmux; it does not claim that a Codex or Claude
+context window was restored. Structured Agent Context and Review GET responses
+carry `Cache-Control: no-store, max-age=0` so conforming clients and
+intermediaries do not retain them.
+
 Historical agent snapshots, messages, and resolved decisions are retained for
 30 days by default. Current context and unresolved decisions can remain while a
 session is active. You can change the retention period, turn off the

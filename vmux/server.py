@@ -197,6 +197,20 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     app.state.images = images
     app.state.creation = creation
 
+    @app.middleware("http")
+    async def prevent_structured_context_caching(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if request.method == "GET" and (
+            path == "/api/review"
+            or path == "/api/timeline"
+            or path == "/api/decisions"
+            or path.startswith("/api/agents")
+            or path.startswith("/api/decisions/")
+        ):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+
     def require_auth(authorization: Optional[str] = Header(None)):
         if not cfg.token:
             return
@@ -470,6 +484,30 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     @app.get("/api/agents/{agent_id}/resume")
     def get_agent_resume(agent_id: str, _=Depends(require_auth)):
         return _agent_call(hub.agents.resume, agent_id)
+
+    @app.get("/api/agents/{agent_id}/recovery")
+    def get_agent_recovery(
+        agent_id: str,
+        message_limit: int = 20,
+        timeline_limit: int = 20,
+        activity_limit: int = 20,
+        message_cursor: Optional[str] = None,
+        timeline_cursor: Optional[str] = None,
+        activity_cursor: Optional[str] = None,
+        _=Depends(require_auth),
+    ):
+        value = _agent_call(
+            hub.agents.recovery,
+            agent_id,
+            message_limit=message_limit,
+            timeline_limit=timeline_limit,
+            activity_limit=activity_limit,
+            message_cursor=message_cursor,
+            timeline_cursor=timeline_cursor,
+            activity_cursor=activity_cursor,
+        )
+        value["server_instance_id"] = cfg.server_instance_id
+        return value
 
     @app.get("/api/review")
     def get_review(_=Depends(require_auth)):

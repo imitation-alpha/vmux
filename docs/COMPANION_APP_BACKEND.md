@@ -247,7 +247,18 @@ Returns the live-editable fields plus:
         "persistence": "structured_only",
         "chat": "confirmed_idle_only",
         "decisions": "verified_structured_only",
-        "degraded_reason": null
+        "degraded_reason": null,
+        "recovery": {
+          "version": 1,
+          "path_template": "/api/agents/{id}/recovery",
+          "default_recent_messages": 20,
+          "default_recent_timeline": 20,
+          "default_recent_activity": 20,
+          "max_recent_messages": 50,
+          "max_recent_timeline": 50,
+          "max_recent_activity": 50,
+          "activity_order": "oldest_to_newest"
+        }
       },
       "agent_review_v1": {
         "enabled": true,
@@ -274,8 +285,11 @@ currently represented tmux targets. Push and usage info report
 capability/availability without exposing credentials.
 
 `capabilities.agent_context_v1` gates the independent agent workspace, and
-`capabilities.agent_review_v1` gates the cross-client Review workflow. Clients
-must fall back to the terminal workspace when it is absent or disabled.
+`capabilities.agent_review_v1` gates the cross-client Review workflow. The
+optional `agent_context_v1.recovery` object advertises the additive recovery-v1
+read; clients that do not understand it ignore it, and newer clients use the
+legacy resources when it is absent. Clients must fall back to the terminal
+workspace when Agent Context is absent or disabled.
 `experimental_agent_workspace_enabled` is the authoritative server-persisted
 switch; clients must not hydrate agent REST resources or open `/ws/agents`
 unless it is `true` and the corresponding capability is enabled.
@@ -299,6 +313,7 @@ accepts `status` and `agent_id` filters.
 | `GET /api/agents` | `{agents:[AgentSession],next_cursor}` |
 | `GET /api/agents/{id}` | Current `AgentSession` |
 | `GET /api/agents/{id}/resume` | Resume object shown below |
+| `GET /api/agents/{id}/recovery` | One bounded current brief, based changes, visible-message page, semantic page, and traversable typed activity page |
 | `PUT /api/agents/{id}/visit` | Advance the shared baseline with `{"snapshot_id":"..."}` |
 | `GET /api/agents/{id}/timeline` | `{events:[TimelineEvent],next_cursor}`; events include their context |
 | `GET /api/timeline` | `{events:[TimelineEvent],next_cursor}` across sessions; event context is `null` |
@@ -387,6 +402,96 @@ accept either during the v1 transition. Other context fields, including
 than being duplicated at the top level. A change object may omit any unchanged
 key. `history_truncated` means the saved visit baseline expired before the
 oldest retained snapshot, so the delta starts at the oldest available context.
+
+### Recovery v1
+
+When `agent_context_v1.recovery.version` is `1`, an authenticated client can
+fetch:
+
+~~~http
+GET /api/agents/{id}/recovery?message_limit=20&timeline_limit=20&activity_limit=20
+~~~
+
+The canonical cross-client contract fixture is
+[`recovery-v1.fixture.json`](recovery-v1.fixture.json). The response
+contains the current public `agent` (the structured session brief), `changes`,
+`recent_messages`, `recent_timeline`, `recent_activity`, and `freshness`.
+`generated_at`, `server_instance_id`, and `consistency: "single_read"` identify
+the observation. All sections are selected inside one SQLite read transaction;
+a projection committed afterward is delivered by normal invalidation and will
+appear on a later GET.
+
+Recovery is a read, not an execution operation. It never sends chat, resumes a
+runtime, binds a pane, observes logs, or advances the legacy visit, Review, or
+any client read baseline. The current brief and `changes.delta` are existing
+normalized data, not a server-authored narrative. `changes.basis` is
+`shared_review` when that baseline exists, otherwise `legacy_shared_visit`,
+otherwise `available_history`. `changes.history_truncated` and
+`changes.unavailable_reason: "expired_or_deleted"` describe a missing semantic
+change basis; they do not describe visible-message retention. A truncated
+`available_history` delta begins at the oldest retained snapshot. If no
+snapshot remains, the delta is empty rather than inferred from an invented
+empty context.
+
+The two source pages remain independently useful:
+
+- `recent_messages.messages` contains retained visible user/assistant messages;
+- `recent_timeline.events` contains retained semantic snapshots; and
+- each page is chronological (`oldest_to_newest`), has an older `next_cursor`,
+  a newer `previous_cursor`, `cursor_status`, and source-specific `coverage`.
+
+`recent_activity.entries` is the deterministic presentation sequence. Each
+entry is a discriminated resource with `kind: "visible_message"` or
+`kind: "semantic_event"`, `occurred_at`, stable resource id, and the existing
+normalized resource. The order key is ascending
+`(occurred_at, kind, source_order, resource_id)`: visible messages sort before
+semantic events when timestamps tie; retained message insertion order or
+semantic snapshot sequence breaks same-kind ties; the id is the final stable
+tie-breaker. This order is independent of arrival order and does not fabricate
+or infer activity text.
+
+The newest request has no activity cursor. `older_cursor` loads the immediately
+older retained page and `newer_cursor` loads the immediately newer retained
+page; every returned page is still chronological. Cursors are opaque keyset
+values scoped to the agent and resource. The first request records immutable
+message/snapshot high-water marks and a read time. Every cursor derived from
+that page retains those anchors, so a concurrent projection—even one carrying
+an older runtime timestamp—cannot duplicate, reorder, or enter the traversal.
+Cursors survive a server restart because they require no process-local state.
+They remain usable while their anchored records are retained. A deletion or
+retention pass can make a boundary unavailable; an empty page then reports
+`cursor_status: "data_unavailable"` or `"exhausted"`, and the client should
+show the coverage warning or refetch the newest page rather than call the
+history complete.
+
+Limits are clamped to `1...50`; malformed cursor syntax returns `400`.
+`more_retained_older`/`more_retained_newer` and non-null cursors mean data is
+still available and are never retention warnings. `history_truncated` and
+`unavailable_reason` mean earlier source data expired or was deleted and are
+never "load more" states. Message and semantic coverage are deliberately
+separate. Empty history is valid and has empty arrays plus null cursors.
+Unknown/pruned agents return `404`; disabled Agent Context returns `503`.
+
+Freshness reports the latest pane observation correlated with the discovered
+native session after projection, last projection time, and last runtime event
+time. Request generation time remains separate in `generated_at`. Until this
+server instance completes that correlation, `observed_at` is null and
+`runtime_session` is `unknown`; a raw pane observation or persisted association
+alone never establishes liveness. If the observation generation changes during
+the consistent store read, or its age exceeds the poll-relative liveness
+boundary, freshness is downgraded to unknown.
+`runtime_session` is only `live_bound`, `observed_unbound`, `offline`, or
+`unknown` and describes association to the native runtime session.
+`model_context` is always
+`runtime_owned_unverified` in v1. A client must never say vmux restored or
+verified the runtime/model context window.
+
+Every structured Agent Context, Timeline, Decision, and Review GET response,
+including authentication/domain errors, carries `Cache-Control: no-store,
+max-age=0`. Recovery contains no pane capture, source path/CWD, hidden or
+encrypted reasoning, compact summaries, tool arguments/results, commands, or
+arbitrary runtime records. Its only text is already-public structured context,
+visible messages, and normalized semantic metadata.
 
 ### Review workflow
 
