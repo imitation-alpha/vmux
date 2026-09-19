@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
 import threading
 import time
 import uuid
@@ -72,7 +73,7 @@ def test_event_subscriber_validates_ack_and_only_wakes():
     os.unlink(path)
 
 
-def test_bad_ack_never_wakes_and_insecure_socket_is_rejected():
+def test_bad_ack_never_wakes():
     path = short_socket_path("bad")
     server, _ = unix_server(path, bad_ack=True)
     woke = threading.Event()
@@ -85,15 +86,17 @@ def test_bad_ack_never_wakes_and_insecure_socket_is_rejected():
     assert subscriber.active is False
 
     os.unlink(path)
-    other = short_socket_path("writable")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.bind(str(other))
-        os.chmod(other, 0o620)
-        assert HerdrEventSubscriber.validate_socket(str(other)) is False
-    finally:
-        sock.close()
-        os.unlink(other)
+
+
+@pytest.mark.parametrize("mode, expected", [(0o600, True), (0o620, False), (0o602, False)])
+def test_socket_permissions(monkeypatch, tmp_path, mode, expected):
+    path = str(tmp_path / "events.sock")
+    # Exercise permission validation without exposing a real writable socket.
+    info = os.stat_result((stat.S_IFSOCK | mode, 0, 0, 1, os.getuid(), 0, 0, 0, 0, 0))
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "stat", lambda path: info)
+        valid = HerdrEventSubscriber.validate_socket(path)
+    assert valid is expected
 
 
 @pytest.mark.parametrize("frame", [[], None, "invalid", 42])
