@@ -152,7 +152,8 @@ def test_capture_does_not_trust_route_revision_for_terminal_output(monkeypatch):
     assert selected.capture(endpoint, lines=200) == selected.capture(endpoint, lines=200)
 
     reads = [argv for argv, _ in calls if argv[1:3] == ["pane", "read"]]
-    assert len(reads) == 2
+    assert len(reads) == 4
+    assert "detection" in reads[1]
     assert "recent-unwrapped" in reads[0]
     assert reads[0][-2:] == ["--session", SESSION]
 
@@ -224,3 +225,46 @@ def test_bad_configuration_and_unverified_keys_fail_closed(monkeypatch):
     with pytest.raises(ProviderError) as caught:
         selected.send_literal(snapshot, "first\nsecond")  # type: ignore[arg-type]
     assert caught.value.category == "capability_unavailable"
+
+
+@pytest.mark.parametrize("failure", ["socket", "schema", "session"])
+def test_discovery_and_revalidation_require_successful_health_probe(monkeypatch, failure):
+    calls = install_fake_subprocess(monkeypatch)
+    selected = provider()
+    original_json = selected._json
+    healthy = True
+
+    def response(args, **kwargs):
+        value = original_json(args, **kwargs)
+        if not healthy and failure == "schema" and args == ["api", "schema", "--json"]:
+            return {"requests": []}
+        if not healthy and failure == "session" and args == ["status", "--json"]:
+            value["server"]["session"] = "other"
+        return value
+
+    monkeypatch.setattr(selected, "_json", response)
+    monkeypatch.setattr(
+        "vmux.terminals.herdr_provider.HerdrEventSubscriber.validate_socket",
+        lambda path: healthy or failure != "socket",
+    )
+    healthy = False
+    with pytest.raises(ProviderError):
+        selected.probe()
+    failed = selected.discover()
+    assert failed.authoritative is False
+    assert failed.health.status != "ready"
+    assert failed.endpoints == ()
+    assert not any(argv[1:3] == ["api", "snapshot"] for argv, _ in calls)
+
+    healthy = True
+    recovered = selected.discover()
+    assert recovered.authoritative is True
+    endpoint = recovered.endpoints[0]
+    healthy = False
+    with pytest.raises(ProviderError):
+        selected.revalidate(endpoint.public_id, endpoint)
+    retained = selected.discover()
+    assert retained.authoritative is False
+    assert retained.endpoints == (endpoint,)
+    assert retained.health.status != "ready"
+    assert not any(argv[1:3] in (["pane", "send-text"], ["pane", "send-keys"]) for argv, _ in calls)

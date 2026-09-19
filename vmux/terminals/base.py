@@ -101,6 +101,7 @@ class CaptureResult:
     text: str
     native_revision: str = ""
     truncated: bool = False
+    detection_text: Optional[str] = None
 
 
 @dataclass(frozen=True)

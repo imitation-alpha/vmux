@@ -139,3 +139,31 @@ def test_main_omits_app_address_hint_on_localhost(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "app server address" not in captured.out
     assert "plain HTTP" not in captured.err
+
+
+@pytest.mark.parametrize("override", ["session", "provider"])
+def test_main_merges_terminal_overrides_before_validation(tmp_path, monkeypatch, override):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("terminal:\n  provider: herdr\ntmux:\n  disable_auto_rename: false\n")
+    calls = _stub_startup(monkeypatch)
+    providers = []
+
+    class Provider:
+        def probe(self):
+            providers.append("probed")
+
+    monkeypatch.setattr(cli, "provider_for_config", lambda cfg: Provider())
+    monkeypatch.setattr(cli, "create_app", lambda cfg, provider=None: {"cfg": cfg})
+    args = ["--herdr-session", " agents "] if override == "session" else ["--terminal-provider", "tmux"]
+    assert cli.main(["-c", str(cfgfile), *args]) == 0
+    cfg = calls["run"]["app"]["cfg"]
+    assert cfg.terminal_provider == ("herdr" if override == "session" else "tmux")
+    assert cfg.herdr_session == ("agents" if override == "session" else "")
+    assert providers == (["probed"] if override == "session" else [])
+
+
+def test_main_still_rejects_missing_effective_herdr_session(tmp_path):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("terminal:\n  provider: herdr\n")
+    with pytest.raises(SystemExit, match="terminal.herdr.session is required"):
+        cli.main(["-c", str(cfgfile)])

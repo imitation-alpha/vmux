@@ -21,12 +21,7 @@ def _digest(prefix: str, value: Any) -> str:
 
 
 def prompt_fingerprint(text: str, question: Optional[str]) -> str:
-    if question:
-        basis = " ".join(question.split())
-    else:
-        lines = [" ".join(line.split()) for line in (text or "").splitlines() if line.strip()]
-        basis = "\n".join(lines[-20:])
-    return _digest("sha256:", basis)
+    return _digest("sha256:", {"text": text, "question": question})
 
 
 def prepare_guard(text: str, question: Optional[str], menu: list[MenuOption]) -> tuple[str, str, list[MenuOption]]:
@@ -35,8 +30,9 @@ def prepare_guard(text: str, question: Optional[str], menu: list[MenuOption]) ->
         {
             "index": index,
             "key": option.key,
-            "label": " ".join(option.label.split()),
-            "description": " ".join(option.description.split()),
+            "label": option.label,
+            "description": option.description,
+            "selected": option.selected,
             "freeform": option.freeform,
         }
         for index, option in enumerate(menu)
@@ -213,7 +209,8 @@ class TerminalActionService:
         prompt_guarded = operation in ("text", "select") or (operation == "key" and key == "Enter")
         if prompt_guarded and expected.get("prompt_fingerprint") != current_guard.get("prompt_fingerprint"):
             raise ActionProblem(409, "prompt_changed", current=current_guard)
-        if operation == "select" and expected.get("options_fingerprint") != current_guard.get("options_fingerprint"):
+        options_guarded = operation == "select" or (operation == "key" and key == "Enter") or (operation == "text" and enter)
+        if options_guarded and expected.get("options_fingerprint") != current_guard.get("options_fingerprint"):
             raise ActionProblem(409, "options_changed", current=current_guard)
         try:
             verified = self.provider.revalidate(pane_id, endpoint)
@@ -228,10 +225,10 @@ class TerminalActionService:
             result.question,
             result.menu_list(),
         )
+        if options_guarded and options != expected.get("options_fingerprint"):
+            raise ActionProblem(409, "options_changed")
         if prompt_guarded and prompt != expected.get("prompt_fingerprint"):
             raise ActionProblem(409, "prompt_changed")
-        if operation == "select" and options != expected.get("options_fingerprint"):
-            raise ActionProblem(409, "options_changed")
 
         try:
             if operation == "key":
@@ -253,7 +250,9 @@ class TerminalActionService:
                 option = next((item for item in menu if item.id == option_id), None)
                 if option is None:
                     raise ActionProblem(409, "options_changed")
-                if state.kind == KIND_CLAUDE or option.freeform:
+                if option.key == "enter":
+                    self.provider.send_key(fresh, "Enter")
+                elif state.kind == KIND_CLAUDE or option.freeform:
                     self.provider.send_menu_key(fresh, option.key)
                 elif state.kind == KIND_CODEX:
                     self.provider.send_menu_key(fresh, option.key)
@@ -261,8 +260,6 @@ class TerminalActionService:
                         self.provider.send_key(fresh, "Enter")
                     except ProviderError as exc:
                         raise ActionProblem(409, "partial_delivery_unknown") from exc
-                elif option.key == "enter":
-                    self.provider.send_key(fresh, "Enter")
                 else:
                     self.provider.send_literal(fresh, option.key)
                     try:

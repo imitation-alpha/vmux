@@ -499,7 +499,12 @@ def save_overlay(cfg: "Config") -> None:
     os.replace(tmp, cfg.overlay_path)  # atomic
 
 
-def load(path: Optional[str]) -> Config:
+def load(
+    path: Optional[str],
+    *,
+    terminal_provider: Optional[str] = None,
+    herdr_session: Optional[str] = None,
+) -> Config:
     data: dict = {}
     if path:
         if not os.path.exists(path):
@@ -512,7 +517,7 @@ def load(path: Optional[str]) -> Config:
     terminal = data.get("terminal", {}) or {}
     if not isinstance(terminal, dict):
         raise SystemExit("terminal must be a mapping")
-    terminal_provider = str(terminal.get("provider", "tmux") or "tmux")
+    terminal_provider = terminal_provider if terminal_provider is not None else str(terminal.get("provider", "tmux") or "tmux")
     if terminal_provider not in ("tmux", "herdr"):
         raise SystemExit("terminal.provider must be 'tmux' or 'herdr'")
     herdr = terminal.get("herdr", {}) or {}
@@ -523,7 +528,7 @@ def load(path: Optional[str]) -> Config:
     herdr_events = "off" if raw_herdr_events is False else str(raw_herdr_events or "auto")
     if herdr_events not in ("auto", "off"):
         raise SystemExit("terminal.herdr.events must be 'auto' or 'off'")
-    herdr_session = str(herdr.get("session", "") or "").strip()
+    herdr_session = (herdr_session if herdr_session is not None else str(herdr.get("session", "") or "")).strip()
     herdr_binary = str(herdr.get("binary", "herdr") or "herdr")
     if terminal_provider == "herdr" and not herdr_session:
         raise SystemExit("terminal.herdr.session is required when terminal.provider is herdr")

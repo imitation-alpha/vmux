@@ -9,6 +9,8 @@ import threading
 import time
 import uuid
 
+import pytest
+
 from vmux.terminals.herdr_events import HerdrEventSubscriber
 
 
@@ -92,3 +94,60 @@ def test_bad_ack_never_wakes_and_insecure_socket_is_rejected():
     finally:
         sock.close()
         os.unlink(other)
+
+
+@pytest.mark.parametrize("frame", [[], None, "invalid", 42])
+@pytest.mark.parametrize("phase", ["ack", "event"])
+def test_wrong_shape_frames_fail_closed_and_clear_active(monkeypatch, frame, phase):
+    subscriber = HerdrEventSubscriber("/unused.sock")
+    wakes = []
+    subscriber._wake = lambda: wakes.append(True)
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def settimeout(self, value):
+            pass
+
+        def connect(self, path):
+            pass
+
+        def sendall(self, data):
+            request = json.loads(data)
+            ack = {"id": request["id"], "result": {"type": "subscription_started"}}
+            self.frames = [json.dumps(frame if phase == "ack" else ack).encode() + b"\n"]
+            if phase == "event":
+                self.frames.append(json.dumps(frame).encode() + b"\n")
+
+        def recv(self, size):
+            return self.frames.pop(0) if self.frames else b""
+
+    monkeypatch.setattr(socket, "socket", lambda *a: Client())
+    with pytest.raises(ValueError):
+        subscriber._stream(("w1:p1",))
+    assert subscriber.active is False
+    assert wakes == []
+
+
+def test_stream_disconnect_clears_active_and_reconnects(monkeypatch):
+    subscriber = HerdrEventSubscriber("/unused.sock")
+    subscriber._ids = ("w1:p1",)
+    calls = []
+    monkeypatch.setattr(subscriber, "validate_socket", lambda path: True)
+    monkeypatch.setattr(subscriber._stop, "wait", lambda timeout: None)
+
+    def consume(ids):
+        calls.append(ids)
+        subscriber.active = True
+        if len(calls) == 1:
+            raise ValueError("bad event envelope")
+        subscriber._stop.set()
+
+    monkeypatch.setattr(subscriber, "_consume_stream", consume)
+    subscriber._run()
+    assert calls == [("w1:p1",), ("w1:p1",)]
+    assert subscriber.active is False
