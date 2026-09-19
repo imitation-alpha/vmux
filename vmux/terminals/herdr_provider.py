@@ -204,7 +204,9 @@ class HerdrProvider(TerminalProvider):
             ):
                 raise ProviderError("configured Herdr session is not compatible", category="incompatible")
             sessions = self._json(["session", "list", "--json"]).get("sessions")
-            matches = [item for item in sessions or [] if isinstance(item, dict) and item.get("name") == self.session]
+            if not isinstance(sessions, list) or any(not isinstance(item, dict) for item in sessions):
+                raise ProviderError("Herdr session collection is malformed", category="malformed")
+            matches = [item for item in sessions if item.get("name") == self.session]
             if len(matches) != 1 or matches[0].get("running") is not True:
                 raise ProviderError("configured Herdr session is unavailable", category="session_unavailable")
             socket_path = str(server.get("socket") or "")

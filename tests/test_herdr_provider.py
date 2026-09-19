@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import subprocess
 
 import pytest
 
+from vmux.config import Config
+from vmux.poller import Hub
 from vmux.terminals.base import ProviderError
 from vmux.terminals.herdr_provider import HERDR_KEY_MAP, HerdrProvider
 
@@ -267,4 +270,35 @@ def test_discovery_and_revalidation_require_successful_health_probe(monkeypatch,
     assert retained.authoritative is False
     assert retained.endpoints == (endpoint,)
     assert retained.health.status != "ready"
+    assert not any(argv[1:3] in (["pane", "send-text"], ["pane", "send-keys"]) for argv, _ in calls)
+
+
+@pytest.mark.parametrize("sessions", [42, None, False, "agents", {}, [42], [None]])
+def test_malformed_session_collection_retains_read_only_state(monkeypatch, sessions):
+    calls = install_fake_subprocess(monkeypatch)
+    selected = provider()
+    hub = Hub(Config(terminal_provider="herdr", herdr_session=SESSION), provider=selected)
+    asyncio.run(hub.poll_once())
+    endpoint = next(iter(selected.discover().endpoints))
+    state = hub.states[endpoint.public_id]
+    assert state.actionable is True
+    previous_lines = list(state.lines)
+    original_json = selected._json
+
+    def response(args, **kwargs):
+        if args == ["session", "list", "--json"]:
+            return {"sessions": sessions}
+        return original_json(args, **kwargs)
+
+    monkeypatch.setattr(selected, "_json", response)
+    asyncio.run(hub.poll_once())
+    retained = hub.states[endpoint.public_id]
+    assert retained.stale is True
+    assert retained.actionable is False
+    assert retained.lines == previous_lines
+    assert selected.health.status != "ready"
+    assert selected.health.last_error == "malformed"
+    with pytest.raises(ProviderError) as caught:
+        selected.revalidate(endpoint.public_id, endpoint)
+    assert caught.value.category == "malformed"
     assert not any(argv[1:3] in (["pane", "send-text"], ["pane", "send-keys"]) for argv, _ in calls)

@@ -153,6 +153,36 @@ async function dispatcher() {
   assert.equal(h.records.at(-1).status, "error");
   assert.equal(h.errors.at(-1), conflict);
 
+  for (const field of ["endpoint_revision", "prompt_fingerprint", "options_fingerprint"]) {
+    for (const submit of [
+      (actions, pane) => actions.key(pane, "Enter"),
+      (actions, pane) => actions.text(pane, "answer", true),
+      (actions, pane) => actions.select(pane, "1"),
+    ]) {
+      const advanced = harness();
+      const observed = advanced.pane;
+      advanced.setRaw({ ...wire, action_guard: { ...wire.action_guard, [field]: "changed" } });
+      await assert.rejects(submit(advanced.actions, observed), error => error.status === 409);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(advanced.requests.length, 0);
+      assert.equal(advanced.refreshes, 1);
+      assert.equal(advanced.records.at(-1).status, "error");
+      assert.deepEqual(observed.actionGuard, wire.action_guard);
+      await submit(advanced.actions, advanced.pane);
+      assert.equal(advanced.requests.length, 1);
+      assert.deepEqual(advanced.requests[0].body.expected, advanced.pane.actionGuard);
+    }
+  }
+  const advancedText = harness();
+  const observedText = advancedText.pane;
+  advancedText.setRaw({ ...wire, action_guard: { ...wire.action_guard, prompt_fingerprint: "new" } });
+  await assert.rejects(advancedText.actions.text(observedText, "draft", false), error => error.status === 409);
+  assert.equal(advancedText.requests.length, 0);
+  await advancedText.actions.key(observedText, "C-c");
+  assert.deepEqual(advancedText.requests[0].body.expected, observedText.actionGuard);
+  await assert.rejects(advancedText.actions.key(advancedText.pane.id, "Enter"));
+  assert.equal(advancedText.requests.length, 1);
+
   const legacy = harness({ id: "%1", target: "work:1.1", status: "needs_input" });
   await legacy.actions.select(legacy.pane, "1");
   await legacy.actions.key(legacy.pane, "Enter");
