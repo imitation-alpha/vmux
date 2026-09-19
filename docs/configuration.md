@@ -124,27 +124,17 @@ authority choices and require a vmux restart. vmux validates the running
 session, protocol, schema, and socket identity. It does not start a missing or
 stopped session and never restarts Herdr.
 
-Herdr discovery uses an atomic snapshot and exact native ID relationships.
-Output is read from `recent-unwrapped` with at least 200 rows because small
-reads can be empty on Herdr 0.8.2. Native agent status enriches vmux status, but
-never authorizes input. Optional socket events only wake a normal snapshot
-poll; disabling or losing the event reader does not stop polling.
-
-Herdr input uses the additive guarded endpoint advertised by
-`terminal_provider_v1`. Legacy key/text/select routes return
-`409 guarded_input_required`. The PWA immediately revalidates the opaque live
-endpoint, route revision, prompt, and menu options and never replays a conflict
-or uncertain delivery. Herdr sends only verified `Enter`, `Escape`, `C-c`, and
-`C-u` keys. Control characters (including newlines) are rejected in literal
-text because Herdr would deliver them to the PTY and could submit unexpectedly.
-Text and Enter remain separate operations.
+See [Pane discovery](guides/pane-discovery.md#herdr-discovery) for snapshot,
+capture, and recovery behavior. Optional socket events only wake a normal poll;
+disabling or losing the event reader does not stop polling. The
+[guarded-input API contract](reference/client-api.md#guarded-terminal-input)
+defines response guards, supported input, and conflict/uncertain-delivery handling.
 
 Herdr v1 deliberately excludes terminal/workspace/tab creation or deletion,
 focus, move, resize, rename, agent start, broadcast, and server/session
 lifecycle. tmux creation and the structured Agent Workspace report unavailable.
-Opaque Herdr targets and action IDs are never derived from labels. A route move
-changes the target, so a star/override must be selected again rather than being
-silently adopted by a same-labeled pane.
+See [Inspect targets](guides/pane-discovery.md#inspect-targets) before configuring
+Herdr overrides.
 
 ## Server examples
 

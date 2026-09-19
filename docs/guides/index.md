@@ -2,7 +2,7 @@
 
 After the first local run, these guides cover vmux's optional behavior:
 
-- [Pane discovery](pane-discovery.md): decide which tmux panes appear and keep
+- [Pane discovery](pane-discovery.md): decide which provider panes appear and keep
   stable overrides.
 - [Agent detectors](agent-detectors.md): understand status classification and
   tune safe prompt/error patterns.

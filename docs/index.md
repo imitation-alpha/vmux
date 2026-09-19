@@ -1,11 +1,10 @@
-<p class="vmux-kicker">Local-first tmux control panel</p>
+<p class="vmux-kicker">Local-first agent control panel</p>
 
 # Know which coding agent needs you
 
 <p class="vmux-lead">
-vmux watches a swarm of CLI coding agents in tmux, brings the panes needing
-attention to the top, and turns supported terminal prompts into responses you
-can tap from the built-in PWA.
+Find setup guides and references for the
+<a href="https://github.com/imitation-alpha/vmux#vmux">vmux attention router</a>.
 </p>
 
 <span class="vmux-status">Available now · v0.1.0</span>
@@ -23,24 +22,23 @@ can tap from the built-in PWA.
 ### Route attention
 
 Statuses distinguish panes that need input, are working, encountered an error,
-are idle, or went offline. Tree, active, all, and starred views keep larger tmux
-sessions navigable.
+are idle, or went offline. See [Pane discovery](guides/pane-discovery.md) for
+provider hierarchy and visibility rules.
 </div>
 
 <div class="vmux-card" markdown>
 ### Make replies cheap
 
-Supported dialogs become buttons. You can also send literal text, allow-listed
-keys, saved snippets, or one broadcast message to several panes.
+Supported dialogs become buttons. See [Snippets and shortcuts](guides/snippets-shortcuts.md)
+for input controls and provider availability.
 </div>
 
 <div class="vmux-card" markdown>
 ### Resume the reasoning state
 
-When you opt in under **Settings → Experimental**, supported Codex and Claude
-Code sessions expose structured goals, progress, blockers, verified decisions,
-visible chat, and “what changed” without making you reconstruct the session
-from terminal scrollback.
+See [Agent Workspace configuration](configuration.md#experimental-agent-workspace)
+for provider support and opt-in setup, then
+[Agent context and Review](guides/agent-context.md) for the structured workflow.
 </div>
 
 <div class="vmux-card" markdown>
@@ -53,7 +51,8 @@ vendored; there is no hosted vmux account, telemetry service, or runtime CDN.
 
 ## Start on localhost
 
-vmux requires Python 3.10–3.14 and tmux. Install from PyPI:
+Check the [requirements](https://github.com/imitation-alpha/vmux#requirements).
+For the default provider, install from PyPI:
 
 ~~~bash
 pipx install vmux-agent
@@ -65,7 +64,7 @@ Open <http://127.0.0.1:8787>. A working tmux agent appears automatically; use
 
 !!! warning "Remote access changes the threat model"
 
-    Anyone who has the bearer token and network reach can send input to your tmux
+    Anyone who has the bearer token and network reach can send input to your terminal
     panes. Tailscale is the recommended remote route. Direct LAN access requires
     a token; public-internet access additionally requires an HTTPS reverse proxy.
     Never expose vmux's plain-HTTP listener publicly.

@@ -1,7 +1,7 @@
 # Contributing to vmux
 
 Thanks for helping improve vmux. The project is intentionally small: it routes
-attention between tmux and a phone, rather than becoming a hosted agent
+attention between a local terminal provider and a phone, rather than becoming a hosted agent
 platform. Contributions should preserve that focus, keep the security boundary
 understandable, and avoid unnecessary dependencies.
 
@@ -42,8 +42,8 @@ visible.
 
 vmux supports Python 3.10 through 3.14. You need
 [`uv`](https://docs.astral.sh/uv/) for the reproducible contributor environment.
-tmux is required to run vmux manually, but the automated test suite does not
-require a live tmux server.
+Manual runs need a configured [terminal provider](docs/configuration.md#terminal-provider);
+the automated test suite does not require a live terminal server.
 
 ```bash
 git clone https://github.com/imitation-alpha/vmux

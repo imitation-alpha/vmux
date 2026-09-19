@@ -60,9 +60,11 @@ and other tmux action errors also return `400`. Broadcast reports individual
 unresolved ids/errors in `errors` while returning an overall successful
 response. Refresh state before retrying any stale action.
 
-These legacy endpoints retain tmux semantics. If their id resolves to Herdr,
-they return `409` with `{"detail":{"reason":"guarded_input_required"}}` and do
-not send input. Herdr broadcast is unsupported.
+The legacy key/text/select endpoints retain tmux semantics. If their id resolves
+to Herdr, they return `409` with
+`{"detail":{"reason":"guarded_input_required"}}` and do not send input.
+Broadcast reports Herdr recipients in `errors` without sending to them. Star
+updates remain available by opaque target and do not send terminal input.
 
 ### Guarded terminal input
 
@@ -85,16 +87,25 @@ shape:
 ~~~
 
 `text` instead supplies `text` (at most 8,000 characters) and optional `enter`;
-`key` supplies one key advertised in that pane's `capabilities.keys`. A text
-operation requires the current prompt fingerprint, and select also requires the
-options fingerprint. Herdr literal text rejects all control characters,
-including newline and tab, because native PTY delivery could submit or mutate
-the line; Enter is always the separate key operation. The verified Herdr key
-set is `Enter`, `Escape`, `C-c`, and `C-u`.
+`key` supplies one key advertised in that pane's `capabilities.keys`. Every
+operation requires the observed endpoint revision. Text and select also require
+the prompt fingerprint; select, an Enter key, and text with `enter:true` require
+both prompt and options fingerprints. The options guard includes the currently
+selected choice. Clients must submit the guard the user observed, never replace
+it with a newer snapshot's guard while dispatching the same action. Fingerprints
+are opaque server values based on the detection buffer before native display
+enrichment; clients must not reconstruct them from the displayed question.
+
+Herdr literal text rejects ASCII control characters and DEL, including newline
+and tab, because native PTY delivery could submit or mutate the line. With
+`enter:true`, the server sends text and then a separate Enter key; this is not
+an atomic send. The provider's advertised key list is authoritative; its mapping
+is defined by `HERDR_KEY_MAP` in `vmux/terminals/herdr_provider.py`.
 
 Under a per-endpoint lock, the server resolves the opaque live registry entry,
-fetches a fresh exact native route, reads the detection buffer, fetches the
-route again, reparses the prompt/options, and only then performs one mutation.
+checks provider health, fetches a fresh exact native route, reads the detection
+buffer, fetches the route again, reparses the prompt/options, and only then sends
+the operation's literal text and/or keys.
 Labels and native agent state never participate in identity or authorization.
 Success is:
 
@@ -106,8 +117,11 @@ Conflicts are `409` with a bounded `detail.reason`, including
 `endpoint_stale`, `endpoint_moved`, `revision_stale`, `prompt_changed`,
 `options_changed`, `capability_unavailable`, `delivery_unknown`, or
 `partial_delivery_unknown`. A client must refresh and let the user inspect; it
-must never replay automatically. `partial_delivery_unknown` means literal text
-may be staged even though the following Enter was not confirmed. An
+must never replay automatically. `partial_delivery_unknown` means text or a
+menu key may already be staged even though the following Enter was not
+confirmed. For either uncertain-delivery reason, explicitly tell the user to
+inspect the terminal before retrying; a retained composer draft is not evidence
+that nothing was sent. An
 idempotency key is reserved before I/O; repeating the identical request returns
 the recorded outcome without another send, while reusing it for another body
 conflicts. The table is in-memory, so server restart requires a fresh state and
@@ -338,7 +352,7 @@ Returns the live-editable fields plus:
 `version` is the backend software version. `compatibility.protocol_version`
 identifies the REST/WebSocket contract, while `minimum_ios_version` is the
 oldest iOS marketing version supported by this server. `targets` contains
-currently represented tmux targets. Push and usage info report
+currently represented provider targets. Push and usage info report
 capability/availability without exposing credentials.
 
 `capabilities.agent_context_v1` gates the independent agent workspace, and
@@ -662,9 +676,8 @@ An invalid period or scope returns `400`.
 | `POST /api/push/unregister` | `{"token":"<apns-hex>"}` |
 
 Registration is accepted even when APNs credentials or optional dependencies
-are not ready. Herdr alerts use the open-only `vmux.open` notification category
-and carry only the opaque pane route; clients must refresh before offering any
-response action. See [Push notifications](https://imitation-alpha.github.io/vmux/guides/push-notifications/).
+are not ready. See [Push notifications](https://imitation-alpha.github.io/vmux/guides/push-notifications/)
+for provider-specific categories and refresh requirements.
 
 ## WebSocket
 
