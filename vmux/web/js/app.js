@@ -195,7 +195,7 @@ function BroadcastDialog({ panes, connection, onClose }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const scoped = useMemo(() => panes.filter((pane) => scopeMatches(pane, scope)), [panes, scope]);
-  const recipients = useMemo(() => scoped.filter((pane) => actions.canAct(pane)), [scoped, actions]);
+  const recipients = useMemo(() => scoped.filter((pane) => actions.canAct(pane) && pane.capabilities?.broadcast !== false), [scoped, actions]);
   const excluded = scoped.length - recipients.length;
 
   const send = async (retryPanes = null) => {
@@ -216,7 +216,7 @@ function BroadcastDialog({ panes, connection, onClose }) {
     <div class="broadcast-body">
       <div class="broadcast-scopes" role="group" aria-label="Broadcast recipients">
         ${[["queue", "Queue"], ["active", "Active"], ["all", "All"]].map(([key, label]) => {
-          const count = panes.filter((pane) => scopeMatches(pane, key) && actions.canAct(pane)).length;
+          const count = panes.filter((pane) => scopeMatches(pane, key) && actions.canAct(pane) && pane.capabilities?.broadcast !== false).length;
           return html`<button aria-pressed=${scope === key} class=${scope === key ? "selected" : ""} key=${key} onClick=${() => { setScope(key); setResult(null); }}>${label}<b>${count}</b></button>`;
         })}
       </div>
