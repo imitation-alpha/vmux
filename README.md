@@ -4,7 +4,7 @@
 
 vmux watches either tmux or one explicitly configured Herdr session, identifies
 which agent needs attention, turns supported terminal dialogs into tappable
-choices, and sends guarded responses back to the exact terminal endpoint. tmux
+choices, and sends responses back to the terminal endpoint. tmux
 remains the default. The backend and installable PWA run on your machine: no hosted
 account, telemetry, or cloud control plane.
 
@@ -51,6 +51,10 @@ places panes needing input first. To include ordinary shell panes while testing:
 vmux --include-shells
 ~~~
 
+For Herdr, follow the
+[terminal-provider setup](https://imitation-alpha.github.io/vmux/configuration/#terminal-provider)
+to select an already-running named session explicitly.
+
 Use your browser's **Add to Home Screen** action to install the PWA. The native
 iOS companion is released separately for iPhone and iPad and uses its own
 version and build numbers; its source and release documentation live under
@@ -96,7 +100,7 @@ before using a non-loopback bind.
 - Parses Claude Code selections, structured Codex questionnaires, and
   conservative numbered dialogs; configurable regexes cover common prompts
   from other CLIs.
-- Optionally enables one experimental structured workspace for supported Codex
+- Optionally enables one tmux-only experimental structured workspace for supported Codex
   and Claude Code sessions: current goal/task, progress, blockers, resumable
   deltas, visible chat, Review, and a historical timeline. It is off by default
   and enabled server-wide in **Settings → Experimental**.

@@ -11,19 +11,11 @@ still choose when to send it.
 
 ## Shortcut keys
 
-Shortcut buttons can be relabeled and reordered. A client should use the
-server-provided `_info.allowed_keys` list from `GET /api/config`. The current
-allowlist is:
-
-~~~text
-Enter Escape Tab BTab Space BSpace
-Up Down Left Right Home End PageUp PageDown
-C-c C-d C-z C-a C-e C-u C-k C-l C-r C-w C-o C-n C-p
-~~~
-
-The backend rejects anything outside this list. Literal text is sent with tmux
-`send-keys -l --`, so leading dashes and shell metacharacters remain text rather
-than becoming a shell invocation.
+Shortcut buttons can be relabeled and reordered. For tmux, clients use the
+server-provided `_info.allowed_keys` list from `GET /api/config`. For guarded
+Herdr panes, the PWA filters shortcuts using each pane's `capabilities.keys`.
+The [pane-action API](../reference/client-api.md#pane-actions) owns key and
+literal-text rules, including Herdr's control-character restriction.
 
 ## Browser-local persistence
 
@@ -41,6 +33,8 @@ untrusted shared browser.
 
 ## Broadcast
 
-Broadcast sends the same literal text to multiple selected pane ids and presses
-Enter by default. Review the destination list: vmux deliberately does not infer
-whether the same instruction is safe in every pane.
+Broadcast sends the same literal text to multiple selected panes that advertise
+broadcast support and presses Enter by default. Review the destination list:
+vmux deliberately does not infer whether the same instruction is safe in every
+pane. See [Terminal provider](../configuration.md#terminal-provider) for provider
+availability.

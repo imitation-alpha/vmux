@@ -18,8 +18,8 @@ vmux relay. A compatible client registers its device token at
 `POST /api/push/register`, and vmux stores it locally in `vmux-push.json`.
 
 Pane alerts use generic copy and omit names, targets, questions, and option
-labels. Common confirmation categories carry only the opaque pane id and the
-minimal input-key mapping needed by a registered action.
+labels. See the provider-specific notification categories below for routing
+and action behavior.
 
 Agent decision notifications always use generic alert copy and opaque routing
 identifiers. Decision titles, descriptions, prompts, options, transcript
@@ -95,13 +95,19 @@ at `POST /api/push/unregister`.
 
 `contextual` defaults to true for older-client compatibility and can be changed
 by re-registering the same token, but it no longer changes notification copy.
-Notifications use pane categories
+Tmux notifications use pane categories
 `vmux.confirm2`, `vmux.confirm3`, and `vmux.generic`, plus
 `vmux.agent-decision` for a foreground route to the verified Review item and
 `vmux.agent-review` for a scheduled digest route. A client may register matching
 notification actions; clients without them still receive ordinary alerts.
 Agent decision notifications never contain a terminal input key and never
 bypass live server revalidation.
+
+Herdr pane notifications use only `vmux.open`, with the opaque pane id and no
+menu keys or response actions. Opening one must fetch current state before
+offering a [guarded response](https://imitation-alpha.github.io/vmux/reference/client-api/#guarded-terminal-input).
+Tmux confirmation categories carry only the opaque pane id and minimal key
+mapping needed by a registered action; labels remain on the server.
 
 An Agent Context notification uses this routing envelope. Treat every value as
 an opaque cache key and fetch the current decision after opening it:

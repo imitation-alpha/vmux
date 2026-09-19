@@ -46,9 +46,11 @@ requests at least 200 rows and trims locally.
 `TerminalActionService` keeps old routes tmux-only. Guarded Herdr input resolves
 one current registry entry, compares client guards, reads a fresh detection
 buffer between two exact route snapshots, reparses the prompt/options, and then
-issues one literal/key operation under a per-endpoint lock. Idempotency is
+issues the requested text and/or keys under a per-endpoint lock. Idempotency is
 reserved before I/O and uncertain sends are never replayed. Herdr's protocol
-has no atomic compare-and-send, leaving a documented narrow local-client race.
+has no atomic compare-and-send; see the
+[guarded-input contract](https://imitation-alpha.github.io/vmux/reference/client-api/#guarded-terminal-input)
+for operation guards, delivery outcomes, and the remaining local-client race.
 
 `HerdrEventSubscriber` checks the configured session socket's identity,
 ownership, type, and write permissions, then subscribes to native status

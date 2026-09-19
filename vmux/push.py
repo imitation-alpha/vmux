@@ -416,19 +416,19 @@ class PushManager:
     def _payload(self, pane: PaneState) -> dict:
         """Build a privacy-minimized pane alert.
 
-        Pane names, tmux targets, questions, and menu labels may contain source
+        Pane names, provider targets, questions, and menu labels may contain source
         code or other confidential project information, so none of them cross
         APNs. The app fetches the current pane after the notification is opened.
-        Common confirmations retain only the opaque option keys needed by the
-        registered Yes/No actions; arbitrary menus use the generic category.
+        Tmux confirmations retain only the opaque option keys needed by the
+        registered Yes/No actions; Herdr notifications must open and refresh.
         """
         if pane.status == STATUS_ERROR:
             body = "A pane reported an error."
         else:
             body = "A pane needs your input."
         # Herdr actions require a fresh endpoint/prompt/revision guard. Native
-        # notification categories only carry legacy menu keys, so they must
-        # remain open-only until the native client implements guarded input.
+        # notification categories only carry legacy menu keys, so opening and
+        # refreshing is required before a client can offer a guarded response.
         category = classify_category(pane.menu) if pane.provider == "tmux" else "vmux.open"
         custom = {"id": pane.id}
         if pane.provider == "tmux" and category in ("vmux.confirm2", "vmux.confirm3"):

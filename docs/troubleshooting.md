@@ -281,7 +281,7 @@ reset live settings. Do not edit the overlay while vmux is writing it.
 
 ## Actions target the wrong pane or fail
 
-Refresh the state first. tmux pane ids are live identifiers and an old id may
+For tmux, refresh the state first. Pane ids are live identifiers and an old id may
 refer to a pane that disappeared. Actions against an unknown pane return `404`;
 disallowed named keys return `400`.
 
@@ -292,8 +292,12 @@ pane returns.
 All menu, key, and text actions remain non-optimistic and display pending,
 success, or error feedback. Stars update optimistically and roll back if saving
 fails. If a button stays disabled, check for an identical pending action, an
-offline pane, or an Offline/Unauthorized/Incompatible connection before
+offline or stale pane, or an Offline/Unauthorized/Incompatible connection before
 reloading.
+
+For Herdr, follow the [guarded-input conflict and delivery guidance](reference/client-api.md#guarded-terminal-input).
+Legacy clients cannot send through the tmux action routes; use a client that
+supports the advertised guarded-input capability.
 
 Broadcast excludes offline or otherwise non-actionable panes before sending.
 Completion reports the attempted and sent counts plus partial errors; retry only
@@ -390,8 +394,8 @@ or the wrong APNs environment.
 
 For launchd, systemd, or another supervisor:
 
-- run as the tmux owner
-- set an explicit `PATH` containing tmux, vmux, and optional tools
+- run as the selected terminal provider's owner
+- set an explicit `PATH` containing vmux, the configured provider, and optional tools
 - use absolute config, APNs-key, and executable paths
 - give the process a writable directory for overlays/caches
 - keep the config and key permission-restricted

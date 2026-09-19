@@ -5,6 +5,8 @@ always wins; otherwise `naming_mode` chooses the source.
 
 ## Naming modes
 
+The following table describes tmux names:
+
 | Mode | Result |
 | --- | --- |
 | `pane` | Pane index |
@@ -16,6 +18,12 @@ always wins; otherwise `naming_mode` chooses the source.
 | `target` | Exact `session:window-index.pane-index` target |
 | `command` | Current command basename |
 | `smart` | Local heuristic, then optional cached AI name |
+
+For Herdr, hierarchy modes use native labels: `pane` uses the pane label,
+`window` uses the tab label, and `window_pane` combines both. The `session_pane`
+and `session_window_pane` modes start with the workspace label. `title` uses the
+provider title, `target` uses the opaque persistence target, and `command` uses
+the native agent command basename. `smart` still uses the heuristic below.
 
 Choose a mode in Settings or YAML:
 

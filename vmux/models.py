@@ -1,6 +1,6 @@
 """The state contract shared by the poller, the API, and the web UI.
 
-One PaneState per tmux pane. This dict shape is the single source of truth that
+One PaneState per provider endpoint. This dict shape is the single source of truth that
 the backend produces and the frontend renders. Keep it stable.
 """
 
@@ -52,18 +52,18 @@ class MenuOption:
 
 @dataclass
 class PaneState:
-    id: str                                   # tmux pane id, e.g. "%12" (stable key)
-    target: str                               # session:window.pane (display + fallback)
+    id: str                                   # opaque live action handle; never derive from labels
+    target: str                               # persistence key, not a Herdr action fallback
     name: str                                 # friendly name (config override or derived)
     kind: str = KIND_SHELL                    # claude-code | codex | grok | opencode | antigravity | generic | shell
     status: str = STATUS_IDLE
-    title: str = ""                           # tmux pane title
+    title: str = ""                           # untrusted provider display text
     question: Optional[str] = None            # the prompt text, when needs_input
     menu: List[MenuOption] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)   # captured visible lines (detail view)
     updated: float = 0.0                      # epoch seconds of last *change*
     changed: bool = False                     # changed since previous poll (working hint)
-    window: str = ""                          # tmux window name (for the tree view)
+    window: str = ""                          # display label; hierarchy owns node identity
     starred: bool = False                     # user-starred (PaneOverride.star)
     interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
     provider: str = "tmux"                    # terminal provider; additive wire field

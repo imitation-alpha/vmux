@@ -60,7 +60,7 @@ state frames.
 | `kind` | enum | `claude-code`, `codex`, `grok`, `opencode`, `antigravity`, `generic`, or `shell`. |
 | `status` | enum | `needs_input`, `error`, `working`, `idle`, or `offline`. |
 | `title` | string | Untrusted provider pane title, for display/classification only. |
-| `question` | string or null | Bounded prompt text when a dialog was recognized. |
+| `question` | string or null | Detected prompt text, or a generic waiting-for-input message for native blocked state without a parsed question. Display text is not an action guard. |
 | `menu` | array | Parsed `MenuOption` objects; empty when no supported options exist. |
 | `preview` | string array | Last six non-empty captured lines. |
 | `lines` | string array | Captured pane output split into lines. |
@@ -75,7 +75,7 @@ state frames.
 | `native_agent` | object or null | Herdr's bounded native kind/name/status (`idle`, `working`, `blocked`, `done`, `unknown`), state sequence, and readiness. It is display/state evidence, never authorization. |
 | `action_guard` | object or null | Herdr route revision plus opaque prompt/options fingerprints required by `POST /api/input`. |
 | `actionable` | boolean | Server decision that current input is safe to attempt. Clients must honor `false`. |
-| `stale` | boolean | The last good snapshot was retained after discovery/capture failure and is read-only. |
+| `stale` | boolean | Read-only state retained after discovery/capture failure, or an unavailable configured target. |
 
 `updated` is not the snapshot time. It stays constant while output is unchanged.
 `changed` is a transient hint and may become false on the next snapshot.

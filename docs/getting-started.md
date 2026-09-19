@@ -46,21 +46,9 @@ vmux
 
 Open <http://127.0.0.1:8787>.
 
-To use Herdr instead, start and populate one named session using Herdr itself,
-then select it in local YAML. vmux does not create, focus, move, delete, start,
-stop, or restart any Herdr resource:
-
-~~~yaml
-terminal:
-  provider: herdr
-  herdr:
-    session: my-agents
-    events: auto
-~~~
-
-Herdr requires protocol 20. The initial integration supports monitoring,
-native hierarchy/status, and guarded responses only; creation, broadcast, and
-Agent Workspace remain tmux-only.
+To use an already-running named Herdr session instead, follow
+[Terminal provider](configuration.md#terminal-provider), then run
+`vmux --config config.yaml` with that configuration.
 
 ### Expected result
 
