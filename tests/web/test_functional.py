@@ -963,6 +963,57 @@ def test_queue_actions_are_deduplicated_and_terminal_output_stays_plain_text(
     page.locator(".terminal-dialog").wait_for(state="detached")
 
 
+@pytest.mark.parametrize("include_tmux", [False, True], ids=["herdr-only", "mixed"])
+def test_broadcast_dialog_excludes_panes_without_broadcast_capability(
+    browser_runtime: BrowserRuntime,
+    fixture_server: FixtureServer,
+    page_factory,
+    include_tmux: bool,
+) -> None:
+    panes = fixture_panes()
+    herdr = {
+        **panes[0],
+        "id": "h:review",
+        "target": "herdr:review",
+        "provider": "herdr",
+        "actionable": True,
+        "capabilities": {"input": "guarded_v1", "broadcast": False},
+        "action_guard": {
+            "endpoint_revision": "1",
+            "prompt_fingerprint": "prompt",
+            "options_fingerprint": "options",
+        },
+    }
+    fixture_server.set_panes([herdr, *panes] if include_tmux else [herdr])
+    page = page_factory(browser_runtime, viewport=(1024, 768))
+    open_app(page, fixture_server)
+    wait_for_connection(page)
+    page.get_by_role("button", name="Broadcast", exact=True).click()
+    dialog = page.get_by_role("dialog", name=re.compile("Broadcast"))
+    scopes = dialog.get_by_role("group", name="Broadcast recipients")
+    message = dialog.get_by_role("textbox", name="Message")
+    message.fill("Please save progress.")
+
+    for label, expected in [("Queue", 2), ("Active", 1), ("All", 4)]:
+        count = expected if include_tmux else 0
+        scope = scopes.get_by_role("button", name=re.compile(f"^{label}"))
+        assert scope.locator("b").inner_text() == str(count)
+        scope.click()
+        assert f"{count} actionable" in dialog.locator(".recipient-summary").inner_text()
+        assert dialog.get_by_role("button", name=f"Send to {count}").is_enabled() == bool(count)
+
+    assert fixture_server.action_requests() == []
+    if include_tmux:
+        dialog.get_by_role("button", name="Send to 4").click()
+        dialog.get_by_text("Broadcast complete", exact=True).wait_for()
+        assert fixture_server.action_requests() == [{
+            "endpoint": "/api/broadcast",
+            "body": {"ids": ["%1", "%2", "%3", "%4"], "text": "Please save progress.", "enter": True},
+        }]
+    else:
+        assert dialog.get_by_role("button", name=re.compile("^Retry")).count() == 0
+
+
 def test_stats_settings_and_partial_broadcast_use_real_fixture_endpoints(
     browser_runtime: BrowserRuntime,
     fixture_server: FixtureServer,
