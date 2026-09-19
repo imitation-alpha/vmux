@@ -450,6 +450,11 @@ function safeEndpoint(url) {
   }
 }
 
+const DELIVERY_ERROR_MESSAGES = Object.freeze({
+  partial_delivery_unknown: "Input may already have been delivered, but Enter was not confirmed. Inspect the terminal before retrying to avoid duplicate input.",
+  delivery_unknown: "Delivery could not be confirmed. Inspect the terminal before retrying to avoid duplicate input.",
+});
+
 export class ApiError extends Error {
   constructor(message, {
     category = "api",
@@ -457,16 +462,20 @@ export class ApiError extends Error {
     endpoint = "/api",
     timestamp = Date.now(),
     retryable = false,
+    reason = null,
     cause = null,
   } = {}) {
-    super(cleanMessage(message, "Request failed"));
+    const safeReason = typeof reason === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(reason) ? reason : null;
+    const deliveryMessage = Object.hasOwn(DELIVERY_ERROR_MESSAGES, safeReason) ? DELIVERY_ERROR_MESSAGES[safeReason] : null;
+    super(deliveryMessage || cleanMessage(message, "Request failed"));
     this.name = "ApiError";
     this.userMessage = this.message;
     this.category = category;
     this.status = Number.isFinite(status) ? status : 0;
     this.endpoint = safeEndpoint(endpoint);
     this.timestamp = timestamp;
-    this.retryable = Boolean(retryable);
+    this.reason = safeReason;
+    this.retryable = Boolean(retryable) && !deliveryMessage;
     if (cause) this.cause = cause;
   }
 }
@@ -529,6 +538,7 @@ export function createApiClient({
       const detail = isObject(data) ? data.detail : null;
       throw new ApiError(cleanMessage(detail, `Request failed (${status})`), {
         category: categoryForStatus(status),
+        reason: isObject(detail) ? detail.reason : null,
         status,
         endpoint,
         retryable: status >= 500,
@@ -1680,6 +1690,7 @@ function shortHash(value) {
 
 function actionErrorMessage(error) {
   if (!(error instanceof ApiError)) return "Action failed.";
+  if (Object.hasOwn(DELIVERY_ERROR_MESSAGES, error.reason)) return error.userMessage;
   if (error.category === "unauthorized") return "Authorization is required.";
   if (error.category === "timeout") return "Action timed out. Check the pane before retrying.";
   if (error.category === "network") return "Action could not be confirmed. Check the pane before retrying.";
