@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 
 import pytest
-
 from fastapi.testclient import TestClient
 
-from vmux.config import Config
+from vmux.config import Config, PaneOverride
 from vmux.poller import Hub
+from vmux.push import PushManager
 from vmux.server import create_app
 from vmux.terminals.base import (
     CaptureResult,
@@ -18,7 +19,9 @@ from vmux.terminals.base import (
     EndpointCapabilities,
     EndpointRef,
     EndpointSnapshot,
+    HierarchyNode,
     NativeAgentState,
+    ProviderError,
     ProviderHealth,
     TerminalProvider,
     VerifiedEndpoint,
@@ -221,3 +224,89 @@ def test_native_blocked_does_not_override_terminal_error(monkeypatch):
     state = hub.states[provider.endpoint.public_id]
     assert state.status == "error"
     assert state.question is None
+
+
+@pytest.mark.parametrize("evidence,status", [
+    ("esc to interrupt", "working"),
+    ("fatal: process failed", "error"),
+    (DIALOG.replace("continue?", "apply changes?"), "needs_input"),
+])
+def test_failed_capture_preserves_interpretation_without_false_push(monkeypatch, evidence, status):
+    provider = ApiHerdr()
+    provider.endpoint = replace(
+        provider.endpoint,
+        native_agent=replace(provider.endpoint.native_agent, status="working"),
+    )
+    monkeypatch.setattr(provider, "capture", lambda *a, **kw: CaptureResult(DIALOG, detection_text=evidence))
+    monkeypatch.setattr(PushManager, "configured", property(lambda self: True))
+    monkeypatch.setattr(PushManager, "available", property(lambda self: True))
+    hub = Hub(Config(terminal_provider="herdr", herdr_session="named"), provider=provider)
+    alerts = []
+    monkeypatch.setattr(hub.push, "fire", lambda batch: alerts.extend(batch))
+    asyncio.run(hub.poll_once())
+    before = hub.states[provider.endpoint.public_id].to_dict()
+    assert before["status"] == status
+    alerts.clear()
+
+    def fail_capture(*args, **kwargs):
+        raise ProviderError("capture failed", category="timeout")
+
+    monkeypatch.setattr(provider, "capture", fail_capture)
+    provider.endpoint = replace(
+        provider.endpoint,
+        native_agent=replace(provider.endpoint.native_agent, status="blocked"),
+    )
+    for _ in range(2):
+        asyncio.run(hub.poll_once())
+        retained = hub.snapshot()["panes"][0]
+        assert retained == {**before, "stale": True, "actionable": False, "changed": False}
+        assert alerts == []
+
+    monkeypatch.setattr(provider, "capture", lambda *a, **kw: CaptureResult(DIALOG, detection_text=evidence))
+    provider.endpoint = replace(
+        provider.endpoint,
+        native_agent=replace(provider.endpoint.native_agent, status="working"),
+    )
+    asyncio.run(hub.poll_once())
+    recovered = hub.states[provider.endpoint.public_id]
+    assert recovered.stale is False
+    assert recovered.actionable is True
+    assert recovered.status == status
+    assert recovered.action_guard == before["action_guard"]
+    assert alerts == []
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("command", "codex"),
+    ("target", "herdr:stable"),
+    ("title", "Review"),
+    ("pane", "Worker"),
+    ("window", "Tab"),
+    ("window_pane", "Tab:Worker"),
+    ("session_pane", "Project:Worker"),
+    ("session_window_pane", "Project:Tab:Worker"),
+    ("smart", "Suggested name"),
+])
+@pytest.mark.parametrize("override", [None, "Pinned"])
+def test_herdr_naming_modes_preserve_selected_source(monkeypatch, mode, expected, override):
+    provider = ApiHerdr()
+    provider.endpoint = replace(
+        provider.endpoint,
+        command="/usr/bin/codex",
+        title="✳ Review",
+        hierarchy=(
+            HierarchyNode("session", "hs:1", "agents"),
+            HierarchyNode("workspace", "hw:1", "Project"),
+            HierarchyNode("tab", "ht:1", "Tab"),
+            HierarchyNode("pane", "hp:1", "Worker"),
+        ),
+    )
+    cfg = Config(terminal_provider="herdr", herdr_session="named", naming_mode=mode)
+    if override:
+        cfg.overrides[provider.endpoint.persistent_target] = PaneOverride(
+            target=provider.endpoint.persistent_target, name=override,
+        )
+    hub = Hub(cfg, provider=provider)
+    monkeypatch.setattr(hub.namer, "name", lambda *a: "Suggested name")
+    asyncio.run(hub.poll_once())
+    assert hub.snapshot()["panes"][0]["name"] == (override or expected)
