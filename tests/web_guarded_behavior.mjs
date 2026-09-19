@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { ApiError, createActionDispatcher, normalizePane } from "../vmux/web/js/state.js";
+import { ApiError, createActionDispatcher, createApiClient, normalizePane } from "../vmux/web/js/state.js";
 
 const wire = {
   id: "h:opaque", target: "herdr:opaque", name: "Review", kind: "codex",
@@ -202,6 +202,62 @@ async function dispatcher() {
   assert.deepEqual(legacy.requests.at(-1).body.ids, ["%1"]);
 }
 
+async function delivery() {
+  for (const reason of ["partial_delivery_unknown", "delivery_unknown"]) {
+    const h = harness();
+    const fetched = [];
+    const client = createApiClient({
+      origin: "http://localhost", token: "", xhrFactory: null,
+      fetchImpl: async (url, options) => {
+        fetched.push({ url, body: JSON.parse(options.body) });
+        return { status: 409, text: async () => JSON.stringify({ detail: { reason } }) };
+      },
+    });
+    h.respond(client.request);
+    let decoded;
+    await assert.rejects(h.actions.text(h.pane, "continue", true), error => {
+      decoded = error;
+      return error instanceof ApiError && error.reason === reason && error.status === 409;
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(fetched.length, 1);
+    assert.equal(fetched[0].url, "http://localhost/api/input");
+    assert.equal(fetched[0].body.text, "continue");
+    assert.equal(fetched[0].body.enter, true);
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.refreshes, 1);
+    assert.equal(decoded.retryable, false);
+    assert.equal(h.errors.at(-1), decoded);
+    const feedback = h.actions.stateFor(h.pane);
+    assert.equal(feedback.status, "error");
+    assert.equal(feedback.message, decoded.userMessage);
+    assert.ok(feedback.message.includes("Inspect the terminal before retrying"));
+    assert.ok(feedback.message.includes("avoid duplicate input"));
+    if (reason === "partial_delivery_unknown") {
+      assert.ok(feedback.message.includes("Enter was not confirmed"));
+    }
+  }
+  for (const [detail, expectedReason, message] of [
+    ["Legacy rejection", null, "Legacy rejection"],
+    [{ reason: "prompt_changed" }, "prompt_changed", "Request failed (409)"],
+    [{ reason: { nested: "delivery_unknown" } }, null, "Request failed (409)"],
+    [{ reason: "bad\nreason" }, null, "Request failed (409)"],
+    [{ reason: "constructor" }, "constructor", "Request failed (409)"],
+  ]) {
+    const client = createApiClient({
+      token: "", xhrFactory: null,
+      fetchImpl: async () => ({ status: 409, text: async () => JSON.stringify({ detail }) }),
+    });
+    await assert.rejects(client.request("/input"), error => (
+      error.reason === expectedReason && error.userMessage === message
+    ));
+  }
+  const uncertain = new ApiError("Server error", { reason: "delivery_unknown", retryable: true, status: 503 });
+  assert.equal(uncertain.retryable, false);
+  assert.ok(uncertain.userMessage.includes("Inspect the terminal before retrying"));
+}
+
 if (process.argv[2] === "herdr") await herdr();
 else if (process.argv[2] === "dispatcher") await dispatcher();
+else if (process.argv[2] === "delivery") await delivery();
 else assert.fail("unknown behavioral case");

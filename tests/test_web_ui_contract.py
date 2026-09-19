@@ -372,6 +372,10 @@ def test_menu_descriptions_normalize_compare_and_render_in_the_action_card():
     assert ".pane-action-copy small" in styles
 
 
+def test_uncertain_delivery_preserves_reason_and_warns_before_retry():
+    run_web_behavior("delivery")
+
+
 def test_actions_share_one_dispatcher_and_never_swallow_failures():
     run_web_behavior("dispatcher")
 
