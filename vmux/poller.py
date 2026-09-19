@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import re
 import time
+from dataclasses import replace
 from typing import Dict, List, Optional
 
 from . import tmux
@@ -230,6 +231,11 @@ class Hub:
             override = self.cfg.overrides.get(target)
             capture_failed = isinstance(capture, BaseException)
             previous_state = self.states.get(pid)
+            if capture_failed and previous_state is not None:
+                if self._included(pane, previous_state.kind):
+                    new_states[pid] = replace(previous_state, stale=True, actionable=False, changed=False)
+                    new_order.append(pid)
+                continue
             if capture_failed:
                 text = "\n".join(previous_state.lines) if previous_state is not None else ""
             else:
@@ -318,7 +324,13 @@ class Hub:
             smart_name = None
             if self.cfg.naming_mode == "smart" and not override_name:
                 smart_name = self.namer.name(pane, text, target)
-            if self.provider.name == "herdr" and not override_name and self.cfg.naming_mode != "smart":
+            if (
+                self.provider.name == "herdr"
+                and not override_name
+                and self.cfg.naming_mode in (
+                    "pane", "window", "window_pane", "session_pane", "session_window_pane",
+                )
+            ):
                 name = _hierarchy_name(endpoint, self.cfg.naming_mode)
             else:
                 name = choose_name(
