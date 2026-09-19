@@ -354,7 +354,7 @@ class AgentService:
                 else:
                     association = "probable"
                 capabilities = default_capabilities(association)
-                if bound_obs and bound_obs.status == "idle":
+                if bound_obs and bound_obs.capture_valid and bound_obs.status == "idle":
                     capabilities["chat_send"] = "idle_only"
                 capabilities.update({
                     "runtime": candidate.runtime,
@@ -375,7 +375,10 @@ class AgentService:
                         pane_incarnation=bound_obs.incarnation if bound_obs else None,
                         source="manual" if manual_obs else "automatic", capabilities=capabilities,
                     )
-                self._ingest_candidate(observer, candidate, agent, bound_obs, capabilities)
+                self._ingest_candidate(
+                    observer, candidate, agent,
+                    bound_obs if bound_obs and bound_obs.capture_valid else None, capabilities,
+                )
 
         agents, cursor = self.store.list_agents(limit=100)
         while True:
@@ -527,7 +530,7 @@ class AgentService:
             self._loop.call_soon_threadsafe(self.push.fire_agent_decision, decision)
 
     def _match_decision(self, decision: Dict[str, Any], obs: PaneObservation) -> Optional[Dict[str, str]]:
-        if not obs.question or not obs.menu or obs.status != "needs_input":
+        if not obs.capture_valid or not obs.question or not obs.menu or obs.status != "needs_input":
             return None
         prompt = str(decision.get("description") or decision.get("title") or "")
         if not _prompt_matches(prompt, obs.question):
@@ -557,7 +560,7 @@ class AgentService:
         if agent.get("association") != "confirmed" or not agent.get("pane_id"):
             raise AgentUnavailable("agent session is read-only until its pane binding is confirmed")
         obs = self._latest_observation(agent["pane_id"])
-        if not obs or time.time() - obs.observed_at > max(10.0, self.cfg.poll_interval * 4):
+        if not obs or not obs.capture_valid or time.time() - obs.observed_at > max(10.0, self.cfg.poll_interval * 4):
             raise AgentConflict("pane observation is stale", self.store.get_agent(agent["id"]))
         if require_idle and obs.status != "idle":
             raise AgentConflict("agent is not at an idle prompt", self.store.get_agent(agent["id"]))
@@ -1008,7 +1011,7 @@ class AgentService:
                 raise AgentConflict("pane runtime or working directory does not match this session", agent)
             caps = default_capabilities("confirmed")
             caps.update({"runtime": agent["runtime"], "parser_version": agent["_parser_version"],
-                         "chat_send": "idle_only" if obs.status == "idle" else "unavailable"})
+                         "chat_send": "idle_only" if obs.capture_valid and obs.status == "idle" else "unavailable"})
             self._invalidate_other_bindings(session_id, obs.pane_id, obs.incarnation)
             result = self.store.update_binding(
                 session_id, association="confirmed", pane_id=obs.pane_id, target=obs.target,

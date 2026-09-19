@@ -54,6 +54,7 @@ class PaneObservation:
     menu: Tuple[Dict[str, Any], ...]
     prompt_fingerprint: str
     observed_at: float = field(default_factory=time.time)
+    capture_valid: bool = True
 
     @property
     def incarnation(self) -> str:

@@ -138,6 +138,24 @@ def _hierarchy_name(endpoint: EndpointSnapshot, mode: str) -> str:
     return endpoint.title or (pane.label if pane else endpoint.persistent_target)
 
 
+def _agent_observation(pane: dict, kind: str, *, status: str = "unknown",
+                       question=None, menu=(), text: str = "", capture_valid: bool = True) -> Optional[PaneObservation]:
+    runtime = runtime_from_command(pane["cmd"]) or {KIND_CLAUDE: "claude", KIND_CODEX: "codex"}.get(kind)
+    if runtime not in ("codex", "claude"):
+        return None
+    try:
+        pane_created = float(pane.get("created") or 0)
+    except (TypeError, ValueError):
+        pane_created = 0.0
+    return PaneObservation(
+        pane_id=pane["id"], target=pane["target"], command=pane["cmd"], title=pane["title"],
+        cwd=pane.get("path", ""), pid=str(pane.get("pid", "")), pane_created=pane_created,
+        runtime=runtime, status=status, question=question, menu=tuple(menu),
+        prompt_fingerprint=fingerprint_terminal(text) if capture_valid else "",
+        capture_valid=capture_valid,
+    )
+
+
 class Hub:
     def __init__(self, cfg: Config, provider: Optional[TerminalProvider] = None):
         self.cfg = cfg
@@ -231,6 +249,13 @@ class Hub:
             override = self.cfg.overrides.get(target)
             capture_failed = isinstance(capture, BaseException)
             previous_state = self.states.get(pid)
+            if capture_failed and self.agents.runtime_active:
+                previous_kind = previous_state.kind if previous_state else self._meta.get(pid, {}).get("kind")
+                observation = _agent_observation(
+                    pane, previous_kind or classify_kind(pane["cmd"], pane["title"], ""), capture_valid=False,
+                )
+                if observation is not None:
+                    agent_observations.append(observation)
             if capture_failed and previous_state is not None:
                 if self._included(pane, previous_state.kind):
                     new_states[pid] = replace(previous_state, stale=True, actionable=False, changed=False)
@@ -252,7 +277,8 @@ class Hub:
             prev = self._meta.get(pid)
             changed = not capture_failed and (prev is None or prev["hash"] != digest)
             updated = now if changed else (prev["updated"] if prev else now)
-            self._meta[pid] = {"hash": digest, "updated": updated}
+            if not capture_failed:
+                self._meta[pid] = {"hash": digest, "updated": updated, "kind": kind}
 
             detection_text = text if capture_failed or capture.detection_text is None else capture.detection_text
             res = detect(detection_text, kind, changed, self.cfg, pane["title"])
@@ -290,32 +316,13 @@ class Hub:
             ):
                 res.status = STATUS_WORKING
 
-            if self.agents.runtime_active:
-                runtime = runtime_from_command(pane["cmd"])
-                if runtime is None:
-                    runtime = {KIND_CLAUDE: "claude", KIND_CODEX: "codex"}.get(kind)
-            else:
-                runtime = None
-            if self.agents.runtime_active and runtime in ("codex", "claude"):
-                try:
-                    pane_created = float(pane.get("created") or 0)
-                except (TypeError, ValueError):
-                    pane_created = 0.0
-                agent_observations.append(PaneObservation(
-                    pane_id=pid,
-                    target=target,
-                    command=pane["cmd"],
-                    title=pane["title"],
-                    cwd=pane.get("path", ""),
-                    pid=str(pane.get("pid", "")),
-                    pane_created=pane_created,
-                    runtime=runtime,
-                    status=res.status,
-                    question=res.question,
-                    menu=tuple(item.to_dict() for item in res.menu_list()),
-                    prompt_fingerprint=fingerprint_terminal(text),
-                    observed_at=now,
-                ))
+            if self.agents.runtime_active and not capture_failed:
+                observation = _agent_observation(
+                    pane, kind, status=res.status, question=res.question,
+                    menu=(item.to_dict() for item in res.menu_list()), text=text,
+                )
+                if observation is not None:
+                    agent_observations.append(observation)
 
             if not self._included(pane, kind):
                 continue
@@ -398,7 +405,8 @@ class Hub:
         )
         self.states = new_states
         self.order = new_order
-        self._meta = {key: value for key, value in self._meta.items() if key in new_states}
+        live_ids = {endpoint.public_id for endpoint in endpoints}
+        self._meta = {key: value for key, value in self._meta.items() if key in live_ids}
         self._update_snapshot_revision()
         schedule_now = time.time()
         if self.agents.runtime_active:

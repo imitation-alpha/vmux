@@ -578,3 +578,96 @@ def test_private_files_do_not_chmod_existing_shared_parent(tmp_path):
     registry.add("cd" * 32)
     assert (os.stat(shared).st_mode & 0o777) == 0o755
     assert (os.stat(shared / "push.json").st_mode & 0o777) == 0o600
+
+
+def polling_agent(tmp_path, monkeypatch, *, hidden=False, manual=False):
+    cfg = config(tmp_path)
+    cfg.auto_discover = not hidden
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    now = time.time()
+    write_log(
+        tmp_path / "codex" / "sessions" / "live.jsonl", "live", cwd,
+        now - 1000 if manual else now,
+    )
+    pane = {
+        "id": "%3", "target": "work:1.3", "cmd": "codex", "title": "Codex",
+        "window": "work", "path": str(cwd), "pid": "333",
+        "window_id": "@1", "created": str(now),
+    }
+    live = [pane]
+    capture = {"text": "Build complete."}
+    monkeypatch.setattr("vmux.poller.tmux.list_panes", lambda: live)
+    monkeypatch.setattr("vmux.poller.tmux.capture", lambda *_: capture["text"])
+    monkeypatch.setattr("vmux.poller.ACTIVITY_GRACE_SECONDS", 0)
+    hub = Hub(cfg)
+    hub.agents._runtime_active = True
+    monkeypatch.setattr(hub.agents, "review_schedule_is_due", lambda **kw: True)
+    return hub, live, capture
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+@pytest.mark.parametrize("manual", [False, True])
+def test_poll_capture_failure_preserves_agent_binding_and_blocks_input(tmp_path, monkeypatch, hidden, manual):
+    hub, live, capture = polling_agent(tmp_path, monkeypatch, hidden=hidden, manual=manual)
+    asyncio.run(hub.poll_once())
+    asyncio.run(hub.poll_once())
+    agent = hub.agents.list_agents()[0][0]
+    if manual:
+        agent = hub.agents.bind(agent["id"], "%3", agent["binding_revision"])
+    assert agent["association"] == "confirmed"
+    assert agent["capabilities"]["chat_send"] == "idle_only"
+    source = hub.agents.store.get_agent(agent["id"], internal=True)["_binding_source"]
+    sent = []
+    monkeypatch.setattr(hub.agents.controller, "send_message", lambda *args: sent.append(args))
+
+    capture["text"] = None
+    for attempt in range(2):
+        asyncio.run(hub.poll_once())
+        stale = hub.agents.get_agent(agent["id"])
+        assert stale["association"] == "confirmed"
+        assert stale["pane_id"] == "%3"
+        assert stale["context"]["lifecycle"] != "offline"
+        assert stale["capabilities"]["chat_send"] == "unavailable"
+        assert stale["capabilities"]["decision_reply"] == "open_terminal"
+        assert hub.agents.store.get_agent(agent["id"], internal=True)["_binding_source"] == source
+        if not hidden:
+            assert hub.states["%3"].stale is True
+            assert hub.states["%3"].actionable is False
+        with pytest.raises(AgentConflict, match="observation is stale"):
+            hub.agents.send_message(agent["id"], "continue", f"stale-{attempt}", stale["binding_revision"])
+        assert sent == []
+
+    capture["text"] = "Build complete."
+    asyncio.run(hub.poll_once())
+    recovered = hub.agents.get_agent(agent["id"])
+    assert recovered["capabilities"]["chat_send"] == "idle_only"
+    assert hub.agents.store.get_agent(agent["id"], internal=True)["_binding_source"] == source
+    hub.agents.send_message(agent["id"], "continue", "recovered", recovered["binding_revision"])
+    assert sent == [("%3", "continue")]
+    live.clear()
+    asyncio.run(hub.poll_once())
+    missing = hub.agents.get_agent(agent["id"])
+    assert missing["association"] == "unavailable"
+    assert missing["pane_id"] is None
+    assert missing["context"]["lifecycle"] == "offline"
+
+
+def test_hidden_agent_quiet_output_restores_chat_and_removed_endpoint_resets_history(tmp_path, monkeypatch):
+    hub, live, capture = polling_agent(tmp_path, monkeypatch, hidden=True)
+    asyncio.run(hub.poll_once())
+    agent = hub.agents.list_agents()[0][0]
+    assert hub.states == {}
+    assert agent["capabilities"]["chat_send"] == "unavailable"
+    for _ in range(3):
+        asyncio.run(hub.poll_once())
+        assert hub.states == {}
+        assert hub.agents.get_agent(agent["id"])["capabilities"]["chat_send"] == "idle_only"
+    pane = live.pop()
+    asyncio.run(hub.poll_once())
+    assert hub.agents.get_agent(agent["id"])["pane_id"] is None
+    live.append(pane)
+    asyncio.run(hub.poll_once())
+    assert hub.agents.get_agent(agent["id"])["capabilities"]["chat_send"] == "unavailable"
+    asyncio.run(hub.poll_once())
+    assert hub.agents.get_agent(agent["id"])["capabilities"]["chat_send"] == "idle_only"
