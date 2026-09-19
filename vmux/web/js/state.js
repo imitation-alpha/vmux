@@ -1716,7 +1716,7 @@ export function createActionDispatcher(store) {
   }
 
   function guardedBody(pane, operation, values = {}) {
-    if (!pane.actionGuard || !pane.actionGuard.endpoint_revision) {
+    if (!pane?.actionGuard || !pane.actionGuard.endpoint_revision) {
       throw new ApiError("The pane action guard is unavailable", {
         category: "validation", endpoint: "/api/input",
       });
@@ -1788,6 +1788,27 @@ export function createActionDispatcher(store) {
     return result;
   }
 
+  function requestAction(endpoint, body, timeoutMs) {
+    if (endpoint === "/input") {
+      const current = currentPane(body.id);
+      const guard = current?.actionGuard;
+      const fields = ["endpoint_revision"];
+      if (body.operation === "select" || body.operation === "text" || body.key === "Enter") {
+        fields.push("prompt_fingerprint");
+      }
+      if (body.operation === "select" || body.key === "Enter" || (body.operation === "text" && body.enter)) {
+        fields.push("options_fingerprint");
+      }
+      if (!current || !canAct(current) || current.capabilities?.input !== "guarded_v1"
+          || fields.some(field => !body.expected[field] || body.expected[field] !== guard?.[field])) {
+        return Promise.reject(new ApiError("The pane changed. Review its current state before responding.", {
+          category: "http", status: 409, endpoint: "/api/input",
+        }));
+      }
+    }
+    return store.request(endpoint, { method: "POST", body, timeoutMs });
+  }
+
   function perform({
     paneId,
     type,
@@ -1801,7 +1822,8 @@ export function createActionDispatcher(store) {
     validate = (value) => validateOk(value, endpoint),
     order = ++actionOrder,
   }) {
-    const flightKey = actionRecordKey(paneId, actionKey);
+    const flightKey = actionRecordKey(paneId, endpoint === "/input"
+      ? `${actionKey}:${JSON.stringify(body.expected)}` : actionKey);
     if (inflight.has(flightKey)) return inflight.get(flightKey);
     const startedAt = Date.now();
     store._recordAction({
@@ -1817,7 +1839,7 @@ export function createActionDispatcher(store) {
 
     const promise = (async () => {
       try {
-        const raw = await store.request(endpoint, { method: "POST", body, timeoutMs });
+        const raw = await requestAction(endpoint, body, timeoutMs);
         const result = validate(raw);
         store._recordAction({
           paneId,
@@ -1871,7 +1893,7 @@ export function createActionDispatcher(store) {
     if (!key) return Promise.reject(new ApiError("A menu key is required", {
       category: "validation", endpoint: `/api${endpoint}`,
     }));
-    const option = guarded ? resolved.menu.find((item) => (
+    const option = guarded ? (pane?.menu || []).find((item) => (
       suppliedOption?.id ? item.id === suppliedOption.id : item.key === key
     )) : null;
     if (guarded && !option?.id) return Promise.reject(new ApiError("The menu option is stale", {
@@ -1880,7 +1902,7 @@ export function createActionDispatcher(store) {
     let body;
     try {
       body = guarded
-        ? guardedBody(resolved, "select", { option_id: option.id })
+        ? guardedBody(pane, "select", { option_id: option.id })
         : { id: resolved.id, key };
     } catch (error) { return Promise.reject(error); }
     return perform({
@@ -1917,7 +1939,7 @@ export function createActionDispatcher(store) {
     let body;
     try {
       body = guarded
-        ? guardedBody(resolved, "key", { key: value })
+        ? guardedBody(pane, "key", { key: value })
         : { id: resolved.id, key: value };
     } catch (error) { return Promise.reject(error); }
     return perform({
@@ -1943,7 +1965,7 @@ export function createActionDispatcher(store) {
     let body;
     try {
       body = guarded
-        ? guardedBody(resolved, "text", { text: textValueRaw, enter: Boolean(enter) })
+        ? guardedBody(pane, "text", { text: textValueRaw, enter: Boolean(enter) })
         : { id: resolved.id, text: textValueRaw, enter: Boolean(enter) };
     } catch (error) { return Promise.reject(error); }
     return perform({
