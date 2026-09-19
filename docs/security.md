@@ -1,7 +1,8 @@
 # Security and privacy
 
 The short threat model is: **a client that has the token and network reach can
-send input to your tmux panes, which can lead to command execution as you.**
+send input to your selected terminal provider, which can lead to command
+execution as you.**
 
 The canonical vulnerability-reporting policy is
 [`SECURITY.md`](https://github.com/imitation-alpha/vmux/blob/main/SECURITY.md).
@@ -47,7 +48,7 @@ Loopback without a token is not a complete boundary on a shared OS host.
 
 ## Data handled
 
-The backend captures pane scrollback and serves it to authenticated clients.
+The backend captures tmux or Herdr pane scrollback and serves it to authenticated clients.
 That data can include source, prompts, terminal output, URLs, and secrets.
 
 When tmux creation is enabled, authenticated clients can also browse directory
@@ -109,9 +110,14 @@ single-user host.
 
 - non-loopback binds fail with an empty token
 - bearer comparisons are constant-time
-- named tmux keys are allow-listed
-- pane ids are validated
-- text is sent with tmux literal mode through argument-list subprocess calls
+- named keys are provider-specific allowlists; Herdr initially permits only lab-verified `Enter`, `Escape`, `C-c`, and `C-u`
+- tmux ids are validated; Herdr accepts only opaque ids in the current private exact-route registry
+- text is sent with tmux literal mode or Herdr's literal API through argument-list subprocess calls
+- Herdr text rejects control bytes (including newline), keeping Enter a separate operation
+- every Herdr command names one configured session explicitly; vmux performs no Herdr creation, deletion, layout/focus, agent-start, or lifecycle call
+- guarded Herdr input compares route revision and fresh prompt/options fingerprints under a per-endpoint lock; labels and native status never authorize
+- legacy actions cannot drive Herdr, event frames only wake polling, and malformed/failed discovery retains a stale read-only snapshot
+- unknown or partial Herdr delivery is never retried automatically
 - creation paths are canonicalized inside startup-validated roots; runtime
   commands are fixed server-side argument arrays and are never client supplied
 - custom regex matching has size limits and a hard timeout

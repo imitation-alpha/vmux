@@ -12,7 +12,6 @@ from vmux.config import Config
 from vmux.models import PaneState
 from vmux.poller import Hub
 
-
 PANE = {
     "id": "%1", "target": "work:1.1", "cmd": "node", "title": "worker",
     "window": "work", "path": "/tmp", "pid": "", "window_id": "@1",

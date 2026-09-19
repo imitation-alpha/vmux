@@ -7,12 +7,13 @@ import sys
 
 from . import __version__, config, tmux
 from .server import create_app
+from .terminals import ProviderError, provider_for_config
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="vmux",
-        description="Attention router for a swarm of CLI coding agents in tmux.",
+        description="Attention router for a swarm of CLI coding agents in terminal providers.",
     )
     parser.add_argument("-c", "--config", help="path to config.yaml (optional)")
     parser.add_argument("--host", help="override bind host (default 127.0.0.1)")
@@ -20,13 +21,11 @@ def main(argv=None) -> int:
     parser.add_argument("--token", help="override bearer token")
     parser.add_argument("--include-shells", action="store_true",
                         help="also show plain idle shells, not just agents")
+    parser.add_argument("--terminal-provider", choices=("tmux", "herdr"),
+                        help="override the configured terminal provider")
+    parser.add_argument("--herdr-session", help="explicit named Herdr session")
     parser.add_argument("--version", action="version", version="vmux " + __version__)
     args = parser.parse_args(argv)
-
-    if not tmux.available():
-        print("vmux: tmux is not on PATH. Install tmux and start a session first.",
-              file=sys.stderr)
-        return 2
 
     cfg = config.load(args.config)
     if args.host:
@@ -37,9 +36,26 @@ def main(argv=None) -> int:
         cfg.token = args.token
     if args.include_shells:
         cfg.include_shells = True
+    if args.terminal_provider:
+        cfg.terminal_provider = args.terminal_provider
+    if args.herdr_session is not None:
+        cfg.herdr_session = args.herdr_session.strip()
     cfg.validate()
 
-    if cfg.disable_tmux_auto_rename:
+    provider = None
+    if cfg.terminal_provider == "tmux" and not tmux.available():
+        print("vmux: tmux is not on PATH. Install tmux and start a session first.",
+              file=sys.stderr)
+        return 2
+    if cfg.terminal_provider == "herdr":
+        try:
+            provider = provider_for_config(cfg)
+            provider.probe()
+        except ProviderError as exc:
+            print("vmux: Herdr provider is unavailable (%s)." % exc.category, file=sys.stderr)
+            return 2
+
+    if cfg.terminal_provider == "tmux" and cfg.disable_tmux_auto_rename:
         try:
             tmux.disable_automatic_rename()
         except tmux.TmuxError as exc:
@@ -47,14 +63,14 @@ def main(argv=None) -> int:
                 print("vmux: could not disable tmux automatic rename: %s" % exc,
                       file=sys.stderr)
 
-    if not tmux.list_panes():
+    if cfg.terminal_provider == "tmux" and not tmux.list_panes():
         print("vmux: no tmux panes found. Start some agents in tmux, then reload.",
               file=sys.stderr)
         # not fatal — server still starts so the UI can show panes as they appear
 
     import uvicorn
 
-    app = create_app(cfg)
+    app = create_app(cfg) if provider is None else create_app(cfg, provider=provider)
     loopback_hosts = ("127.0.0.1", "localhost", "::1")
     scheme_host = cfg.host if cfg.host not in ("0.0.0.0", "::") else "<this-machine>"
     print("vmux %s -> http://%s:%d  (%s)" % (

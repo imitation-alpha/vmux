@@ -1,13 +1,12 @@
 # Getting started
 
-This path starts vmux on the same computer as your tmux server, verifies the PWA
+This path starts vmux on the same computer as your terminal provider, verifies the PWA
 locally, and only then expands network access.
 
 ## Requirements
 
 - Python 3.10–3.14
-- tmux available on `PATH`
-- at least one tmux session
+- tmux available on `PATH` with at least one session (default), or Herdr 0.8.2 with one already-running named session
 - pipx for an isolated install
 
 macOS is the daily-use platform. Linux is expected to work but still needs
@@ -46,6 +45,22 @@ vmux
 ~~~
 
 Open <http://127.0.0.1:8787>.
+
+To use Herdr instead, start and populate one named session using Herdr itself,
+then select it in local YAML. vmux does not create, focus, move, delete, start,
+stop, or restart any Herdr resource:
+
+~~~yaml
+terminal:
+  provider: herdr
+  herdr:
+    session: my-agents
+    events: auto
+~~~
+
+Herdr requires protocol 20. The initial integration supports monitoring,
+native hierarchy/status, and guarded responses only; creation, broadcast, and
+Agent Workspace remain tmux-only.
 
 ### Expected result
 

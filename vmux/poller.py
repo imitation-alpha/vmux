@@ -23,13 +23,22 @@ from .models import (
     KIND_CLAUDE,
     KIND_CODEX,
     KIND_GENERIC,
+    STATUS_ERROR,
     STATUS_IDLE,
-    STATUS_WORKING,
+    STATUS_NEEDS_INPUT,
     STATUS_OFFLINE,
+    STATUS_WORKING,
     PaneState,
 )
 from .naming import SmartNamer
 from .push import PushManager
+from .terminals import TerminalProvider, provider_for_config
+from .terminals.actions import TerminalActionService, prepare_guard
+from .terminals.base import EndpointSnapshot, ProviderError
+
+# Retain this module attribute for the established monkeypatch surface while
+# terminal calls themselves go through providers.
+TMUX_COMPAT_MODULE = tmux
 
 
 def _strip_spinner(s: str) -> str:
@@ -82,10 +91,56 @@ def _hash(text: str) -> str:
 
 ACTIVITY_GRACE_SECONDS = 2.0
 
+_NATIVE_KINDS = {
+    "claude": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "grok": "grok",
+    "opencode": "opencode",
+    "antigravity_cli": "antigravity",
+    "antigravity": "antigravity",
+    "agy": "antigravity",
+}
+
+
+def _endpoint_pane(endpoint: EndpointSnapshot) -> dict:
+    metadata = endpoint.provider_metadata
+    return {
+        "id": endpoint.public_id,
+        "target": endpoint.persistent_target,
+        "cmd": endpoint.command,
+        "title": endpoint.title,
+        "window": endpoint.window,
+        "path": endpoint.cwd,
+        "pid": metadata.get("pid", ""),
+        "created": metadata.get("created", ""),
+        "window_id": metadata.get("window_id", ""),
+    }
+
+
+def _hierarchy_name(endpoint: EndpointSnapshot, mode: str) -> str:
+    nodes = {node.kind: node for node in endpoint.hierarchy}
+    pane = nodes.get("pane")
+    tab = nodes.get("tab") or nodes.get("window")
+    workspace = nodes.get("workspace") or nodes.get("session")
+    if mode == "pane" and pane:
+        return pane.label
+    if mode in ("window", "window_pane") and tab:
+        return tab.label if mode == "window" or not pane else "%s:%s" % (tab.label, pane.label)
+    if mode in ("session_pane", "session_window_pane") and workspace:
+        parts = [workspace.label]
+        if mode == "session_window_pane" and tab:
+            parts.append(tab.label)
+        if pane:
+            parts.append(pane.label)
+        return ":".join(part for part in parts if part)
+    return endpoint.title or (pane.label if pane else endpoint.persistent_target)
+
 
 class Hub:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, provider: Optional[TerminalProvider] = None):
         self.cfg = cfg
+        self.provider = provider or provider_for_config(cfg)
         self.states: Dict[str, PaneState] = {}
         self.order: List[str] = []
         self.clients: Dict[str, dict] = {}   # sid -> {ws, ip, ua, ts, revision}
@@ -95,10 +150,16 @@ class Hub:
         # discovery is disabled, so clients can open the successful result.
         self.created_panes = set()
         self.push = PushManager(cfg)
+        if self.provider.name != "tmux":
+            cfg.experimental_agent_workspace_enabled = False
         self.agents = AgentService(cfg, push=self.push, kick=self.kick)
+        if self.provider.name != "tmux":
+            self.agents.disable("unsupported by the selected terminal provider")
+        self.actions = TerminalActionService(self, self.provider)
         # Created in run() so asyncio.Event binds to the active server loop.
         # at construction, and Hub is built before the server loop exists
         self._wake: Optional[asyncio.Event] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop = False
         self._agent_startup_complete = False
         self.namer = SmartNamer(cfg, on_update=self.kick)
@@ -127,13 +188,35 @@ class Hub:
 
     # -- one polling pass --------------------------------------------------- #
     async def poll_once(self) -> None:
-        panes = await asyncio.to_thread(tmux.list_panes)
-        self.created_panes.intersection_update(pane["id"] for pane in panes)
-        present_targets = {p["target"] for p in panes}
+        discovery = await asyncio.to_thread(self.provider.discover)
+        if not discovery.authoritative:
+            # A failed provider read is not evidence that endpoints disappeared.
+            # Retain the last good in-memory snapshot, but make it read-only.
+            for state in self.states.values():
+                if not state.id.startswith("cfg:"):
+                    state.stale = True
+                    state.actionable = False
+            self._update_snapshot_revision()
+            return
 
-        # capture all panes concurrently (with configured scrollback depth)
+        endpoints = list(discovery.endpoints)
+        panes = [_endpoint_pane(endpoint) for endpoint in endpoints]
+        if self.provider.name == "tmux":
+            self.created_panes.intersection_update(pane["id"] for pane in panes)
+        else:
+            self.created_panes.clear()
+        present_targets = {endpoint.persistent_target for endpoint in endpoints}
+
         captures = await asyncio.gather(
-            *[asyncio.to_thread(tmux.capture, p["id"], self.cfg.capture_lines) for p in panes]
+            *[
+                asyncio.to_thread(
+                    self.provider.capture,
+                    endpoint,
+                    lines=self.cfg.capture_lines,
+                )
+                for endpoint in endpoints
+            ],
+            return_exceptions=True,
         )
 
         now = time.time()
@@ -141,44 +224,60 @@ class Hub:
         new_order: List[str] = []
         agent_observations: List[PaneObservation] = []
 
-        for pane, text in zip(panes, captures):
-            pid = pane["id"]
-            target = pane["target"]
+        for endpoint, pane, capture in zip(endpoints, panes, captures):
+            pid = endpoint.public_id
+            target = endpoint.persistent_target
             override = self.cfg.overrides.get(target)
-            text = text or ""
+            capture_failed = isinstance(capture, BaseException)
+            previous_state = self.states.get(pid)
+            if capture_failed:
+                text = "\n".join(previous_state.lines) if previous_state is not None else ""
+            else:
+                text = capture.text
 
-            kind = (override.kind if override and override.kind
-                    else classify_kind(pane["cmd"], pane["title"], text))
+            native_kind = endpoint.native_agent.kind if endpoint.native_agent else None
+            kind = (
+                override.kind if override and override.kind
+                else _NATIVE_KINDS.get(str(native_kind or "").lower())
+                or classify_kind(pane["cmd"], pane["title"], text)
+            )
 
             digest = _hash(text)
             prev = self._meta.get(pid)
-            changed = prev is None or prev["hash"] != digest
+            changed = not capture_failed and (prev is None or prev["hash"] != digest)
             updated = now if changed else (prev["updated"] if prev else now)
             self._meta[pid] = {"hash": digest, "updated": updated}
 
             res = detect(text, kind, changed, self.cfg, pane["title"])
-            # Generic/Codex detectors use changed output as their working hint.
-            # A single quiet capture is common while tmux redraws, so do not
-            # turn a just-active pane idle until it has been quiet briefly.
-            # Attention and errors always win without delay.
-            previous_state = self.states.get(pid)
+            native_status = endpoint.native_agent.status if endpoint.native_agent else None
+            # Terminal evidence still wins for parsed questions and errors.
+            if res.status != STATUS_NEEDS_INPUT and native_status == "blocked":
+                res.status = STATUS_NEEDS_INPUT
+                if not res.question:
+                    res.question = "This agent is waiting for input."
+            elif res.status not in (STATUS_NEEDS_INPUT, STATUS_ERROR) and native_status == "working":
+                res.status = STATUS_WORKING
+            elif (
+                res.status not in (STATUS_NEEDS_INPUT, STATUS_ERROR, STATUS_WORKING)
+                and native_status in ("idle", "done")
+            ):
+                res.status = STATUS_IDLE
+            # Generic/Codex output gets a short quiet grace, as it did before
+            # provider extraction. Native done/idle deliberately ends the grace.
             if (
-                kind in (KIND_GENERIC, KIND_CODEX)
+                native_status not in ("idle", "done")
+                and kind in (KIND_GENERIC, KIND_CODEX)
                 and res.status == STATUS_IDLE
                 and previous_state is not None
                 and previous_state.status == STATUS_WORKING
                 and now - previous_state.updated < ACTIVITY_GRACE_SECONDS
             ):
                 res.status = STATUS_WORKING
-            # Runtime-log observation is part of the opt-in experimental
-            # workspace. Do not even construct observations while it is off.
+
             if self.agents.runtime_active:
                 runtime = runtime_from_command(pane["cmd"])
                 if runtime is None:
-                    runtime = {
-                        KIND_CLAUDE: "claude",
-                        KIND_CODEX: "codex",
-                    }.get(kind)
+                    runtime = {KIND_CLAUDE: "claude", KIND_CODEX: "codex"}.get(kind)
             else:
                 runtime = None
             if self.agents.runtime_active and runtime in ("codex", "claude"):
@@ -202,8 +301,6 @@ class Hub:
                     observed_at=now,
                 ))
 
-            # Agent observation is independent of whether the terminal pane is
-            # included in the pane workspace/navigation.
             if not self._included(pane, kind):
                 continue
 
@@ -211,15 +308,32 @@ class Hub:
             smart_name = None
             if self.cfg.naming_mode == "smart" and not override_name:
                 smart_name = self.namer.name(pane, text, target)
-            name = choose_name(
-                self.cfg.naming_mode,
-                title=pane["title"], window=pane.get("window", ""),
-                target=target, command=pane["cmd"],
-                override_name=override_name,
-                smart_name=smart_name,
-            )
+            if self.provider.name == "herdr" and not override_name and self.cfg.naming_mode != "smart":
+                name = _hierarchy_name(endpoint, self.cfg.naming_mode)
+            else:
+                name = choose_name(
+                    self.cfg.naming_mode,
+                    title=pane["title"], window=pane.get("window", ""),
+                    target=target, command=pane["cmd"],
+                    override_name=override_name,
+                    smart_name=smart_name,
+                )
 
-            st = PaneState(
+            menu = res.menu_list()
+            action_guard = None
+            if self.provider.name == "herdr" and not capture_failed:
+                prompt, options, menu = prepare_guard(text, res.question, menu)
+                action_guard = {
+                    "endpoint_revision": endpoint.native_revision,
+                    "prompt_fingerprint": prompt,
+                    "options_fingerprint": options,
+                }
+            actionable = bool(
+                not capture_failed
+                and discovery.health.status == "ready"
+                and endpoint.capabilities.input in ("legacy", "guarded_v1")
+            )
+            state = PaneState(
                 id=pid,
                 target=target,
                 name=name,
@@ -227,29 +341,38 @@ class Hub:
                 status=res.status,
                 title=pane["title"],
                 question=res.question,
-                menu=res.menu_list(),
+                menu=menu,
                 lines=text.splitlines(),
                 updated=updated,
                 changed=changed,
                 window=pane.get("window", ""),
                 starred=bool(override and override.star),
                 interacted=self.interactions.get(pid, 0.0),
+                provider=self.provider.name,
+                hierarchy=[node.to_dict() for node in endpoint.hierarchy],
+                capabilities=endpoint.capabilities.to_dict(),
+                native_agent=endpoint.native_agent.to_dict() if endpoint.native_agent else None,
+                action_guard=action_guard,
+                actionable=actionable,
+                stale=capture_failed,
             )
-            new_states[pid] = st
+            new_states[pid] = state
             new_order.append(pid)
 
-        # configured panes that aren't present right now -> offline cards
-        for target, ov in self.cfg.overrides.items():
+        for target, override in self.cfg.overrides.items():
             if target in present_targets:
                 continue
             pid = "cfg:" + target
             new_states[pid] = PaneState(
                 id=pid,
                 target=target,
-                name=ov.name or target,
-                kind=ov.kind or "generic",
+                name=override.name or target,
+                kind=override.kind or "generic",
                 status=STATUS_OFFLINE,
-                starred=ov.star,
+                starred=override.star,
+                provider=self.provider.name,
+                actionable=False,
+                stale=True,
             )
             new_order.append(pid)
 
@@ -262,22 +385,21 @@ class Hub:
         )
         self.states = new_states
         self.order = new_order
+        self._meta = {key: value for key, value in self._meta.items() if key in new_states}
         self._update_snapshot_revision()
         schedule_now = time.time()
         if self.agents.runtime_active:
             if self.agents.review_schedule_is_due(now=schedule_now):
-                # A due queue must include semantic events visible in this same
-                # pane capture. Serial processing also prevents an older queued
-                # batch from being applied after the due-window snapshot.
                 await self.agents.process_now(agent_observations)
             else:
                 self.agents.submit(agent_observations)
-        # drop interaction timestamps for panes that no longer exist
-        self.interactions = {k: v for k, v in self.interactions.items() if k in new_states}
+        self.interactions = {key: value for key, value in self.interactions.items() if key in new_states}
         self.created_panes.intersection_update(new_states)
-        self.push.fire(alerts)   # async, best-effort; never blocks the poll
-        # Use the same clock sample as the due check above. If the boundary is
-        # crossed during this tick, the next tick ingests first and then claims.
+        self.push.fire(alerts)
+        self.provider.configure_events(
+            [endpoint.ref.native_endpoint_id for endpoint in endpoints],
+            self.kick_from_thread,
+        )
         if self.agents.runtime_active:
             self._process_review_schedule(now=schedule_now)
 
@@ -358,6 +480,8 @@ class Hub:
 
     async def transition_agent_workspace(self, enabled: bool) -> None:
         """Start or stop the experimental runtime within this server process."""
+        if enabled and self.provider.name != "tmux":
+            raise RuntimeError("unsupported by the selected terminal provider")
         if enabled:
             await self.agents.start()
             if not self.agents.runtime_active:
@@ -404,47 +528,31 @@ class Hub:
 
     # -- action helpers (used by the API) ---------------------------------- #
     def resolve_id(self, pane_id: str) -> Optional[str]:
-        """Map an incoming id to a real tmux target we can drive."""
-        st = self.states.get(pane_id)
-        if st and not pane_id.startswith("cfg:"):
-            return st.id
-        if tmux.valid_pane_id(pane_id):
-            return pane_id
-        return None
+        """Resolve only tmux legacy targets; Herdr handles stay registry-only."""
+        endpoint = self.provider.resolve(pane_id)
+        if endpoint is None or endpoint.ref.provider != "tmux":
+            return None
+        return endpoint.ref.native_endpoint_id
 
     def do_select(self, pane_id: str, key: str) -> None:
-        st = self.states.get(pane_id)
-        real = self.resolve_id(pane_id)
-        if real is None:
-            raise tmux.TmuxError("unknown pane")
-        kind = st.kind if st else "generic"
-        if kind == KIND_CLAUDE:
-            tmux.send_chars(real, key)            # digit press selects the option
-        elif kind == KIND_CODEX:
-            option = next((item for item in (st.menu if st else []) if item.key == key), None)
-            if key == "enter":
-                tmux.send_key(real, "Enter")
-            elif option is not None and option.freeform:
-                # Stage "None of the above" without submitting so the web
-                # composer can collect notes for the selected Codex answer.
-                tmux.send_chars(real, key)
-            else:
-                tmux.send_chars(real, key)
-                tmux.send_key(real, "Enter")
-        elif key == "enter":
-            tmux.send_key(real, "Enter")
-        else:
-            tmux.send_literal(real, key, enter=True)
-        self.mark_interaction(real)
+        self.actions.legacy_select(pane_id, key)
 
     def kick(self) -> None:
         if self._wake is not None:
             self._wake.set()
 
+    def kick_from_thread(self) -> None:
+        """Thread-safe wake target for optional provider event readers."""
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.kick)
+
     # -- main loop ---------------------------------------------------------- #
     async def start_agent_runtime(self) -> None:
         """Finish the initial agent transition before clients receive config."""
         if self._agent_startup_complete:
+            return
+        if self.provider.name != "tmux":
+            self._agent_startup_complete = True
             return
         try:
             await self.agents.start()
@@ -461,6 +569,23 @@ class Hub:
     async def run(self) -> None:
         if self._wake is None:
             self._wake = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
+        if self.provider.name == "herdr":
+            try:
+                health = getattr(self.provider, "health", None)
+                if getattr(health, "status", None) != "ready":
+                    await asyncio.to_thread(self.provider.probe)
+                # Subscribe before publishing the initial level snapshot. Any
+                # event during the following poll sets the coalesced wake flag
+                # and causes another authoritative reconciliation.
+                initial = await asyncio.to_thread(self.provider.discover)
+                if initial.authoritative:
+                    self.provider.configure_events(
+                        [endpoint.ref.native_endpoint_id for endpoint in initial.endpoints],
+                        self.kick_from_thread,
+                    )
+            except ProviderError as exc:
+                print("[vmux] terminal provider=herdr event=probe status=unavailable reason=%s" % exc.category)
         await self.start_agent_runtime()
         while not self._stop:
             try:
@@ -484,5 +609,6 @@ class Hub:
         self._stop = True
         self.namer.stop()
         self.agents.stop()
+        self.provider.close()
         if self._wake is not None:
             self._wake.set()

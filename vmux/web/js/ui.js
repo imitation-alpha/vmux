@@ -455,8 +455,8 @@ function PromptActions({ pane, actions, connection, limit = null, onFreeform = n
     if (!allowed || pending(actions, pane, actionKey)) return;
     if (option.freeform && onFreeform) onFreeform();
     try {
-      if (option.freeform && typeof actions.selectThenCompose === "function") await actions.selectThenCompose(pane, option.key);
-      else await actions.select(pane, option.key);
+      if (option.freeform && typeof actions.selectThenCompose === "function") await actions.selectThenCompose(pane, option);
+      else await actions.select(pane, option);
     } catch (error) { reportActionError(error); }
   };
   if (!shown.length) return null;
@@ -485,8 +485,8 @@ function PaneActionCard({ pane, actions, connection }) {
     const actionKey = `select:${option.key}`;
     if (!allowed || pending(actions, pane, actionKey)) return;
     try {
-      if (option.freeform && typeof actions.selectThenCompose === "function") await actions.selectThenCompose(pane, option.key);
-      else await actions.select(pane, option.key);
+      if (option.freeform && typeof actions.selectThenCompose === "function") await actions.selectThenCompose(pane, option);
+      else await actions.select(pane, option);
     } catch (error) { reportActionError(error); }
   };
   return html`<section class="pane-action-card" aria-label="Action required">
@@ -581,6 +581,22 @@ function PaneRow({ pane, selected, onOpen, actions, connection, onCreate = null 
 }
 
 function splitTarget(pane) {
+  if (pane.provider === "herdr" && Array.isArray(pane.hierarchy)) {
+    const node = (kind) => pane.hierarchy.find((item) => item.kind === kind) || null;
+    const sessionNode = node("session");
+    const workspaceNode = node("workspace");
+    const tabNode = node("tab");
+    const paneNode = node("pane");
+    if (sessionNode && workspaceNode && tabNode) {
+      return {
+        session: `${sessionNode.label} / ${workspaceNode.label}`,
+        sessionId: `${sessionNode.id}:${workspaceNode.id}`,
+        windowId: tabNode.id,
+        windowName: tabNode.label,
+        paneIndex: Number.isInteger(paneNode?.position) ? paneNode.position : 0,
+      };
+    }
+  }
   const target = String(pane.target || "");
   const colon = target.lastIndexOf(":");
   const session = String(pane.session || (colon >= 0 ? target.slice(0, colon) : target) || "Session");
@@ -588,7 +604,7 @@ function splitTarget(pane) {
   const dot = tail.indexOf(".");
   const windowId = String((pane.window_index ?? pane.window_id ?? (dot >= 0 ? tail.slice(0, dot) : tail)) || "0");
   const paneIndex = Number.parseInt(dot >= 0 ? tail.slice(dot + 1) : "0", 10) || 0;
-  return { session, windowId, paneIndex };
+  return { session, sessionId: session, windowId, windowName: pane.window || `Window ${windowId}`, paneIndex };
 }
 
 function worstStatus(panes) {
@@ -600,27 +616,27 @@ function buildTree(panes) {
   const sessions = new Map();
   panes.forEach((pane) => {
     const parts = splitTarget(pane);
-    if (!sessions.has(parts.session)) sessions.set(parts.session, new Map());
-    const windows = sessions.get(parts.session);
-    if (!windows.has(parts.windowId)) windows.set(parts.windowId, []);
-    windows.get(parts.windowId).push({ ...pane, _paneIndex: parts.paneIndex });
+    if (!sessions.has(parts.sessionId)) sessions.set(parts.sessionId, { name: parts.session, windows: new Map() });
+    const group = sessions.get(parts.sessionId);
+    if (!group.windows.has(parts.windowId)) group.windows.set(parts.windowId, []);
+    group.windows.get(parts.windowId).push({ ...pane, _paneIndex: parts.paneIndex, _windowName: parts.windowName });
   });
   return [...sessions.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([session, windows]) => {
-      const items = [...windows.entries()]
+    .sort(([, a], [, b]) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .map(([sessionId, group]) => {
+      const items = [...group.windows.entries()]
         .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
         .map(([windowId, windowPanes]) => {
           windowPanes.sort((a, b) => a._paneIndex - b._paneIndex);
           return {
             id: windowId,
-            name: windowPanes[0].window || `Window ${windowId}`,
+            name: windowPanes[0]._windowName || windowPanes[0].window || `Window ${windowId}`,
             panes: windowPanes,
             status: worstStatus(windowPanes),
           };
         });
       const all = items.flatMap((item) => item.panes);
-      return { id: session, windows: items, panes: all, status: worstStatus(all) };
+      return { id: sessionId, name: group.name, windows: items, panes: all, status: worstStatus(all) };
     });
 }
 
@@ -628,7 +644,7 @@ function selectedAncestorKeys(panes, selectedId) {
   const pane = panes.find((item) => item.id === selectedId);
   if (!pane) return [];
   const parts = splitTarget(pane);
-  return [`session:${parts.session}`, `window:${parts.session}:${parts.windowId}`];
+  return [`session:${parts.sessionId}`, `window:${parts.sessionId}:${parts.windowId}`];
 }
 
 function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = null }) {
@@ -667,10 +683,10 @@ function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = n
         <div class="tree-parent-row"><button type="button" class=${cx("tree-node", "tree-parent", `status-${normalizedStatus(session.status)}`)} aria-expanded=${sessionOpen} onClick=${() => toggle(sessionKey)}>
             <${Icon} name=${sessionOpen ? "chevron-down" : "chevron-right"} size=${16} />
             <${StatusBadge} value=${session.status} compact=${true} />
-            <strong>${session.id}</strong>
+            <strong>${session.name}</strong>
             <span class="tree-count">${session.panes.length}</span>
           </button>
-          ${onCreate ? html`<button type="button" class="icon-button tree-create" aria-label=${`New window in ${session.id}`} title="New window" onClick=${() => onCreate({ type: "window", parentSession: session.id })}><${Icon} name="plus" size=${16} /></button>` : null}
+          ${onCreate && session.panes.some((pane) => pane.capabilities?.create === true) ? html`<button type="button" class="icon-button tree-create" aria-label=${`New window in ${session.name}`} title="New window" onClick=${() => onCreate({ type: "window", parentSession: session.name })}><${Icon} name="plus" size=${16} /></button>` : null}
         </div>
         ${sessionOpen ? html`<div class="tree-children">
           ${session.windows.map((windowItem) => {
@@ -683,7 +699,7 @@ function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = n
                   <span>${windowItem.name}</span>
                   <span class="tree-count">${windowItem.panes.length}</span>
                 </button>
-                ${onCreate && windowItem.panes[0] ? html`<button type="button" class="icon-button tree-create" aria-label=${`Split ${windowItem.name}`} title="Split pane" onClick=${() => onCreate({ type: "pane", parentPaneID: windowItem.panes[0].id })}><${Icon} name="plus" size=${16} /></button>` : null}
+                ${onCreate && windowItem.panes[0]?.capabilities?.create === true ? html`<button type="button" class="icon-button tree-create" aria-label=${`Split ${windowItem.name}`} title="Split pane" onClick=${() => onCreate({ type: "pane", parentPaneID: windowItem.panes[0].id })}><${Icon} name="plus" size=${16} /></button>` : null}
               </div>
               ${windowOpen ? html`<div class="tree-children">
                 ${windowItem.panes.map((pane) => html`<${PaneRow}
@@ -693,7 +709,7 @@ function TreeView({ panes, selectedId, onOpen, actions, connection, onCreate = n
                   onOpen=${onOpen}
                   actions=${actions}
                   connection=${connection}
-                  onCreate=${onCreate}
+                  onCreate=${pane.capabilities?.create === true ? onCreate : null}
                 />`)}
               </div>` : null}
             </div>`;
@@ -749,7 +765,11 @@ function Terminal({ pane, actions, connection }) {
   const previousOutput = useRef("");
   const output = (pane.lines || []).join("\n") || "(no output)";
   const links = useMemo(() => extractLinks(pane.lines), [pane.lines]);
-  const shortcuts = prefs.actions || DEFAULT_SHORTCUTS;
+  const configuredShortcuts = prefs.actions || DEFAULT_SHORTCUTS;
+  const supportedKeys = Array.isArray(pane.capabilities?.keys) ? pane.capabilities.keys : [];
+  const shortcuts = pane.capabilities?.input === "guarded_v1"
+    ? configuredShortcuts.filter(([, key]) => supportedKeys.includes(key))
+    : configuredShortcuts;
   const allowed = canAct(actions, connection, pane);
 
   const scrollLatest = useCallback(() => {
@@ -856,8 +876,11 @@ function PaneDetail({ pane, actions, connection }) {
     </header>
     <div class="pane-detail-scroll">
       <${PaneActionCard} pane=${pane} actions=${actions} connection=${connection} />
+      ${pane.stale ? html`<${InlineNotice} tone="warning" icon="wifi-off"><strong>Read-only snapshot</strong><p>The terminal provider could not revalidate this pane. Refresh before sending input.</p><//>` : null}
       <dl class="pane-facts">
         <div><dt>Pane</dt><dd>${pane.target || "Unknown"}</dd></div>
+        ${pane.provider === "herdr" ? html`<div><dt>Provider</dt><dd>Herdr</dd></div>` : null}
+        ${pane.nativeAgent ? html`<div><dt>Native state</dt><dd>${pane.nativeAgent.status}${pane.nativeAgent.kind ? ` · ${pane.nativeAgent.kind}` : ""}</dd></div>` : null}
         <div><dt>Updated</dt><dd>${formatAge(pane.updated)}</dd></div>
         <div><dt>Last sent</dt><dd>${formatAge(pane.interacted)}</dd></div>
       </dl>
@@ -1166,8 +1189,8 @@ function WideShell({ panes, connection, actions, usage, selectedId, setSelectedI
         if (option && canAct(actions, connection, selected)) {
           event.preventDefault();
           const task = option.freeform && typeof actions.selectThenCompose === "function"
-            ? actions.selectThenCompose(selected, option.key)
-            : actions.select(selected, option.key);
+            ? actions.selectThenCompose(selected, option)
+            : actions.select(selected, option);
           task.catch(reportActionError);
         }
       }

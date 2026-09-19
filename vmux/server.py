@@ -26,7 +26,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import (
     Body,
@@ -42,7 +42,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 
 from . import __version__, tmux
@@ -59,6 +59,8 @@ from .images import (
     UploadQuotaExceeded,
 )
 from .poller import Hub
+from .terminals.actions import ActionProblem
+from .terminals.base import TerminalProvider
 from .usage import PERIODS, UsageCollector
 
 WEB_DIR = Path(__file__).resolve().parent / "web"   # packaged inside vmux/ so it ships in the wheel
@@ -84,6 +86,27 @@ class BroadcastReq(BaseModel):
     ids: List[str]
     text: str
     enter: bool = True
+
+
+class ExpectedInputGuard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_revision: str = Field(min_length=1, max_length=160)
+    prompt_fingerprint: Optional[str] = Field(default=None, max_length=160)
+    options_fingerprint: Optional[str] = Field(default=None, max_length=160)
+
+
+class InputReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    operation: Literal["text", "key", "select"]
+    text: Optional[str] = Field(default=None, max_length=8_000)
+    key: Optional[str] = Field(default=None, max_length=40)
+    option_id: Optional[str] = Field(default=None, max_length=160)
+    enter: bool = False
+    expected: ExpectedInputGuard
+    idempotency_key: str = Field(min_length=1, max_length=160)
 
 
 class KillReq(BaseModel):
@@ -148,8 +171,13 @@ class ImageUploadResponse(BaseModel):
     expires_at: int
 
 
-def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> FastAPI:
-    hub = Hub(cfg)
+def create_app(
+    cfg: Config,
+    *,
+    image_store: Optional[ImageStore] = None,
+    provider: Optional[TerminalProvider] = None,
+) -> FastAPI:
+    hub = Hub(cfg, provider=provider)
     usage = UsageCollector(cfg, push=hub.push)
     images = image_store or ImageStore()
     creation = CreationService(cfg)
@@ -204,11 +232,11 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
         if not (authorization and hmac.compare_digest(authorization, expected)):
             raise HTTPException(status_code=401, detail="bad or missing token")
 
-    def _resolve(pane_id: str) -> str:
-        real = hub.resolve_id(pane_id)
-        if real is None:
-            raise HTTPException(status_code=404, detail="unknown pane")
-        return real
+    def _action_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ActionProblem as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail())
 
     def _agent_call(fn, *args, **kwargs):
         with hub.agents.api_guard():
@@ -264,49 +292,63 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
 
     @app.post("/api/key")
     def post_key(req: KeyReq, _=Depends(require_auth)):
-        real = _resolve(req.id)
-        try:
-            tmux.send_key(real, req.key)
-        except tmux.TmuxError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
+        _action_call(hub.actions.legacy_key, req.id, req.key)
         hub.kick()
         return {"ok": True}
 
     @app.post("/api/text")
     def post_text(req: TextReq, _=Depends(require_auth)):
-        real = _resolve(req.id)
-        try:
-            tmux.send_literal(real, req.text, enter=req.enter)
-        except tmux.TmuxError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        hub.mark_interaction(real)
+        _action_call(hub.actions.legacy_text, req.id, req.text, req.enter)
         hub.kick()
         return {"ok": True}
 
     @app.post("/api/select")
     def post_select(req: SelectReq, _=Depends(require_auth)):
-        try:
-            hub.do_select(req.id, req.key)
-        except tmux.TmuxError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+        _action_call(hub.actions.legacy_select, req.id, req.key)
         hub.kick()
         return {"ok": True}
+
+    @app.post("/api/input")
+    def post_input(req: InputReq, _=Depends(require_auth)):
+        fields_set = getattr(req, "model_fields_set", None)
+        if fields_set is None:  # Pydantic v1 compatibility
+            fields_set = req.__fields_set__
+        supplied = set(fields_set) - {"id", "operation", "expected", "idempotency_key"}
+        allowed = {
+            "text": {"text", "enter"},
+            "key": {"key"},
+            "select": {"option_id"},
+        }[req.operation]
+        if not supplied.issubset(allowed):
+            raise HTTPException(status_code=400, detail={"reason": "fields_do_not_match_operation"})
+        if req.operation == "key" and not req.key:
+            raise HTTPException(status_code=400, detail={"reason": "key_required"})
+        if req.operation == "select" and not req.option_id:
+            raise HTTPException(status_code=400, detail={"reason": "option_id_required"})
+        if req.operation == "text" and not req.text and not req.enter:
+            raise HTTPException(status_code=400, detail={"reason": "text_required"})
+        expected = req.expected.model_dump() if hasattr(req.expected, "model_dump") else req.expected.dict()
+        return _action_call(
+            hub.actions.guarded_input,
+            pane_id=req.id,
+            operation=req.operation,
+            expected=expected,
+            idempotency_key=req.idempotency_key,
+            text=req.text,
+            key=req.key,
+            option_id=req.option_id,
+            enter=req.enter,
+        )
 
     @app.post("/api/broadcast")
     def post_broadcast(req: BroadcastReq, _=Depends(require_auth)):
         sent, errors = 0, []
-        for pid in req.ids:
-            real = hub.resolve_id(pid)
-            if real is None:
-                errors.append(pid)
-                continue
+        for pane_id in req.ids:
             try:
-                tmux.send_literal(real, req.text, enter=req.enter)
-                hub.mark_interaction(real)
+                hub.actions.legacy_text(pane_id, req.text, req.enter)
                 sent += 1
-            except tmux.TmuxError as exc:
-                errors.append("%s: %s" % (pid, exc))
+            except ActionProblem as exc:
+                errors.append("%s: %s" % (pane_id, exc.reason))
         hub.kick()
         return {"ok": True, "sent": sent, "errors": errors}
 
@@ -327,6 +369,7 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
                 "agent_context_v1": hub.agents.info(),
                 "agent_review_v1": hub.agents.review_info(),
                 "tmux_create_v1": creation.capability(),
+                "terminal_provider_v1": hub.provider.capability(),
             },
         }
         return d
@@ -338,6 +381,14 @@ def create_app(cfg: Config, *, image_store: Optional[ImageStore] = None) -> Fast
     @app.patch("/api/config")
     async def patch_config(payload: dict, _=Depends(require_auth)):
         async with config_transition_lock:
+            if (
+                cfg.terminal_provider != "tmux"
+                and payload.get("experimental_agent_workspace_enabled") is True
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="agent context is unsupported by the selected terminal provider",
+                )
             previous = cfg.editable_dict()
             previous_enabled = cfg.experimental_agent_workspace_enabled
             try:

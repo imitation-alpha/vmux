@@ -1,10 +1,11 @@
 # vmux
 
-**Attention router for CLI coding-agent swarms in tmux—monitor and respond from your phone.**
+**Attention router for CLI coding-agent swarms—monitor and respond from your phone.**
 
-vmux watches your tmux panes, identifies which agent needs attention, turns
-supported terminal dialogs into tappable choices, and sends your response back
-through tmux. The backend and installable PWA run on your machine: no hosted
+vmux watches either tmux or one explicitly configured Herdr session, identifies
+which agent needs attention, turns supported terminal dialogs into tappable
+choices, and sends guarded responses back to the exact terminal endpoint. tmux
+remains the default. The backend and installable PWA run on your machine: no hosted
 account, telemetry, or cloud control plane.
 
 The native iOS app remains separate from that self-hosted data path. Beginning
@@ -24,7 +25,7 @@ after explicit consent; the server and PWA do not participate. See the
 ## Requirements
 
 - Python 3.10–3.14
-- tmux
+- tmux (default provider), or Herdr 0.8.2 / protocol 20 for the optional Herdr provider
 - [pipx](https://pipx.pypa.io/) for an isolated install
 
 Install the `vmux-agent` distribution from PyPI:
@@ -85,8 +86,12 @@ before using a non-loopback bind.
 
 ## What it does
 
-- Discovers tmux panes and classifies Claude Code, Codex, Grok, OpenCode,
-  Antigravity, generic agents, and shells.
+- Discovers tmux panes or panes in one explicit named Herdr session and
+  classifies Claude Code, Codex, Grok, OpenCode, Antigravity, generic agents,
+  and shells.
+- Enriches Herdr panes with native session/workspace/tab hierarchy and native
+  agent state. Input uses opaque endpoint, prompt, options, and route-revision
+  guards; events are optional wake hints and snapshots remain authoritative.
 - Ranks `needs_input`, `error`, `working`, `idle`, and `offline` states.
 - Parses Claude Code selections, structured Codex questionnaires, and
   conservative numbered dialogs; configurable regexes cover common prompts
@@ -104,7 +109,9 @@ before using a non-loopback bind.
 - Sends literal text, menu choices, or one broadcast message to multiple panes.
 - Creates detached tmux sessions, windows, and split panes inside explicitly
   configured server-side roots, with server-controlled Shell, Codex, Claude,
-  Antigravity, Grok Build, and OpenCode runtime presets.
+  Antigravity, Grok Build, and OpenCode runtime presets. Creation, deletion,
+  focus, movement, rename, agent start, broadcast, and lifecycle control are
+  deliberately unavailable when Herdr is selected.
 - Uploads pasted or selected images to private 24-hour host storage and appends
   the shell-safe path to terminal or agent drafts without submitting them.
 - Includes an opt-in tokscale Stats dashboard with cost/token history, client and

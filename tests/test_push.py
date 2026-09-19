@@ -280,6 +280,16 @@ def test_payload_confirm3_carries_only_index_and_key(tmp_path):
     assert set(p["vmux"]) == {"id", "menu"}
 
 
+def test_herdr_confirmation_is_open_only_and_omits_legacy_keys(tmp_path):
+    m = menu(("1", "Yes"), ("2", "No"))
+    payload = _mgr(tmp_path)._payload(PaneState(
+        id="h:opaque", target="herdr:opaque", name="agent", provider="herdr",
+        status=STATUS_NEEDS_INPUT, question="Allow?", menu=m,
+    ))
+    assert payload["aps"]["category"] == "vmux.open"
+    assert payload["vmux"] == {"id": "h:opaque"}
+
+
 def test_payload_arbitrary_menu_is_generic_and_omits_options(tmp_path):
     m = menu(("1", "Apple"), ("2", "Banana"), ("3", "Cherry"))
     p = _mgr(tmp_path)._payload(PaneState(

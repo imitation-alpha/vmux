@@ -1,8 +1,8 @@
 # REST and WebSocket API
 
 The backend contract is used by the bundled PWA and can be implemented by other
-clients. The server owns the tmux panes and defaults to
-`http://127.0.0.1:8787`.
+clients. The server owns one selected terminal provider (tmux by default, or
+one explicit Herdr session) and defaults to `http://127.0.0.1:8787`.
 
 ## Authentication
 
@@ -59,6 +59,63 @@ A well-formed but stale tmux id can instead reach tmux and return `400`; select
 and other tmux action errors also return `400`. Broadcast reports individual
 unresolved ids/errors in `errors` while returning an overall successful
 response. Refresh state before retrying any stale action.
+
+These legacy endpoints retain tmux semantics. If their id resolves to Herdr,
+they return `409` with `{"detail":{"reason":"guarded_input_required"}}` and do
+not send input. Herdr broadcast is unsupported.
+
+### Guarded terminal input
+
+`POST /api/input` is used only when a pane advertises
+`capabilities.input == "guarded_v1"`. The request has an exact operation-specific
+shape:
+
+~~~json
+{
+  "id": "h:opaque-live-handle",
+  "operation": "select",
+  "option_id": "o:opaque-current-option",
+  "expected": {
+    "endpoint_revision": "12",
+    "prompt_fingerprint": "sha256:...",
+    "options_fingerprint": "sha256:..."
+  },
+  "idempotency_key": "client-generated-UUID"
+}
+~~~
+
+`text` instead supplies `text` (at most 8,000 characters) and optional `enter`;
+`key` supplies one key advertised in that pane's `capabilities.keys`. A text
+operation requires the current prompt fingerprint, and select also requires the
+options fingerprint. Herdr literal text rejects all control characters,
+including newline and tab, because native PTY delivery could submit or mutate
+the line; Enter is always the separate key operation. The verified Herdr key
+set is `Enter`, `Escape`, `C-c`, and `C-u`.
+
+Under a per-endpoint lock, the server resolves the opaque live registry entry,
+fetches a fresh exact native route, reads the detection buffer, fetches the
+route again, reparses the prompt/options, and only then performs one mutation.
+Labels and native agent state never participate in identity or authorization.
+Success is:
+
+~~~json
+{"ok":true,"delivery":"accepted"}
+~~~
+
+Conflicts are `409` with a bounded `detail.reason`, including
+`endpoint_stale`, `endpoint_moved`, `revision_stale`, `prompt_changed`,
+`options_changed`, `capability_unavailable`, `delivery_unknown`, or
+`partial_delivery_unknown`. A client must refresh and let the user inspect; it
+must never replay automatically. `partial_delivery_unknown` means literal text
+may be staged even though the following Enter was not confirmed. An
+idempotency key is reserved before I/O; repeating the identical request returns
+the recorded outcome without another send, while reusing it for another body
+conflicts. The table is in-memory, so server restart requires a fresh state and
+key rather than an assumption about prior delivery.
+
+Herdr currently has no atomic compare-and-send primitive. Immediate
+revalidation narrows but cannot eliminate the final read-to-send race with
+another local Herdr client.
 
 ## Temporary image uploads
 
@@ -261,6 +318,17 @@ Returns the live-editable fields plus:
         "supported": true,
         "enabled": true,
         "reason": null
+      },
+      "terminal_provider_v1": {
+        "version": 1,
+        "provider": "tmux",
+        "mode": "legacy",
+        "guarded_input": false,
+        "native_agent_state": false,
+        "creation": true,
+        "deletion": false,
+        "event_subscription": {"supported":false,"active":false,"minimum_protocol":null},
+        "health": {"status":"ready","last_success_at":0,"last_error":null,"protocol":null,"version":null}
       }
     }
   }
@@ -280,7 +348,11 @@ must fall back to the terminal workspace when it is absent or disabled.
 switch; clients must not hydrate agent REST resources or open `/ws/agents`
 unless it is `true` and the corresponding capability is enabled.
 `capabilities.tmux_create_v1` independently gates all creation entry points;
-older clients ignore it and updated clients hide creation when it is absent. The
+older clients ignore it and updated clients hide creation when it is absent.
+`capabilities.terminal_provider_v1` selects legacy versus guarded input and
+reports bounded provider/event health. When provider is Herdr, creation and
+structured Agent Context are disabled and older clients remain unable to send
+through the legacy routes. The
 opaque `server_instance_id` lets a native client reject a notification route
 created by a different vmux server. Capability names and string values are an
 allowlist: an unknown future value must remain read-only until the client
@@ -590,7 +662,9 @@ An invalid period or scope returns `400`.
 | `POST /api/push/unregister` | `{"token":"<apns-hex>"}` |
 
 Registration is accepted even when APNs credentials or optional dependencies
-are not ready. See [Push notifications](https://imitation-alpha.github.io/vmux/guides/push-notifications/).
+are not ready. Herdr alerts use the open-only `vmux.open` notification category
+and carry only the opaque pane route; clients must refresh before offering any
+response action. See [Push notifications](https://imitation-alpha.github.io/vmux/guides/push-notifications/).
 
 ## WebSocket
 
