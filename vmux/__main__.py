@@ -27,7 +27,9 @@ def main(argv=None) -> int:
     parser.add_argument("--version", action="version", version="vmux " + __version__)
     args = parser.parse_args(argv)
 
-    cfg = config.load(args.config)
+    cfg = config.load(
+        args.config, terminal_provider=args.terminal_provider, herdr_session=args.herdr_session,
+    )
     if args.host:
         cfg.host = args.host
     if args.port:
@@ -36,10 +38,6 @@ def main(argv=None) -> int:
         cfg.token = args.token
     if args.include_shells:
         cfg.include_shells = True
-    if args.terminal_provider:
-        cfg.terminal_provider = args.terminal_provider
-    if args.herdr_session is not None:
-        cfg.herdr_session = args.herdr_session.strip()
     cfg.validate()
 
     provider = None

@@ -6,7 +6,7 @@ import pytest
 
 from vmux.config import Config
 from vmux.detectors import detect
-from vmux.models import KIND_CLAUDE, PaneState
+from vmux.models import KIND_CLAUDE, KIND_CODEX, PaneState
 from vmux.terminals.actions import ActionProblem, TerminalActionService, prepare_guard
 from vmux.terminals.base import (
     EndpointCapabilities,
@@ -249,3 +249,66 @@ def test_stale_or_unknown_endpoint_is_never_actionable():
             key="Escape",
         )
     assert caught.value.status_code == 404
+
+
+@pytest.mark.parametrize("operation,values", [
+    ("key", {"key": "Enter"}),
+    ("text", {"text": "answer", "enter": True}),
+    ("select", {}),
+])
+@pytest.mark.parametrize("change", ["label", "selection", "cached"])
+def test_submitting_selection_revalidates_options(operation, values, change):
+    service, hub, provider = guarded_service()
+    state = hub.states[provider.endpoint.public_id]
+    guard = expected(state)
+    if change == "label":
+        provider.text = DIALOG.replace("1. Yes", "1. Delete")
+    elif change == "selection":
+        provider.text = DIALOG.replace("❯ 1.", "  1.").replace("  2.", "❯ 2.")
+    else:
+        guard["options_fingerprint"] = "sha256:old"
+    with pytest.raises(ActionProblem) as caught:
+        service.guarded_input(
+            pane_id=state.id, operation=operation, expected=guard,
+            idempotency_key="changed-options", option_id=state.menu[0].id, **values,
+        )
+    assert caught.value.reason == "options_changed"
+    assert provider.sent == []
+
+
+@pytest.mark.parametrize("before,after", [
+    ("rm 'a b'", "rm 'a  b'"),
+    ("first\n\nsecond", "first\nsecond"),
+    ("run\tcommand", "run command"),
+])
+def test_lossless_terminal_evidence_rejects_changed_prompt(before, after):
+    service, hub, provider = guarded_service()
+    state = hub.states[provider.endpoint.public_id]
+    provider.text = before + "\n" + DIALOG
+    result = detect(provider.text, state.kind, False, hub.cfg, "Claude")
+    prompt, options, _ = prepare_guard(provider.text, result.question, result.menu_list())
+    state.action_guard.update(prompt_fingerprint=prompt, options_fingerprint=options)
+    provider.text = after + "\n" + DIALOG
+    with pytest.raises(ActionProblem) as caught:
+        service.guarded_input(
+            pane_id=state.id, operation="text", expected=expected(state),
+            idempotency_key="changed-whitespace", text="continue", enter=True,
+        )
+    assert caught.value.reason == "prompt_changed"
+    assert provider.sent == []
+
+
+def test_codex_continue_option_sends_only_enter():
+    service, hub, provider = guarded_service()
+    state = hub.states[provider.endpoint.public_id]
+    state.kind = KIND_CODEX
+    provider.text = "Press enter to continue"
+    result = detect(provider.text, state.kind, False, hub.cfg)
+    prompt, options, menu = prepare_guard(provider.text, result.question, result.menu_list())
+    state.action_guard.update(prompt_fingerprint=prompt, options_fingerprint=options)
+    assert menu[0].key == "enter"
+    service.guarded_input(
+        pane_id=state.id, operation="select", expected=expected(state),
+        idempotency_key="continue", option_id=menu[0].id,
+    )
+    assert provider.sent == [("key", "w1:p1", "Enter")]

@@ -248,10 +248,20 @@ class Hub:
             updated = now if changed else (prev["updated"] if prev else now)
             self._meta[pid] = {"hash": digest, "updated": updated}
 
-            res = detect(text, kind, changed, self.cfg, pane["title"])
+            detection_text = text if capture_failed or capture.detection_text is None else capture.detection_text
+            res = detect(detection_text, kind, changed, self.cfg, pane["title"])
+            menu = res.menu_list()
+            action_guard = None
+            if self.provider.name == "herdr" and not capture_failed:
+                prompt, options, menu = prepare_guard(detection_text, res.question, menu)
+                action_guard = {
+                    "endpoint_revision": endpoint.native_revision,
+                    "prompt_fingerprint": prompt,
+                    "options_fingerprint": options,
+                }
             native_status = endpoint.native_agent.status if endpoint.native_agent else None
             # Terminal evidence still wins for parsed questions and errors.
-            if res.status != STATUS_NEEDS_INPUT and native_status == "blocked":
+            if res.status not in (STATUS_NEEDS_INPUT, STATUS_ERROR) and native_status == "blocked":
                 res.status = STATUS_NEEDS_INPUT
                 if not res.question:
                     res.question = "This agent is waiting for input."
@@ -319,15 +329,6 @@ class Hub:
                     smart_name=smart_name,
                 )
 
-            menu = res.menu_list()
-            action_guard = None
-            if self.provider.name == "herdr" and not capture_failed:
-                prompt, options, menu = prepare_guard(text, res.question, menu)
-                action_guard = {
-                    "endpoint_revision": endpoint.native_revision,
-                    "prompt_fingerprint": prompt,
-                    "options_fingerprint": options,
-                }
             actionable = bool(
                 not capture_failed
                 and discovery.health.status == "ready"

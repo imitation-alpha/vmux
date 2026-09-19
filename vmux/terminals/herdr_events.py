@@ -92,6 +92,12 @@ class HerdrEventSubscriber:
                 delay = min(10.0, delay * 2)
 
     def _stream(self, pane_ids: tuple[str, ...]) -> None:
+        try:
+            self._consume_stream(pane_ids)
+        finally:
+            self.active = False
+
+    def _consume_stream(self, pane_ids: tuple[str, ...]) -> None:
         request_id = "vmux-" + uuid.uuid4().hex
         request = {
             "id": request_id,
@@ -118,7 +124,8 @@ class HerdrEventSubscriber:
             line, buffer = buffer.split(b"\n", 1)
             ack = json.loads(line)
             if (
-                ack.get("id") != request_id
+                not isinstance(ack, dict)
+                or ack.get("id") != request_id
                 or not isinstance(ack.get("result"), dict)
                 or ack["result"].get("type") != "subscription_started"
             ):
@@ -142,6 +149,8 @@ class HerdrEventSubscriber:
                 if len(line) > _MAX_FRAME:
                     raise ValueError("event frame too large")
                 envelope = json.loads(line)
+                if not isinstance(envelope, dict):
+                    raise ValueError("bad event envelope")
                 if envelope.get("event") != "pane.agent_status_changed":
                     continue
                 data = envelope.get("data")

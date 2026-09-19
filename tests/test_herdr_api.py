@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from vmux.config import Config
@@ -184,3 +186,38 @@ def test_guarded_api_rejects_wrong_fields_and_agent_context_enable():
         )
         assert workspace.status_code == 400
         assert cfg.experimental_agent_workspace_enabled is False
+
+
+@pytest.mark.parametrize("operation,values", [
+    ("key", {"key": "Enter"}),
+    ("text", {"text": "continue", "enter": True}),
+])
+def test_native_blocked_display_enrichment_preserves_action_evidence(monkeypatch, operation, values):
+    provider = ApiHerdr()
+    evidence = "Awaiting your next instruction"
+    monkeypatch.setattr(provider, "capture", lambda *a, **kw: CaptureResult(
+        "Display history differs from detection", detection_text=evidence,
+    ))
+    monkeypatch.setattr(provider, "revalidate", lambda *a: VerifiedEndpoint(provider.endpoint, evidence))
+    hub = Hub(Config(terminal_provider="herdr", herdr_session="named"), provider=provider)
+    asyncio.run(hub.poll_once())
+    state = hub.states[provider.endpoint.public_id]
+    assert state.question == "This agent is waiting for input."
+    assert state.status == "needs_input"
+    assert state.lines == ["Display history differs from detection"]
+    result = hub.actions.guarded_input(
+        pane_id=state.id, operation=operation, expected=state.action_guard,
+        idempotency_key="native-blocked", **values,
+    )
+    assert result["delivery"] == "accepted"
+    assert provider.sent == ([("key", "Enter")] if operation == "key" else [("text", "continue"), ("key", "Enter")])
+
+
+def test_native_blocked_does_not_override_terminal_error(monkeypatch):
+    provider = ApiHerdr()
+    monkeypatch.setattr(provider, "capture", lambda *a, **kw: CaptureResult("fatal: process failed"))
+    hub = Hub(Config(terminal_provider="herdr", herdr_session="named"), provider=provider)
+    asyncio.run(hub.poll_once())
+    state = hub.states[provider.endpoint.public_id]
+    assert state.status == "error"
+    assert state.question is None

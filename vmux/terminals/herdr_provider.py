@@ -399,6 +399,7 @@ class HerdrProvider(TerminalProvider):
 
     def discover(self) -> DiscoveryResult:
         try:
+            self.probe()
             endpoints = self._parse_snapshot(self._snapshot())
         except ProviderError as exc:
             self._health = ProviderHealth(
@@ -439,6 +440,7 @@ class HerdrProvider(TerminalProvider):
         # become permanently stale.
         return CaptureResult(
             text=self._read(endpoint.ref.native_endpoint_id, source="recent-unwrapped", lines=lines),
+            detection_text=self._read(endpoint.ref.native_endpoint_id, source="detection", lines=200),
             native_revision=endpoint.native_revision,
         )
 
@@ -468,6 +470,7 @@ class HerdrProvider(TerminalProvider):
         )
 
     def revalidate(self, public_id: str, expected: EndpointSnapshot) -> VerifiedEndpoint:
+        self.probe()
         current = self.resolve(public_id)
         if current is None or current != expected or self.health.status != "ready":
             raise ProviderError("endpoint is stale", category="endpoint_stale")
