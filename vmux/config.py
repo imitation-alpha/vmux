@@ -120,6 +120,12 @@ class Config:
     auto_discover: bool = True
     include_shells: bool = False
     disable_tmux_auto_rename: bool = True
+    # Terminal authority selection is local YAML/CLI configuration only. It is
+    # intentionally absent from editable_dict() and the JSON overlay.
+    terminal_provider: str = "tmux"
+    herdr_session: str = ""
+    herdr_binary: str = "herdr"
+    herdr_events: str = "auto"
     naming_mode: str = "session_window_pane"
     overrides: Dict[str, PaneOverride] = field(default_factory=dict)  # keyed by target
     generic_prompt_patterns: List[str] = field(default_factory=lambda: list(DEFAULT_GENERIC_PROMPTS))
@@ -195,6 +201,15 @@ class Config:
     overlay_path: Optional[str] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if self.terminal_provider not in ("tmux", "herdr"):
+            raise ValueError("bad terminal.provider: %s" % self.terminal_provider)
+        if self.herdr_events not in ("auto", "off"):
+            raise ValueError("bad terminal.herdr.events: %s" % self.herdr_events)
+        if self.terminal_provider == "herdr":
+            if not self.herdr_session or "\x00" in self.herdr_session or len(self.herdr_session) > 128:
+                raise ValueError("terminal.herdr.session is required and must be at most 128 characters")
+            if not self.herdr_binary or "\x00" in self.herdr_binary or len(self.herdr_binary) > 1000:
+                raise ValueError("terminal.herdr.binary is invalid")
         if self.naming_mode not in NAMING_MODES:
             raise ValueError("bad naming_mode: %s" % self.naming_mode)
         if self.auto_naming_ai_backend not in AUTO_NAMING_BACKENDS:
@@ -385,6 +400,8 @@ class Config:
         self._recompile()
 
     def validate(self) -> None:
+        if self.terminal_provider == "herdr" and not self.herdr_session:
+            raise SystemExit("terminal.herdr.session is required when terminal.provider is herdr")
         # The one footgun the README promises to fail-fast on.
         if self.host not in ("127.0.0.1", "localhost", "::1") and not self.token:
             raise SystemExit(
@@ -492,6 +509,24 @@ def load(path: Optional[str]) -> Config:
 
     server = data.get("server", {}) or {}
     tmux_settings = data.get("tmux", {}) or {}
+    terminal = data.get("terminal", {}) or {}
+    if not isinstance(terminal, dict):
+        raise SystemExit("terminal must be a mapping")
+    terminal_provider = str(terminal.get("provider", "tmux") or "tmux")
+    if terminal_provider not in ("tmux", "herdr"):
+        raise SystemExit("terminal.provider must be 'tmux' or 'herdr'")
+    herdr = terminal.get("herdr", {}) or {}
+    if not isinstance(herdr, dict):
+        raise SystemExit("terminal.herdr must be a mapping")
+    raw_herdr_events = herdr.get("events", "auto")
+    # PyYAML follows YAML 1.1 and parses an unquoted `off` as false.
+    herdr_events = "off" if raw_herdr_events is False else str(raw_herdr_events or "auto")
+    if herdr_events not in ("auto", "off"):
+        raise SystemExit("terminal.herdr.events must be 'auto' or 'off'")
+    herdr_session = str(herdr.get("session", "") or "").strip()
+    herdr_binary = str(herdr.get("binary", "herdr") or "herdr")
+    if terminal_provider == "herdr" and not herdr_session:
+        raise SystemExit("terminal.herdr.session is required when terminal.provider is herdr")
     discovery = data.get("discovery", {}) or {}
     detectors = data.get("detectors", {}) or {}
     push = data.get("push", {}) or {}
@@ -559,6 +594,10 @@ def load(path: Optional[str]) -> Config:
         auto_discover=bool(discovery.get("auto", True)),
         include_shells=bool(discovery.get("include_shells", False)),
         disable_tmux_auto_rename=bool(tmux_settings.get("disable_auto_rename", True)),
+        terminal_provider=terminal_provider,
+        herdr_session=herdr_session,
+        herdr_binary=herdr_binary,
+        herdr_events=herdr_events,
         naming_mode=str(data.get("naming_mode", "session_window_pane") or "session_window_pane"),
         overrides=overrides,
         generic_prompt_patterns=detectors.get("generic_prompt_patterns", list(DEFAULT_GENERIC_PROMPTS)),

@@ -807,6 +807,7 @@ function normalizeMenu(value) {
     const label = textValue(option.label);
     if (!key || !label) continue;
     out.push({
+      id: textValue(option.id) || null,
       key,
       label,
       description: textValue(option.description),
@@ -828,7 +829,7 @@ function arraysEqual(left, right, itemEqual = (a, b) => a === b) {
 
 function menuEqual(left, right) {
   return arraysEqual(left, right, (a, b) => (
-    a.key === b.key && a.label === b.label && a.description === b.description
+    a.id === b.id && a.key === b.key && a.label === b.label && a.description === b.description
       && a.selected === b.selected && a.freeform === b.freeform
   ));
 }
@@ -838,12 +839,43 @@ function panesEqual(left, right) {
   const primitives = [
     "id", "target", "name", "kind", "rawKind", "kindLabel", "status", "rawStatus",
     "statusLabel", "title", "question", "updated", "changed", "window", "starred",
-    "interacted", "actionable", "configuredOffline",
+    "interacted", "actionable", "configuredOffline", "provider", "stale",
   ];
   return primitives.every((key) => left[key] === right[key])
     && arraysEqual(left.preview, right.preview)
     && arraysEqual(left.lines, right.lines)
-    && menuEqual(left.menu, right.menu);
+    && menuEqual(left.menu, right.menu)
+    && JSON.stringify(left.hierarchy) === JSON.stringify(right.hierarchy)
+    && JSON.stringify(left.capabilities) === JSON.stringify(right.capabilities)
+    && JSON.stringify(left.nativeAgent) === JSON.stringify(right.nativeAgent)
+    && JSON.stringify(left.actionGuard) === JSON.stringify(right.actionGuard);
+}
+
+function normalizeHierarchy(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isObject).map((node) => ({
+    kind: textValue(node.kind).slice(0, 40),
+    id: textValue(node.id).slice(0, 200),
+    label: textValue(node.label).slice(0, 200),
+    position: Number.isInteger(node.position) ? node.position : null,
+  })).filter((node) => node.kind && node.id);
+}
+
+function normalizeCapabilities(value, provider) {
+  const source = isObject(value) ? value : {};
+  const legacy = provider === "tmux";
+  return {
+    capture: source.capture !== false,
+    input: ["legacy", "guarded_v1", "none"].includes(source.input)
+      ? source.input : (legacy ? "legacy" : "none"),
+    literalText: source.literal_text !== false,
+    menuSelect: source.menu_select !== false,
+    keys: Array.isArray(source.keys) ? source.keys.filter((key) => typeof key === "string") : (legacy ? FALLBACK_KEYS.slice() : []),
+    broadcast: source.broadcast !== false && legacy,
+    create: source.create === true,
+    delete: source.delete === true,
+    nativeAgentState: source.native_agent_state === true,
+  };
 }
 
 /** Normalize one untrusted PaneState-shaped JSON object for safe rendering. */
@@ -862,6 +894,26 @@ export function normalizePane(raw, index = 0) {
     ? suppliedPreview
     : lines.filter((line) => line.trim()).slice(-6);
   const configuredOffline = id.startsWith("cfg:") || status === "offline";
+  const rawProvider = textValue(source.provider).trim();
+  const provider = rawProvider || "tmux";
+  const knownProvider = provider === "tmux" || provider === "herdr";
+  const capabilities = normalizeCapabilities(source.capabilities, provider);
+  const nativeSource = isObject(source.native_agent) ? source.native_agent : null;
+  const nativeAgent = nativeSource ? {
+    present: nativeSource.present === true,
+    kind: textValue(nativeSource.kind) || null,
+    name: textValue(nativeSource.name) || null,
+    status: ["idle", "working", "blocked", "done", "unknown"].includes(nativeSource.status)
+      ? nativeSource.status : "unknown",
+    stateChangeSeq: Number.isInteger(nativeSource.state_change_seq) ? nativeSource.state_change_seq : null,
+    interactiveReady: typeof nativeSource.interactive_ready === "boolean" ? nativeSource.interactive_ready : null,
+  } : null;
+  const guardSource = isObject(source.action_guard) ? source.action_guard : null;
+  const actionGuard = guardSource ? {
+    endpoint_revision: textValue(guardSource.endpoint_revision),
+    prompt_fingerprint: textValue(guardSource.prompt_fingerprint) || null,
+    options_fingerprint: textValue(guardSource.options_fingerprint) || null,
+  } : null;
   return {
     id,
     target,
@@ -883,7 +935,14 @@ export function normalizePane(raw, index = 0) {
     starred: source.starred === true,
     interacted: finiteNumber(source.interacted, 0),
     configuredOffline,
-    actionable: Boolean(suppliedId) && !configuredOffline,
+    provider,
+    hierarchy: normalizeHierarchy(source.hierarchy),
+    capabilities,
+    nativeAgent,
+    actionGuard,
+    stale: source.stale === true,
+    actionable: Boolean(suppliedId) && knownProvider && !configuredOffline
+      && source.actionable !== false && source.stale !== true && capabilities.input !== "none",
   };
 }
 
@@ -1649,6 +1708,28 @@ export function createActionDispatcher(store) {
     return isObject(pane) ? pane : null;
   }
 
+  function idempotencyKey() {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+    return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function guardedBody(pane, operation, values = {}) {
+    if (!pane.actionGuard || !pane.actionGuard.endpoint_revision) {
+      throw new ApiError("The pane action guard is unavailable", {
+        category: "validation", endpoint: "/api/input",
+      });
+    }
+    return {
+      id: pane.id,
+      operation,
+      ...values,
+      expected: { ...pane.actionGuard },
+      idempotency_key: idempotencyKey(),
+    };
+  }
+
   function canAct(pane = null) {
     const { connection } = store.getSnapshot();
     if (connection.compatibility.blocksActions) return false;
@@ -1754,6 +1835,13 @@ export function createActionDispatcher(store) {
           category: "api", endpoint, cause: rawError,
         });
         store._handleApiError(error);
+        if (error.status === 409 && endpoint === "/input" && typeof store.refreshState === "function") {
+          // A conflict means the current prompt/identity must be fetched again.
+          // Never replay the terminal mutation automatically.
+          void store.refreshState().catch((refreshError) => {
+            console.warn("[vmux] guarded action refresh failed", refreshError instanceof Error ? refreshError.name : "error");
+          });
+        }
         store._recordAction({
           paneId,
           actionKey,
@@ -1773,26 +1861,41 @@ export function createActionDispatcher(store) {
     return promise;
   }
 
-  function select(pane, optionKey) {
+  function select(pane, optionValue) {
     const resolved = currentPane(pane);
-    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, "/api/select"));
-    const key = textValue(optionKey);
+    const guarded = resolved?.capabilities?.input === "guarded_v1";
+    const endpoint = guarded ? "/input" : "/select";
+    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, `/api${endpoint}`));
+    const suppliedOption = isObject(optionValue) ? optionValue : null;
+    const key = textValue(suppliedOption ? suppliedOption.key : optionValue);
     if (!key) return Promise.reject(new ApiError("A menu key is required", {
-      category: "validation", endpoint: "/api/select",
+      category: "validation", endpoint: `/api${endpoint}`,
     }));
+    const option = guarded ? resolved.menu.find((item) => (
+      suppliedOption?.id ? item.id === suppliedOption.id : item.key === key
+    )) : null;
+    if (guarded && !option?.id) return Promise.reject(new ApiError("The menu option is stale", {
+      category: "validation", endpoint: "/api/input",
+    }));
+    let body;
+    try {
+      body = guarded
+        ? guardedBody(resolved, "select", { option_id: option.id })
+        : { id: resolved.id, key };
+    } catch (error) { return Promise.reject(error); }
     return perform({
       paneId: resolved.id,
       type: "select",
       actionKey: `select:${key}`,
-      endpoint: "/select",
-      body: { id: resolved.id, key },
+      endpoint,
+      body,
       pendingMessage: "Sending answer…",
       successMessage: "Answer sent.",
     });
   }
 
-  async function selectThenCompose(pane, optionKey) {
-    const result = await select(pane, optionKey);
+  async function selectThenCompose(pane, optionValue) {
+    const result = await select(pane, optionValue);
     const paneId = paneIdOf(pane);
     if (typeof globalThis.dispatchEvent === "function" && typeof globalThis.CustomEvent === "function") {
       globalThis.dispatchEvent(new globalThis.CustomEvent("vmux:focus-composer", {
@@ -1804,17 +1907,25 @@ export function createActionDispatcher(store) {
 
   function key(pane, namedKey) {
     const resolved = currentPane(pane);
-    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, "/api/key"));
+    const guarded = resolved?.capabilities?.input === "guarded_v1";
+    const endpoint = guarded ? "/input" : "/key";
+    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, `/api${endpoint}`));
     const value = textValue(namedKey);
-    if (!value) return Promise.reject(new ApiError("A named key is required", {
-      category: "validation", endpoint: "/api/key",
+    if (!value || (guarded && !resolved.capabilities.keys.includes(value))) return Promise.reject(new ApiError("A supported named key is required", {
+      category: "validation", endpoint: `/api${endpoint}`,
     }));
+    let body;
+    try {
+      body = guarded
+        ? guardedBody(resolved, "key", { key: value })
+        : { id: resolved.id, key: value };
+    } catch (error) { return Promise.reject(error); }
     return perform({
       paneId: resolved.id,
       type: "key",
       actionKey: `key:${value}`,
-      endpoint: "/key",
-      body: { id: resolved.id, key: value },
+      endpoint,
+      body,
       pendingMessage: "Sending key…",
       successMessage: "Key sent.",
     });
@@ -1822,17 +1933,25 @@ export function createActionDispatcher(store) {
 
   function text(pane, value, enter = false) {
     const resolved = currentPane(pane);
-    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, "/api/text"));
+    const guarded = resolved?.capabilities?.input === "guarded_v1";
+    const endpoint = guarded ? "/input" : "/text";
+    if (!canAct(resolved)) return Promise.reject(blockedError(resolved, `/api${endpoint}`));
     const textValueRaw = typeof value === "string" ? value : "";
     if (!textValueRaw && !enter) return Promise.reject(new ApiError("Reply text is empty", {
-      category: "validation", endpoint: "/api/text",
+      category: "validation", endpoint: `/api${endpoint}`,
     }));
+    let body;
+    try {
+      body = guarded
+        ? guardedBody(resolved, "text", { text: textValueRaw, enter: Boolean(enter) })
+        : { id: resolved.id, text: textValueRaw, enter: Boolean(enter) };
+    } catch (error) { return Promise.reject(error); }
     return perform({
       paneId: resolved.id,
       type: "text",
       actionKey: `text:${enter ? 1 : 0}:${shortHash(textValueRaw)}`,
-      endpoint: "/text",
-      body: { id: resolved.id, text: textValueRaw, enter: Boolean(enter) },
+      endpoint,
+      body,
       pendingMessage: "Sending reply…",
       successMessage: "Reply sent.",
     });
@@ -1875,7 +1994,7 @@ export function createActionDispatcher(store) {
     for (const candidate of requested) {
       const resolved = currentPane(candidate);
       const id = paneIdOf(candidate);
-      if (!resolved || !canAct(resolved) || seen.has(resolved.id)) {
+      if (!resolved || !canAct(resolved) || resolved.capabilities?.broadcast === false || seen.has(resolved.id)) {
         if (id && !seen.has(id)) excluded.push(id);
         continue;
       }

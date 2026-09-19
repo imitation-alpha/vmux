@@ -426,9 +426,12 @@ class PushManager:
             body = "A pane reported an error."
         else:
             body = "A pane needs your input."
-        category = classify_category(pane.menu)
+        # Herdr actions require a fresh endpoint/prompt/revision guard. Native
+        # notification categories only carry legacy menu keys, so they must
+        # remain open-only until the native client implements guarded input.
+        category = classify_category(pane.menu) if pane.provider == "tmux" else "vmux.open"
         custom = {"id": pane.id}
-        if category in ("vmux.confirm2", "vmux.confirm3"):
+        if pane.provider == "tmux" and category in ("vmux.confirm2", "vmux.confirm3"):
             # Action ids vmux.opt.<i> map through this minimal list to the key
             # accepted by /api/select. Labels remain exclusively on the server.
             custom["menu"] = [

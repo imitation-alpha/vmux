@@ -7,7 +7,7 @@ the backend produces and the frontend renders. Keep it stable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # Status values, in rough order of "how much it wants you".
 STATUS_NEEDS_INPUT = "needs_input"  # a dialog is waiting on a human  (red, pulsing)
@@ -35,15 +35,19 @@ class MenuOption:
     description: str = ""  # bounded supporting text; empty when unavailable
     selected: bool = False  # currently highlighted in the TUI (the default)
     freeform: bool = False  # picking this drops into a free-text reply ("tell Claude what to do")
+    id: str = ""            # opaque guarded-action identity (empty on legacy snapshots)
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "key": self.key,
             "label": self.label,
             "description": self.description,
             "selected": self.selected,
             "freeform": self.freeform,
         }
+        if self.id:
+            payload["id"] = self.id
+        return payload
 
 
 @dataclass
@@ -62,6 +66,13 @@ class PaneState:
     window: str = ""                          # tmux window name (for the tree view)
     starred: bool = False                     # user-starred (PaneOverride.star)
     interacted: float = 0.0                   # epoch of last user send to this pane (for sort)
+    provider: str = "tmux"                    # terminal provider; additive wire field
+    hierarchy: List[Dict[str, Any]] = field(default_factory=list)
+    capabilities: Dict[str, Any] = field(default_factory=dict)
+    native_agent: Optional[Dict[str, Any]] = None
+    action_guard: Optional[Dict[str, str]] = None
+    actionable: bool = True
+    stale: bool = False
 
     def preview(self, n: int = 6) -> List[str]:
         """Last n non-empty-ish lines, for the grid card snippet."""
@@ -85,4 +96,11 @@ class PaneState:
             "window": self.window,
             "starred": self.starred,
             "interacted": self.interacted,
+            "provider": self.provider,
+            "hierarchy": self.hierarchy,
+            "capabilities": self.capabilities,
+            "native_agent": self.native_agent,
+            "action_guard": self.action_guard,
+            "actionable": self.actionable,
+            "stale": self.stale,
         }

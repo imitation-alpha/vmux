@@ -47,6 +47,8 @@ class CreationService:
 
     # -- public metadata ------------------------------------------------- #
     def setup_status(self) -> Tuple[bool, str]:
+        if self.cfg.terminal_provider != "tmux":
+            return False, "Creation is unavailable for the selected terminal provider."
         if not self.cfg.creation_configured:
             return False, self.cfg.creation_setup_reason
         if not tmux.available():

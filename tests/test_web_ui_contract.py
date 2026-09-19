@@ -344,6 +344,32 @@ def test_agent_kinds_and_unknown_wire_values_have_safe_labels():
     assert 'unknown: "Unknown"' in state
 
 
+def test_herdr_state_is_capability_guarded_hierarchical_and_conflict_safe():
+    state = source("js/state.js")
+    ui = source("js/ui.js")
+    worker = source("sw.js")
+    normalize = function_body(state, "normalizePane", "createPaneNormalizer")
+    for field in (
+        "provider", "hierarchy", "capabilities", "nativeAgent", "actionGuard", "stale",
+    ):
+        assert field in normalize
+    assert "source.actionable !== false" in normalize
+    assert 'capabilities.input !== "none"' in normalize
+    assert 'capabilities?.input === "guarded_v1"' in state
+    assert 'guardedBody(resolved, "select"' in state
+    assert 'guardedBody(resolved, "key"' in state
+    assert 'guardedBody(resolved, "text"' in state
+    assert 'endpoint = guarded ? "/input"' in state
+    assert "idempotency_key: idempotencyKey()" in state
+    assert "error.status === 409" in state
+    assert "Never replay" in state
+    assert "resolved.capabilities?.broadcast === false" in state
+    assert 'pane.provider === "herdr"' in ui
+    assert 'node("workspace")' in ui and 'node("tab")' in ui
+    assert "supportedKeys.includes(key)" in ui
+    assert 'const CACHE_NAME = "vmux-shell-v32"' in worker
+
+
 def test_menu_descriptions_normalize_compare_and_render_in_the_action_card():
     state = source("js/state.js")
     ui = source("js/ui.js")
@@ -363,8 +389,8 @@ def test_actions_share_one_dispatcher_and_never_swallow_failures():
     ui = source("js/ui.js")
     app = source("js/app.js")
     assert "export function createActionDispatcher(store)" in state
-    for endpoint in ("/select", "/key", "/text", "/star", "/broadcast"):
-        assert f'endpoint: "{endpoint}"' in state
+    for endpoint in ("/select", "/key", "/text", "/input", "/star", "/broadcast"):
+        assert f'"{endpoint}"' in state
     assert "if (inflight.has(flightKey)) return inflight.get(flightKey);" in state
     assert "_setOptimisticStar" in state
     assert "_rollbackOptimisticStar" in state

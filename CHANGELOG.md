@@ -7,6 +7,34 @@ the documentation.
 
 ## [Unreleased]
 
+### Added
+
+- One explicitly configured Herdr 0.8.2/protocol-20 terminal provider for
+  monitor-and-respond workflows, with atomic discovery, native
+  session/workspace/tab hierarchy, native agent-state enrichment, opaque live
+  endpoint identities, optional wake-only events, and stale read-only failure
+  recovery.
+- A guarded `POST /api/input` capability with exact route/prompt/options
+  revalidation, provider-specific verified keys, per-endpoint serialization,
+  in-memory idempotency, and explicit uncertain/partial-delivery outcomes.
+- Bundled PWA support for provider capabilities, native hierarchy/state,
+  guarded response dispatch, conflict refresh without replay, and provider-safe
+  creation/broadcast controls.
+
+### Security
+
+- Legacy terminal action routes reject Herdr endpoints. Herdr labels and native
+  statuses never authorize input; literal control bytes are rejected, APNs uses
+  open-only categories, and Herdr creation, deletion, layout/focus, agent start,
+  broadcast, and server/session lifecycle operations remain outside product
+  code.
+
+### Changed
+
+- Terminal polling now uses a provider-neutral boundary while preserving tmux
+  ids, targets, command ordering, creation, Agent Workspace, and default startup
+  behavior.
+
 ## [0.1.1] - 2026-07-31
 
 ### Fixed

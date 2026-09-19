@@ -30,6 +30,26 @@ def _stub_startup(monkeypatch):
     return calls
 
 
+def test_main_herdr_probes_explicit_session_without_touching_tmux(tmp_path, monkeypatch):
+    cfgfile = tmp_path / "config.yaml"
+    cfgfile.write_text("terminal:\n  provider: herdr\n  herdr:\n    session: agents\n")
+    calls = {}
+
+    class Provider:
+        def probe(self):
+            calls["probe"] = True
+
+    monkeypatch.setattr(cli, "provider_for_config", lambda cfg: Provider())
+    monkeypatch.setattr(cli.tmux, "available", lambda: (_ for _ in ()).throw(AssertionError("tmux checked")))
+    monkeypatch.setattr(cli.tmux, "list_panes", lambda: (_ for _ in ()).throw(AssertionError("tmux listed")))
+    monkeypatch.setattr(cli.tmux, "disable_automatic_rename", lambda: (_ for _ in ()).throw(AssertionError("tmux mutated")))
+    monkeypatch.setattr(cli, "create_app", lambda cfg, provider=None: {"cfg": cfg, "provider": provider})
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=lambda *args, **kwargs: None))
+
+    assert cli.main(["-c", str(cfgfile)]) == 0
+    assert calls == {"probe": True}
+
+
 def test_main_disables_tmux_automatic_rename_by_default(monkeypatch):
     _stub_startup(monkeypatch)
     rename_calls = []

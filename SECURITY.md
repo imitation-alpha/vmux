@@ -2,8 +2,9 @@
 
 ## Security model
 
-vmux can send keystrokes into tmux panes. Anyone who can reach an instance and
-authenticate with its bearer token can drive the connected agents and may be
+vmux can send keystrokes into panes in the selected tmux or Herdr provider.
+Anyone who can reach an instance and authenticate with its bearer token can
+drive the connected agents and may be
 able to run commands with the privileges of the vmux user. There is no
 per-client or per-pane authorization layer: treat the bearer token like a
 password with command-execution authority.
@@ -36,7 +37,7 @@ public access are not supported network paths.
 vmux refuses to bind a non-loopback address with an empty token. That check is
 a last line of defense, not proof that a deployment is safe. A token does not
 replace TLS, firewalling, operating-system isolation, or access controls on the
-underlying tmux session.
+underlying terminal provider.
 
 ## Token handling
 
@@ -75,9 +76,19 @@ The implementation is designed so that:
 
 - Authentication comparisons are constant-time on REST and WebSocket paths.
 - A non-loopback bind with an empty token fails at startup.
-- tmux and tokscale subprocesses, including Antigravity synchronization, use
-  argument lists rather than a shell, pane identifiers are
-  validated, named keys are allow-listed, and literal text is sent literally.
+- terminal-provider and tokscale subprocesses, including Antigravity
+  synchronization, use argument lists rather than a shell. tmux pane ids are
+  validated. Herdr uses only current opaque registry handles and routes every
+  command to one configured session. Named keys are provider-specific
+  allowlists and text uses literal primitives.
+- Herdr input is unavailable through legacy routes. Guarded input revalidates
+  exact native identity and fresh prompt/options fingerprints, reserves
+  idempotency before I/O, rejects control bytes in text, and never replays an
+  uncertain send. Labels, native status, and wake-only event frames cannot
+  authorize input.
+- Herdr resource creation/deletion, focus/move/rename/resize, agent start,
+  broadcast, and server/session lifecycle operations are absent from product
+  code. Failed discovery retains stale read-only state.
 - User-configured regular expressions have execution timeouts.
 - Browser runtime assets are vendored and served from the same origin rather
   than loaded from a third-party CDN.

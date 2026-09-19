@@ -16,10 +16,21 @@ naming_mode: session_window_pane  # pane names default to session:window:pane
                                   # also: pane, window_pane, session_pane,
                                   # title, window, target, command, smart
 
+# One terminal provider is selected for the whole server. tmux is the default.
+# Herdr requires one explicit already-running named session; vmux never owns
+# its lifecycle or creates/deletes/moves/focuses/renames Herdr resources.
+terminal:
+  provider: tmux             # tmux | herdr
+  herdr:
+    session: ""              # required when provider is herdr
+    binary: herdr            # resolved and pinned at vmux startup
+    events: auto             # auto | off; wake hints only, polling remains authoritative
+
 tmux:
   disable_auto_rename: true  # set tmux automatic-rename off at startup
 
 # Optional session/window/pane creation from authenticated clients. Creation is
+# always unavailable when terminal.provider is herdr.
 # disabled unless enabled here and at least one root resolves to a readable,
 # searchable directory. Roots and runtime argument arrays are YAML-only.
 # Shell is implicit and starts tmux's default shell.
@@ -88,6 +99,8 @@ discovery:
 
 # Optional per-pane overrides / starred panes. A target listed here is always
 # shown; starred panes stay near the top and remain visible if they go offline.
+# Herdr targets are opaque values copied from /api/state and intentionally
+# change after a route move; labels never select or authorize an endpoint.
 panes:
   # - target: "work:1.1"        # session:window.pane (see `tmux list-panes -a`)
   #   name: "API refactor"

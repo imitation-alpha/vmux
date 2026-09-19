@@ -18,6 +18,23 @@ tmux list-panes -a
 Install tmux, start a session, and run vmux again. A service manager needs an
 explicit `PATH` and must run as the user who owns the tmux server.
 
+### Herdr provider is unavailable
+
+When Herdr is selected, startup status 2 means the pinned executable, exact
+named session, protocol-20 compatibility, schema, or socket identity did not
+validate. Check the same service user and explicit session without changing the
+running default fleet:
+
+~~~bash
+herdr status --json --session my-agents
+herdr api snapshot --session my-agents
+~~~
+
+The configured session must already be running. vmux never starts, stops, or
+restarts Herdr. Correct `terminal.herdr.binary`/`session`, or select tmux again.
+Do not work around this with ambient `HERDR_SESSION`; vmux always supplies the
+configured trailing session argument.
+
 ### Non-loopback bind has no token
 
 This refusal is intentional:
@@ -60,6 +77,12 @@ If tmux lists panes but vmux does not, check:
 - `discovery.auto` is true
 - a UI overlay is not overriding the YAML value
 - the service can reach the same tmux socket and executable `PATH`
+
+For Herdr, also confirm that `api snapshot` succeeds for the exact configured
+session. Small direct `pane read --lines` values can be empty; vmux already
+requests 200 rows and trims locally. A stale/read-only card means the last good
+snapshot was retained after a malformed, timed-out, or inconsistent provider
+pass. vmux will resume action only after a valid poll.
 
 See [Pane discovery](guides/pane-discovery.md).
 

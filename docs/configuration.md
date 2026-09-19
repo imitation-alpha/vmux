@@ -24,7 +24,8 @@ Configuration is resolved in this order, from lowest to highest precedence:
 1. built-in defaults
 2. the selected YAML file
 3. the Settings UI JSON overlay
-4. CLI overrides (`--host`, `--port`, `--token`, and `--include-shells`)
+4. CLI overrides (`--host`, `--port`, `--token`, `--include-shells`,
+   `--terminal-provider`, and `--herdr-session`)
 
 When a config path is used, the overlay is `vmux-settings.json` beside that
 file. Without a config path it is `~/.vmux/settings.json`. UI updates replace
@@ -88,13 +89,62 @@ recognized existing choices and maps legacy `needs`/`working` destinations to
 | `poll_interval` | `0.7` seconds | Yes | Delay between capture passes; UI values clamp to 0.2–10 seconds. |
 | `capture_lines` | `200` | Yes | Scrollback lines captured per pane; values clamp to 40–2000. |
 | `naming_mode` | `session_window_pane` | Yes | Source used for display names. |
+| `terminal.provider` | `tmux` | No | Select exactly one terminal authority: `tmux` or `herdr`. |
+| `terminal.herdr.session` | empty | No | Required explicit named session when Herdr is selected. |
+| `terminal.herdr.binary` | `herdr` | No | Executable resolved and pinned at startup. |
+| `terminal.herdr.events` | `auto` | No | `auto` enables optional wake-only native events; `off` uses polling only. |
 | `tmux.disable_auto_rename` | `true` | No | Disables tmux's global `automatic-rename` option at startup. |
-| `discovery.auto` | `true` | Yes | Include panes found from the live tmux server. |
+| `discovery.auto` | `true` | Yes | Include panes found from the selected terminal provider. |
 | `discovery.include_shells` | `false` | Yes | Include ordinary idle shell panes. |
 | `agents.retention_days` | `30` | No | Retain historical agent snapshots, visible messages, and resolved decisions. |
 
 Disabling automatic rename is a tmux-wide change. Set
 `tmux.disable_auto_rename: false` if another tmux workflow owns window names.
+It is not applied when Herdr is selected.
+
+## Terminal provider
+
+No terminal section means tmux and preserves the existing behavior. Herdr
+monitor/respond mode requires Herdr 0.8.2 (protocol 20) and one explicit,
+already-running named session:
+
+~~~yaml
+terminal:
+  provider: herdr
+  herdr:
+    session: my-agents
+    binary: /absolute/path/to/herdr
+    events: auto
+~~~
+
+Every Herdr CLI call includes the configured session as a distinct trailing
+argument; vmux never falls back to ambient Herdr focus or a default session.
+`binary`, `session`, provider selection, and event transport are YAML/CLI-only
+authority choices and require a vmux restart. vmux validates the running
+session, protocol, schema, and socket identity. It does not start a missing or
+stopped session and never restarts Herdr.
+
+Herdr discovery uses an atomic snapshot and exact native ID relationships.
+Output is read from `recent-unwrapped` with at least 200 rows because small
+reads can be empty on Herdr 0.8.2. Native agent status enriches vmux status, but
+never authorizes input. Optional socket events only wake a normal snapshot
+poll; disabling or losing the event reader does not stop polling.
+
+Herdr input uses the additive guarded endpoint advertised by
+`terminal_provider_v1`. Legacy key/text/select routes return
+`409 guarded_input_required`. The PWA immediately revalidates the opaque live
+endpoint, route revision, prompt, and menu options and never replays a conflict
+or uncertain delivery. Herdr sends only verified `Enter`, `Escape`, `C-c`, and
+`C-u` keys. Control characters (including newlines) are rejected in literal
+text because Herdr would deliver them to the PTY and could submit unexpectedly.
+Text and Enter remain separate operations.
+
+Herdr v1 deliberately excludes terminal/workspace/tab creation or deletion,
+focus, move, resize, rename, agent start, broadcast, and server/session
+lifecycle. tmux creation and the structured Agent Workspace report unavailable.
+Opaque Herdr targets and action IDs are never derived from labels. A route move
+changes the target, so a star/override must be selected again rather than being
+silently adopted by a same-labeled pane.
 
 ## Server examples
 
@@ -144,7 +194,7 @@ disappears. Manual names and stars can also be edited live. See
 
 ## Tmux creation
 
-Creation is opt-in and YAML-only. It remains unavailable unless `enabled` is
+Creation is opt-in, YAML-only, and available only with the tmux provider. It remains unavailable unless `enabled` is
 true and at least one root exists, is a directory, and is readable/searchable
 by the vmux process:
 
@@ -226,7 +276,8 @@ disabling pane monitoring.
 ## Experimental Agent Workspace
 
 Agent Context, Review, Timeline, structured decisions/chat, observation, and
-their local database writes are one server-wide experimental bundle. It is off
+their local database writes are one server-wide experimental bundle. The bundle
+is tmux-only in this release and reports unsupported when Herdr is selected. It is off
 by default and is enabled only with **Settings → Experimental → Enable Agent
 Workspace**. The switch is persisted in `vmux-settings.json` and starts or stops
 the runtime without restarting vmux. An `agents.enabled` YAML value is ignored.

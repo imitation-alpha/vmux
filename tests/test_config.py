@@ -75,6 +75,32 @@ def test_tmux_auto_rename_disabled_by_default():
     assert config.Config().disable_tmux_auto_rename is True
 
 
+def test_herdr_provider_requires_explicit_yaml_session_and_stays_out_of_overlay(tmp_path):
+    missing = tmp_path / "missing.yaml"
+    missing.write_text("terminal:\n  provider: herdr\n")
+    with pytest.raises(SystemExit, match="terminal.herdr.session is required"):
+        config.load(str(missing))
+
+    path = tmp_path / "herdr.yaml"
+    path.write_text(
+        "terminal:\n"
+        "  provider: herdr\n"
+        "  herdr:\n"
+        "    session: agents\n"
+        "    binary: /opt/herdr\n"
+        "    events: off\n"
+    )
+    cfg = config.load(str(path))
+    assert cfg.terminal_provider == "herdr"
+    assert cfg.herdr_session == "agents"
+    assert cfg.herdr_binary == "/opt/herdr"
+    assert cfg.herdr_events == "off"
+    assert "terminal_provider" not in cfg.editable_dict()
+    cfg.apply_patch({"terminal_provider": "tmux", "herdr_session": "other"})
+    assert cfg.terminal_provider == "herdr"
+    assert cfg.herdr_session == "agents"
+
+
 def test_tmux_auto_rename_yaml_can_opt_out(tmp_path):
     cfgfile = tmp_path / "config.yaml"
     cfgfile.write_text("tmux:\n  disable_auto_rename: false\n")

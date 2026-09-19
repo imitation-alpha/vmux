@@ -1,29 +1,59 @@
 # Architecture
 
-vmux has two local, cooperating pipelines. The terminal pipeline captures tmux
-and publishes `PaneState`. The agent-context pipeline observes supported
+vmux has two local, cooperating pipelines. The terminal pipeline selects one
+provider (tmux or one explicit Herdr session), captures its endpoints, and
+publishes `PaneState`. The tmux-only agent-context pipeline observes supported
 runtime logs and publishes structured, resumable session state. Terminal state
 remains the fallback and the source of live prompt verification.
 
 ~~~text
-tmux ── capture-pane ──▶ poller ── detectors ──▶ PaneState snapshot
-  ▲                │                                │
-  │                ├── runtime association          └── REST + /ws
-  │                ▼
-  │        Codex / Claude log observers ──▶ AgentService ──▶ SQLite
-  │                                               │            │
-  │                                               └── REST + /ws/agents
-  │                                                            │
-  └──── revision- and prompt-verified terminal input ◀─────────┘
+tmux ───────┐
+            ├── TerminalProvider ──▶ poller ── detectors ──▶ PaneState ── REST + /ws
+Herdr ──────┘         ▲                                      │
+ optional events ─ wake only                                 │
+                     │                                       │
+                     └── exact route + prompt guards ◀── POST /api/input
+
+Codex / Claude logs (tmux only) ──▶ AgentService ──▶ SQLite ── REST + /ws/agents
 ~~~
 
 ## Runtime components
 
 ### CLI and configuration
 
-`vmux.__main__` parses CLI overrides, verifies tmux, loads YAML plus the JSON
-overlay, validates the bind/token boundary, and starts Uvicorn. vmux disables
-tmux `automatic-rename` by default unless configuration opts out.
+`vmux.__main__` parses CLI overrides, loads YAML plus the JSON overlay,
+validates the bind/token boundary and selected terminal provider, and starts
+Uvicorn. vmux disables tmux `automatic-rename` by default unless configuration
+opts out. Herdr startup probes but never starts, reloads, or otherwise owns the
+configured session/server.
+
+### Terminal providers
+
+`terminals/base.py` defines normalized endpoint, hierarchy, native state,
+capability, health, capture, and guarded-action contracts. `TmuxProvider` wraps
+the existing safe `tmux.py` module and preserves `%N` ids, target strings,
+legacy action fallbacks, and command ordering.
+
+`HerdrProvider` pins one executable and one explicit session at startup. Every
+session-scoped argv ends with `--session <name>`. Discovery validates one atomic
+snapshot and exact workspace/tab/pane/terminal/agent relationships. Opaque
+public handles map only to current private routes; labels are display-only. A
+failed pass is non-authoritative, so the poller retains the last snapshot as
+stale/read-only instead of inferring deletion. Herdr 0.8.2 route revisions do
+not advance for terminal output, so captures are never cached by revision; vmux
+requests at least 200 rows and trims locally.
+
+`TerminalActionService` keeps old routes tmux-only. Guarded Herdr input resolves
+one current registry entry, compares client guards, reads a fresh detection
+buffer between two exact route snapshots, reparses the prompt/options, and then
+issues one literal/key operation under a per-endpoint lock. Idempotency is
+reserved before I/O and uncertain sends are never replayed. Herdr's protocol
+has no atomic compare-and-send, leaving a documented narrow local-client race.
+
+`HerdrEventSubscriber` checks the configured session socket's identity,
+ownership, type, and write permissions, then subscribes to native status
+changes. An event can only wake the normal poller; it never patches state or
+triggers input. Polling remains active through all event failures.
 
 ### tmux adapter
 
@@ -33,7 +63,7 @@ keys, and sends user text in literal mode.
 
 ### Poller and detector
 
-`Hub.poll_once()` lists panes and captures them concurrently. For each included
+`Hub.poll_once()` discovers provider endpoints and captures them concurrently. For each included
 pane it:
 
 1. hashes captured text and records whether it changed
@@ -42,7 +72,11 @@ pane it:
 4. resolves a display name and manual override
 5. builds a `PaneState`
 
-Configured targets that are absent become `offline` states. The loop runs every
+Herdr native status and hierarchy enrich the compatibility result without
+becoming action authority. Native `blocked` maps to `needs_input`; terminal
+questions/errors retain precedence; native `working` maps to working; native
+`idle`/`done` map to compatibility idle while the original status remains
+visible. Configured targets that are absent become `offline` states. The loop runs every
 `poll_interval`, 0.7 seconds by default, and an action wakes it for an immediate
 new pass.
 
@@ -176,19 +210,22 @@ the complete editable subset to a JSON overlay:
 built-in defaults < YAML < JSON overlay < CLI overrides
 ~~~
 
-The overlay never rewrites YAML. Bind, token, tmux auto-rename, APNs
-credentials, `usage.command`, and AI backend settings stay YAML/CLI-only.
+The overlay never rewrites YAML. Bind, token, terminal provider/Herdr authority,
+tmux auto-rename, APNs credentials, `usage.command`, and AI backend settings
+stay YAML/CLI-only.
 Creation roots and runtime arrays are also YAML-only.
 
 ## Trust boundaries
 
-### tmux boundary
+### terminal boundary
 
 An authenticated client can intentionally cause input to be sent to a pane.
 That pane may be a shell or an agent capable of running commands as the vmux OS
 user. The bearer token therefore authorizes a high-impact capability.
-When creation is enabled, it additionally authorizes in-root directory browsing
-and detached process creation as that same OS user.
+When tmux creation is enabled, it additionally authorizes in-root directory
+browsing and detached process creation as that same OS user. Herdr creation,
+deletion, focus, move, rename, resize, broadcast, agent start, and all
+server/session lifecycle operations are absent from product code.
 
 ### network boundary
 
@@ -224,8 +261,11 @@ executable markup.
 
 Changes must preserve all of these:
 
-- subprocesses receive argument lists; tmux actions never construct a shell
-  command
+- subprocesses receive argument lists; terminal actions never construct a shell command
+- every Herdr command is routed to the one configured session; no ambient focus or label resolves an action
+- Herdr legacy mutation routes fail closed; guarded input requires current opaque identity plus fresh prompt/options verification
+- Herdr events are wake-only, malformed discovery retains stale read-only state, and uncertain input is never replayed
+- Herdr literal text rejects terminal control bytes so submission remains a separate Enter operation
 - live pane ids and configured targets are format-checked before tmux use
 - named keys are allow-listed
 - text uses `tmux send-keys -l --` so it remains literal

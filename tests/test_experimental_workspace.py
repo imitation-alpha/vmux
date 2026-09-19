@@ -140,8 +140,9 @@ def test_successful_switch_change_invalidates_other_pwa_config_clients(
                 json={"experimental_agent_workspace_enabled": True},
             )
             assert response.status_code == 200
-            messages = [websocket.receive_json() for _ in range(3)]
-            assert "config_changed" in {message["type"] for message in messages}
+            # Config invalidation is the only required frame. Do not depend on
+            # incidental poll timing to enqueue extra pane snapshots.
+            assert websocket.receive_json()["type"] == "config_changed"
 
 
 def test_failed_disable_persistence_restores_enabled_runtime(tmp_path, monkeypatch):
