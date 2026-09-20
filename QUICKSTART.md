@@ -28,22 +28,10 @@ vmux
 Open <http://127.0.0.1:8787>. If an empty pane list is expected because you are
 testing with ordinary shells, restart with `vmux --include-shells`.
 
-To monitor and respond through Herdr instead, explicitly select one already
-running named session. vmux never starts or stops it:
-
-~~~yaml
-terminal:
-  provider: herdr
-  herdr:
-    session: my-agents
-    binary: herdr
-    events: auto
-~~~
-
-Run `vmux --config config.yaml`. Herdr creation/deletion, broadcast, Agent
-Workspace, and all Herdr lifecycle/layout control remain unavailable. See the
-[configuration guide](https://imitation-alpha.github.io/vmux/configuration/#terminal-provider)
-for the guarded-input and compatibility details.
+To monitor and respond through Herdr instead, follow the
+[terminal-provider configuration guide](https://imitation-alpha.github.io/vmux/configuration/#terminal-provider)
+for session selection, supported operations, and compatibility requirements,
+then run `vmux --config config.yaml`.
 
 ## Reach another device
 
