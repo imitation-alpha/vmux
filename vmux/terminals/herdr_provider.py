@@ -56,6 +56,16 @@ def _integer(value: Any) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _status_session_matches(record: dict, session: str) -> bool:
+    if "session" not in record:
+        return False
+    value = record["session"]
+    # Herdr 0.8.2 serializes the implicit default session as JSON null. Named
+    # sessions carry their name here; the session-list and socket checks below
+    # remain the authoritative identity proof for both forms.
+    return value == session or (session == "default" and value is None)
+
+
 def _schema_tokens(value: Any) -> set[str]:
     tokens: set[str] = set()
     if isinstance(value, str):
@@ -199,15 +209,20 @@ class HerdrProvider(TerminalProvider):
                 or protocol is None
                 or protocol < MIN_PROTOCOL
                 or client_protocol != protocol
-                or client.get("session") != self.session
-                or server.get("session") != self.session
+                or not _status_session_matches(client, self.session)
+                or not _status_session_matches(server, self.session)
             ):
                 raise ProviderError("configured Herdr session is not compatible", category="incompatible")
             sessions = self._json(["session", "list", "--json"]).get("sessions")
             if not isinstance(sessions, list) or any(not isinstance(item, dict) for item in sessions):
                 raise ProviderError("Herdr session collection is malformed", category="malformed")
             matches = [item for item in sessions if item.get("name") == self.session]
-            if len(matches) != 1 or matches[0].get("running") is not True:
+            expected_default = self.session == "default"
+            if (
+                len(matches) != 1
+                or matches[0].get("running") is not True
+                or matches[0].get("default") is not expected_default
+            ):
                 raise ProviderError("configured Herdr session is unavailable", category="session_unavailable")
             socket_path = str(server.get("socket") or "")
             if (

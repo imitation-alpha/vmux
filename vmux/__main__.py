@@ -23,7 +23,7 @@ def main(argv=None) -> int:
                         help="also show plain idle shells, not just agents")
     parser.add_argument("--terminal-provider", choices=("tmux", "herdr"),
                         help="override the configured terminal provider")
-    parser.add_argument("--herdr-session", help="explicit named Herdr session")
+    parser.add_argument("--herdr-session", help="explicit Herdr session")
     parser.add_argument("--version", action="version", version="vmux " + __version__)
     args = parser.parse_args(argv)
 

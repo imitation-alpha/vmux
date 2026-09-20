@@ -86,7 +86,8 @@ def install_fake_subprocess(monkeypatch, *, bad_snapshot=False):
             value = status()
         elif command == ["session", "list", "--json"]:
             value = {"sessions": [{
-                "name": SESSION, "running": True, "socket_path": "/tmp/vmux-herdr-test.sock",
+                "name": SESSION, "default": False, "running": True,
+                "socket_path": "/tmp/vmux-herdr-test.sock",
             }]}
         elif command == ["api", "schema", "--json"]:
             value = {
@@ -144,6 +145,62 @@ def test_probe_and_every_command_use_exact_trailing_session(monkeypatch):
         assert kwargs["shell"] is False
         assert kwargs["env"]["HERDR_SESSION"] == SESSION
     assert any(call[0][1:-2] == ["pane", "send-text", "w1:p1", "--leading ' quote ☃"] for call in calls)
+
+
+def test_probe_accepts_null_status_identity_for_canonical_default_session(monkeypatch):
+    calls = install_fake_subprocess(monkeypatch)
+    selected = HerdrProvider(
+        session="default",
+        binary="/bin/echo",
+        events="off",
+        server_instance_id="server-id",
+    )
+    original_json = selected._json
+    canonical_default = True
+
+    def response(args, **kwargs):
+        value = original_json(args, **kwargs)
+        if args == ["status", "--json"]:
+            value["client"]["session"] = None
+            value["server"]["session"] = None
+        elif args == ["session", "list", "--json"]:
+            value["sessions"][0].update(name="default", default=canonical_default)
+        return value
+
+    monkeypatch.setattr(selected, "_json", response)
+
+    health = selected.probe()
+
+    assert health.status == "ready"
+    assert health.protocol == 20
+    assert health.version == "0.8.2"
+    assert all(argv[-2:] == ["--session", "default"] for argv, _ in calls)
+
+    canonical_default = False
+    with pytest.raises(ProviderError) as caught:
+        selected.probe()
+    assert caught.value.category == "session_unavailable"
+
+
+@pytest.mark.parametrize("missing_from", ["client", "server"])
+def test_default_status_identity_must_be_explicit_even_when_null(monkeypatch, missing_from):
+    install_fake_subprocess(monkeypatch)
+    selected = HerdrProvider(session="default", binary="/bin/echo", events="off")
+    original_json = selected._json
+
+    def response(args, **kwargs):
+        value = original_json(args, **kwargs)
+        if args == ["status", "--json"]:
+            value["client"]["session"] = None
+            value["server"]["session"] = None
+            del value[missing_from]["session"]
+        return value
+
+    monkeypatch.setattr(selected, "_json", response)
+
+    with pytest.raises(ProviderError) as caught:
+        selected.probe()
+    assert caught.value.category == "incompatible"
 
 
 def test_capture_does_not_trust_route_revision_for_terminal_output(monkeypatch):

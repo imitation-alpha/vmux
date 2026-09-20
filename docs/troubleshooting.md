@@ -20,10 +20,10 @@ explicit `PATH` and must run as the user who owns the tmux server.
 
 ### Herdr provider is unavailable
 
-When Herdr is selected, startup status 2 means the pinned executable, exact
-named session, protocol-20 compatibility, schema, or socket identity did not
-validate. Check the same service user and explicit session without changing the
-running default fleet:
+When Herdr is selected, startup status 2 means a
+[terminal-provider startup requirement](configuration.md#terminal-provider)
+did not validate. Run these checks as the same service user, replacing
+`my-agents` with your configured session:
 
 ~~~bash
 herdr status --json --session my-agents

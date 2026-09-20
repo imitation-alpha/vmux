@@ -2,7 +2,7 @@
 
 vmux queries the selected terminal provider, captures output, classifies each
 pane, and decides whether it belongs in the state feed. tmux remains the
-default; Herdr uses one configured named session.
+default; see [Terminal provider](../configuration.md#terminal-provider) for Herdr setup.
 
 ## Default behavior
 
@@ -97,7 +97,7 @@ overlay is changed or removed.
 Check these in order:
 
 1. The agent is running in the selected tmux/Herdr provider, not a standalone terminal.
-2. vmux runs as the same OS user and can reach the same tmux server or exact named Herdr session.
+2. vmux runs as the same OS user and can reach the [configured terminal provider](../configuration.md#terminal-provider).
 3. `discovery.auto` is true, or the exact target is configured.
 4. `discovery.include_shells` is true if the current pane process is a shell.
 5. A service manager has the correct `PATH` and user.
