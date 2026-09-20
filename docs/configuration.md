@@ -90,7 +90,7 @@ recognized existing choices and maps legacy `needs`/`working` destinations to
 | `capture_lines` | `200` | Yes | Scrollback lines captured per pane; values clamp to 40–2000. |
 | `naming_mode` | `session_window_pane` | Yes | Source used for display names. |
 | `terminal.provider` | `tmux` | No | Select exactly one terminal authority: `tmux` or `herdr`. |
-| `terminal.herdr.session` | empty | No | Required explicit named session when Herdr is selected. |
+| `terminal.herdr.session` | empty | No | See [Terminal provider](#terminal-provider) for session selection. |
 | `terminal.herdr.binary` | `herdr` | No | Executable resolved and pinned at startup. |
 | `terminal.herdr.events` | `auto` | No | `auto` enables optional wake-only native events; `off` uses polling only. |
 | `tmux.disable_auto_rename` | `true` | No | Disables tmux's global `automatic-rename` option at startup. |
@@ -105,8 +105,8 @@ It is not applied when Herdr is selected.
 ## Terminal provider
 
 No terminal section means tmux and preserves the existing behavior. Herdr
-monitor/respond mode requires Herdr 0.8.2 (protocol 20) and one explicit,
-already-running named session:
+monitor/respond mode requires Herdr 0.8.2 (protocol 20) and one explicitly
+selected, already-running session:
 
 ~~~yaml
 terminal:
@@ -117,12 +117,18 @@ terminal:
     events: auto
 ~~~
 
+To use Herdr's canonical default session, set `terminal.herdr.session` to
+`default`, or pass `--terminal-provider herdr --herdr-session default` on the
+vmux command line. For a named session, use its exact name as shown above.
+Leaving the session empty does not select the default.
+
 Every Herdr CLI call includes the configured session as a distinct trailing
-argument; vmux never falls back to ambient Herdr focus or a default session.
+argument; vmux never falls back to ambient Herdr focus or an unselected session.
 `binary`, `session`, provider selection, and event transport are YAML/CLI-only
 authority choices and require a vmux restart. vmux validates the running
-session, protocol, schema, and socket identity. It does not start a missing or
-stopped session and never restarts Herdr.
+session's default/named identity against the session list, along with protocol,
+schema, and socket identity. It does not start a missing or stopped session and
+never restarts Herdr.
 
 See [Pane discovery](guides/pane-discovery.md#herdr-discovery) for snapshot,
 capture, and recovery behavior. Optional socket events only wake a normal poll;

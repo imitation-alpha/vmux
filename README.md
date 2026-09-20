@@ -52,8 +52,7 @@ vmux --include-shells
 ~~~
 
 For Herdr, follow the
-[terminal-provider setup](https://imitation-alpha.github.io/vmux/configuration/#terminal-provider)
-to select an already-running named session explicitly.
+[terminal-provider setup](https://imitation-alpha.github.io/vmux/configuration/#terminal-provider).
 
 Use your browser's **Add to Home Screen** action to install the PWA. The native
 iOS companion is released separately for iPhone and iPad and uses its own
@@ -90,7 +89,7 @@ before using a non-loopback bind.
 
 ## What it does
 
-- Discovers tmux panes or panes in one explicit named Herdr session and
+- Discovers panes from the selected terminal provider and
   classifies Claude Code, Codex, Grok, OpenCode, Antigravity, generic agents,
   and shells.
 - Enriches Herdr panes with native session/workspace/tab hierarchy and native

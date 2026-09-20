@@ -17,8 +17,8 @@ naming_mode: session_window_pane  # pane names default to session:window:pane
                                   # title, window, target, command, smart
 
 # One terminal provider is selected for the whole server. tmux is the default.
-# Herdr requires one explicit already-running named session; vmux never owns
-# its lifecycle or creates/deletes/moves/focuses/renames Herdr resources.
+# Herdr session selection: docs/configuration.md#terminal-provider.
+# vmux never owns its lifecycle or creates/deletes/moves/focuses/renames Herdr resources.
 terminal:
   provider: tmux             # tmux | herdr
   herdr:

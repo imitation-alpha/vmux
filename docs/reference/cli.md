@@ -12,7 +12,7 @@ The installed console command and `python -m vmux` call the same entry point.
 | `--token TOKEN` | Override `server.token`. |
 | `--include-shells` | Include ordinary shell panes for this run. |
 | `--terminal-provider tmux\|herdr` | Override the YAML provider selection. |
-| `--herdr-session NAME` | Override the one explicit named Herdr session. |
+| `--herdr-session NAME` | Override `terminal.herdr.session`; see [session selection](../configuration.md#terminal-provider). |
 | `--version` | Print `vmux <version>` and exit. |
 | `-h`, `--help` | Print help and exit. |
 

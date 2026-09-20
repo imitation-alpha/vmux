@@ -6,7 +6,7 @@ locally, and only then expands network access.
 ## Requirements
 
 - Python 3.10–3.14
-- tmux available on `PATH` with at least one session (default), or Herdr 0.8.2 with one already-running named session
+- tmux available on `PATH` with at least one session (default), or [Herdr configured as the terminal provider](configuration.md#terminal-provider)
 - pipx for an isolated install
 
 macOS is the daily-use platform. Linux is expected to work but still needs
@@ -46,7 +46,7 @@ vmux
 
 Open <http://127.0.0.1:8787>.
 
-To use an already-running named Herdr session instead, follow
+To use Herdr instead, follow
 [Terminal provider](configuration.md#terminal-provider), then run
 `vmux --config config.yaml` with that configuration.
 
